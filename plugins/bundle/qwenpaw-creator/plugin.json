@@ -1,0 +1,33 @@
+{
+  "id": "qwenpaw-creator",
+  "name": "QwenPaw Creator",
+  "version": "0.2.0",
+  "type": "general",
+  "description": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.2: console panel + Stage 00 script decomposition.",
+  "description_i18n": {
+    "zh-CN": "QwenPaw Creator —— 故事书视频、轮播图、品牌发布等下游垂直应用（毕业册、婚礼册、企业年报等）的智能体底座。v0.2：控制台面板 + Stage 00 剧本拆解。",
+    "en-US": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.2: console panel + Stage 00 script decomposition."
+  },
+  "author": "QwenPaw Team",
+  "entry": {
+    "backend": "plugin.py",
+    "frontend": "ui/dist/index.js"
+  },
+  "dependencies": [
+    "fastapi>=0.110",
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "python-multipart>=0.0.9",
+    "pypinyin>=0.50.0"
+  ],
+  "min_version": "1.1.6",
+  "meta": {
+    "skills": ["storybook-video"],
+    "panel": {
+      "path": "/plugin/qwenpaw-creator/storybook",
+      "label": "Storybook Creator",
+      "icon": "🎬"
+    },
+    "notes": "v0.2 wraps the storybook-video skill in a console panel: source upload → Stage 00 LLM decomposition → ProjectSpec editor → Stage 0a/0b/0c ref generation → HITL review → Stage 02 composition. Stage 3 (Wan I2V) and Stage 4 (ffmpeg assembly) remain CLI-only."
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "id": "qwen-vl-tool",
+  "name": "Qwen-VL Vision-Language Tool",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "Ask questions about images using Alibaba Qwen-VL models — yes/no checks, descriptions, classification, OCR, composition verification",
+  "description_i18n": {
+    "zh-CN": "使用阿里云 Qwen-VL 模型对图像提问 —— 是非判断、描述、分类、OCR、构图校验",
+    "en-US": "Ask questions about images using Alibaba Qwen-VL models — yes/no checks, descriptions, classification, OCR, composition verification"
+  },
+  "author": "QwenPaw Team",
+  "entry": {
+    "backend": "qwen_vl.py"
+  },
+  "dependencies": ["dashscope>=1.25.16"],
+  "min_version": "1.1.6",
+  "meta": {
+    "tools": [
+      {
+        "name": "vlm_check_image",
+        "description": "Ask a yes/no or short-answer question about an image via Qwen-VL (good for validation gates, composition rules, prop presence checks)",
+        "icon": "🔍",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "DashScope API Key",
+            "type": "password",
+            "required": true,
+            "placeholder": "sk-...",
+            "help": "Get your API key from https://bailian.console.aliyun.com/"
+          },
+          {
+            "name": "model",
+            "label": "Model",
+            "type": "select",
+            "required": false,
+            "default": "qwen-vl-max-latest",
+            "options": [
+              "qwen-vl-max-latest",
+              "qwen-vl-max",
+              "qwen-vl-plus-latest",
+              "qwen-vl-plus"
+            ],
+            "help": "Model to use (default: qwen-vl-max-latest)"
+          },
+          {
+            "name": "endpoint",
+            "label": "API Endpoint",
+            "type": "text",
+            "required": false,
+            "placeholder": "https://dashscope.aliyuncs.com/api/v1",
+            "help": "Beijing: https://dashscope.aliyuncs.com/api/v1  Singapore: https://dashscope-intl.aliyuncs.com/api/v1"
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "60",
+            "min": 10,
+            "max": 300,
+            "help": "HTTP request timeout (default: 60)"
+          }
+        ]
+      }
+    ],
+    "api_key_url": "https://bailian.console.aliyun.com/",
+    "api_key_hint": "Get your DashScope API key from Alibaba Cloud Bailian console",
+    "model_url": "https://help.aliyun.com/zh/model-studio/vision/"
+  }
+}

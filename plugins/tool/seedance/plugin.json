@@ -1,0 +1,66 @@
+{
+  "id": "seedance-tool",
+  "name": "Doubao Seedance Video Generation Tool",
+  "version": "1.0.0",
+  "description": "Generate videos using ByteDance Seedance 2.0 (doubao.doubao-seedance-2-0-260128) via DashScope's model-evaluation endpoint. Reference-conditioned text-to-video.",
+  "description_i18n": {
+    "zh-CN": "通过 DashScope 调用字节跳动 Seedance 2.0 视频模型（doubao.doubao-seedance-2-0-260128）。支持参考图、参考视频、参考音频条件化生成。",
+    "en-US": "Generate videos using ByteDance Seedance 2.0 via DashScope's model-evaluation endpoint."
+  },
+  "author": "QwenPaw Team",
+  "entry": {
+    "backend": "seedance.py"
+  },
+  "dependencies": ["httpx>=0.24.0"],
+  "min_version": "1.1.6",
+  "meta": {
+    "tools": [
+      {
+        "name": "image_to_video_seedance",
+        "description": "Generate a video from a starting image with Seedance 2.0 — drop-in for image_to_video_wan",
+        "icon": "🌱",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key", "label": "DashScope API Key",
+            "type": "password", "required": true, "placeholder": "sk-...",
+            "help": "Same DashScope key as wan27 / happyhorse."
+          },
+          {
+            "name": "timeout", "label": "Poll Timeout (seconds)",
+            "type": "number", "required": false, "placeholder": "900",
+            "min": 60, "max": 3600,
+            "help": "Seedance generation often takes 3-10 min."
+          }
+        ]
+      },
+      {
+        "name": "text_to_video_seedance",
+        "description": "Generate a video from a text prompt with Seedance 2.0",
+        "icon": "🌱",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key", "label": "DashScope API Key",
+            "type": "password", "required": true, "placeholder": "sk-..."
+          }
+        ]
+      },
+      {
+        "name": "reference_to_video_seedance",
+        "description": "Generate a video with multi-modal references (images / video / audio) with Seedance 2.0",
+        "icon": "🌱",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key", "label": "DashScope API Key",
+            "type": "password", "required": true, "placeholder": "sk-..."
+          }
+        ]
+      }
+    ],
+    "api_key_url": "https://bailian.console.aliyun.com/",
+    "model_id": "doubao.doubao-seedance-2-0-260128",
+    "endpoint": "https://dashscope.aliyuncs.com/api/v1/services/aigc/model-evaluation/async-inference/"
+  }
+}

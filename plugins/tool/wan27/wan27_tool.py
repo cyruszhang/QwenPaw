@@ -20,6 +20,47 @@ from qwenpaw.plugins import get_tool_config
 
 logger = logging.getLogger(__name__)
 
+# Network errors that are worth retrying — TCP resets, read timeouts,
+# and similar transients from long-running task polls. Real API errors
+# (4xx/5xx with code/message) are NOT retried; they surface immediately.
+_RETRIABLE_NETWORK_EXCEPTIONS = (
+    ConnectionError,
+    ConnectionResetError,
+    TimeoutError,
+)
+# Names of dashscope/urllib3/requests exceptions that mean "transient
+# network problem" — matched by class name to avoid importing every
+# transport library at the top level.
+_RETRIABLE_NAMES = {
+    "ConnectionError",       # requests.ConnectionError, urllib3.ConnectionError
+    "ConnectTimeout",
+    "ReadTimeout",
+    "ProtocolError",         # urllib3.exceptions.ProtocolError
+    "RemoteDisconnected",
+    "IncompleteRead",
+    "ChunkedEncodingError",
+}
+
+
+def _is_retriable_network_error(exc: BaseException) -> bool:
+    """Return True for the transient-network class of exceptions.
+
+    Walks the exception chain (`__cause__` / `__context__`) — DashScope's
+    SDK wraps low-level transport errors several layers deep.
+    """
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, _RETRIABLE_NETWORK_EXCEPTIONS):
+            return True
+        if type(exc).__name__ in _RETRIABLE_NAMES:
+            return True
+        cause = exc.__cause__ or exc.__context__
+        if cause is exc:
+            break
+        exc = cause   # type: ignore[assignment]
+    return False
+
 # Thread lock to protect dashscope global base_http_api_url setting
 _DASHSCOPE_LOCK = threading.Lock()
 
@@ -104,6 +145,35 @@ def _extract_config(
     return api_key, endpoint, timeout
 
 
+def _resolve_tool_config(
+    tool_name: str,
+    api_key_override: str | None,
+) -> tuple[str, str, float] | None:
+    """Resolve tool config, preferring an explicit api_key override.
+
+    When ``api_key_override`` is a non-empty string, skips the
+    agent-context lookup via ``get_tool_config`` and builds a synthetic
+    config from the override. Lets the tool be invoked from standalone
+    scripts (benchmarks, CLIs) without an active agent context.
+
+    Args:
+        tool_name: Tool name registered with the plugin system.
+        api_key_override: Explicit DashScope API key, or None.
+
+    Returns:
+        Tuple of (api_key, endpoint, timeout), or None when no
+        configuration could be resolved.
+    """
+    if api_key_override and api_key_override.strip():
+        synthetic = {"api_key": api_key_override.strip()}
+        return _extract_config(synthetic)
+
+    tool_config = get_tool_config(tool_name)
+    if not tool_config:
+        return None
+    return _extract_config(tool_config)
+
+
 async def _download_video(
     video_url: str,
     save_dir: Path,
@@ -146,33 +216,76 @@ def _call_video_synthesis(
     endpoint: str,
     model: str,
     prompt: str,
+    *,
+    max_retries: int = 3,
+    backoff_base_s: float = 5.0,
     **kwargs,
 ):
-    """Call DashScope VideoSynthesis with thread-safe endpoint setup.
+    """Call DashScope VideoSynthesis with thread-safe endpoint setup
+    and transient-network retry.
+
+    Wan generation runs over a long-poll: the SDK submits a task, then
+    polls until the video is ready, which can take minutes. Long-poll
+    connections occasionally get killed by intermediate routers or the
+    gateway with TCP RESET / read timeout. We retry those once or twice
+    with exponential backoff before surfacing the failure.
+
+    Real API errors (status_code != 200) are NOT retried — they go
+    straight back to the caller for explicit handling.
 
     Args:
         api_key: DashScope API key.
         endpoint: Base HTTP API URL.
         model: Model name.
         prompt: Text prompt.
+        max_retries: Maximum number of attempts BEYOND the first call.
+            Default 3 → up to 4 total attempts.
+        backoff_base_s: Initial backoff (sec). Doubles each retry.
         **kwargs: Additional parameters passed to VideoSynthesis.call().
 
     Returns:
         SDK response object.
+
+    Raises:
+        Whatever the SDK raises after the final retry exhausts.
     """
     import dashscope
     from dashscope import VideoSynthesis
 
-    with _DASHSCOPE_LOCK:
-        dashscope.base_http_api_url = endpoint
-        rsp = VideoSynthesis.call(
-            api_key=api_key,
-            model=model,
-            prompt=prompt,
-            **kwargs,
-        )
+    last_exc: BaseException | None = None
+    for attempt in range(max_retries + 1):
+        try:
+            with _DASHSCOPE_LOCK:
+                dashscope.base_http_api_url = endpoint
+                rsp = VideoSynthesis.call(
+                    api_key=api_key,
+                    model=model,
+                    prompt=prompt,
+                    **kwargs,
+                )
+            return rsp
+        except Exception as exc:   # noqa: BLE001
+            last_exc = exc
+            if not _is_retriable_network_error(exc):
+                # Real error — propagate immediately
+                raise
+            if attempt >= max_retries:
+                logger.error(
+                    f"VideoSynthesis network error after {attempt + 1} "
+                    f"attempts; giving up: {exc!r}",
+                )
+                raise
+            sleep_s = backoff_base_s * (2 ** attempt)
+            logger.warning(
+                f"VideoSynthesis transient network error "
+                f"(attempt {attempt + 1}/{max_retries + 1}); "
+                f"retrying in {sleep_s:.0f}s — {exc!r}",
+            )
+            time.sleep(sleep_s)
 
-    return rsp
+    # Unreachable — final retry either returned or raised.
+    assert last_exc is not None
+    raise last_exc
 
 
 async def text_to_video_wan(
@@ -183,6 +296,7 @@ async def text_to_video_wan(
     negative_prompt: str = "",
     audio_url: str = "",
     prompt_extend: bool = True,
+    api_key: str | None = None,
 ) -> ToolResponse:
     """Generate a video from a text prompt using Wan 2.7.
 
@@ -210,13 +324,17 @@ async def text_to_video_wan(
             If not provided, model auto-generates audio.
         prompt_extend (bool, optional):
             Enable prompt auto-optimization. Default: True.
+        api_key (str, optional):
+            Explicit DashScope API key. When provided, bypasses the
+            agent-context configuration lookup — lets the tool be
+            invoked from standalone scripts without an active agent.
 
     Returns:
         ToolResponse: Contains local video path and metadata.
     """
     try:
-        tool_config = get_tool_config("text_to_video_wan")
-        if not tool_config:
+        resolved = _resolve_tool_config("text_to_video_wan", api_key)
+        if resolved is None:
             return ToolResponse(
                 content=[
                     TextBlock(
@@ -228,8 +346,7 @@ async def text_to_video_wan(
                     ),
                 ],
             )
-
-        api_key, endpoint, timeout = _extract_config(tool_config)
+        api_key, endpoint, timeout = resolved
         if not api_key:
             return ToolResponse(
                 content=[
@@ -383,6 +500,7 @@ async def image_to_video_wan(
     resolution: str = "720P",
     duration: int = 5,
     prompt_extend: bool = True,
+    api_key: str | None = None,
 ) -> ToolResponse:
     """Generate a video from images using Wan 2.7.
 
@@ -415,13 +533,17 @@ async def image_to_video_wan(
             Video duration in seconds, range [2, 15]. Default: 5.
         prompt_extend (bool, optional):
             Enable prompt auto-optimization. Default: True.
+        api_key (str, optional):
+            Explicit DashScope API key. When provided, bypasses the
+            agent-context configuration lookup — lets the tool be
+            invoked from standalone scripts without an active agent.
 
     Returns:
         ToolResponse: Contains local video path and metadata.
     """
     try:
-        tool_config = get_tool_config("image_to_video_wan")
-        if not tool_config:
+        resolved = _resolve_tool_config("image_to_video_wan", api_key)
+        if resolved is None:
             return ToolResponse(
                 content=[
                     TextBlock(
@@ -433,8 +555,7 @@ async def image_to_video_wan(
                     ),
                 ],
             )
-
-        api_key, endpoint, timeout = _extract_config(tool_config)
+        api_key, endpoint, timeout = resolved
         if not api_key:
             return ToolResponse(
                 content=[
@@ -672,6 +793,7 @@ async def reference_to_video_wan(
     ratio: str = "16:9",
     duration: int = 5,
     prompt_extend: bool = True,
+    api_key: str | None = None,
 ) -> ToolResponse:
     """Generate a video with character/object references using Wan 2.7.
 
@@ -706,6 +828,9 @@ async def reference_to_video_wan(
             Video duration in seconds, range [2, 15]. Default: 5.
         prompt_extend (bool, optional):
             Enable prompt auto-optimization. Default: True.
+        api_key (str, optional):
+            Explicit DashScope API key. When provided, bypasses the
+            agent-context configuration lookup.
 
     Returns:
         ToolResponse: Contains local video path and metadata.
@@ -714,8 +839,8 @@ async def reference_to_video_wan(
         reference_videos = []
 
     try:
-        tool_config = get_tool_config("reference_to_video_wan")
-        if not tool_config:
+        resolved = _resolve_tool_config("reference_to_video_wan", api_key)
+        if resolved is None:
             return ToolResponse(
                 content=[
                     TextBlock(
@@ -727,8 +852,7 @@ async def reference_to_video_wan(
                     ),
                 ],
             )
-
-        api_key, endpoint, timeout = _extract_config(tool_config)
+        api_key, endpoint, timeout = resolved
         if not api_key:
             return ToolResponse(
                 content=[

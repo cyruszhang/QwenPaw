@@ -131,6 +131,40 @@ def _extract_config(
     return api_key, endpoint, timeout, model
 
 
+def _resolve_tool_config(
+    tool_name: str,
+    api_key_override: str | None,
+    default_model: str,
+) -> tuple[str, str, float, str] | None:
+    """Resolve tool config, preferring an explicit api_key override.
+
+    When ``api_key_override`` is a non-empty string, the agent-context
+    lookup via ``get_tool_config`` is skipped and a synthetic config is
+    built from the override plus defaults. This lets the tool be called
+    from standalone scripts (e.g. benchmarks) without an active agent.
+
+    When ``api_key_override`` is None or empty, falls back to the
+    standard ``get_tool_config(tool_name)`` flow.
+
+    Args:
+        tool_name: Tool name registered with the plugin system.
+        api_key_override: Explicit DashScope API key, or None.
+        default_model: Fallback model when none set in config.
+
+    Returns:
+        Tuple of (api_key, endpoint, timeout, model), or None when no
+        configuration could be resolved (caller should error out).
+    """
+    if api_key_override and api_key_override.strip():
+        synthetic = {"api_key": api_key_override.strip()}
+        return _extract_config(synthetic, default_model)
+
+    tool_config = get_tool_config(tool_name)
+    if not tool_config:
+        return None
+    return _extract_config(tool_config, default_model)
+
+
 async def _download_image(
     image_url: str,
     save_dir: Path,
@@ -244,6 +278,8 @@ async def generate_image_qwen(
     n: int = 1,
     negative_prompt: str = "",
     prompt_extend: bool = True,
+    seed: int | None = None,
+    api_key: str | None = None,
 ) -> ToolResponse:
     """Generate images from a text prompt using Qwen-Image models.
 
@@ -276,13 +312,29 @@ async def generate_image_qwen(
             Describe what to exclude from the image.
         prompt_extend (bool, optional):
             Enable prompt auto-optimization. Default: True.
+        seed (int, optional):
+            Random seed for reproducible generation. Default: None
+            (random). Use a fixed integer to anchor character/style
+            across multiple calls. Combined with ``prompt_extend=False``
+            and a verbatim prefix, this is the canonical per-panel
+            consistency strategy for storybook pipelines.
+        api_key (str, optional):
+            Explicit DashScope API key. When provided, bypasses the
+            agent-context configuration lookup — lets the tool be
+            called from standalone scripts (benchmarks, CLIs) without
+            an active agent. When omitted, the existing
+            agent-context-driven config flow is used.
 
     Returns:
         ToolResponse: Contains generated images and metadata.
     """
     try:
-        tool_config = get_tool_config("generate_image_qwen")
-        if not tool_config:
+        resolved = _resolve_tool_config(
+            "generate_image_qwen",
+            api_key,
+            default_model="qwen-image-2.0-pro",
+        )
+        if resolved is None:
             return ToolResponse(
                 content=[
                     TextBlock(
@@ -294,11 +346,7 @@ async def generate_image_qwen(
                     ),
                 ],
             )
-
-        api_key, endpoint, timeout, model = _extract_config(
-            tool_config,
-            default_model="qwen-image-2.0-pro",
-        )
+        api_key, endpoint, timeout, model = resolved
         if not api_key:
             return ToolResponse(
                 content=[
@@ -355,10 +403,13 @@ async def generate_image_qwen(
             call_kwargs["size"] = size
         if negative_prompt:
             call_kwargs["negative_prompt"] = negative_prompt
+        if seed is not None:
+            call_kwargs["seed"] = seed
 
         logger.info(
             f"Generating image with Qwen-Image: "
-            f"model={model}, size={size}, n={n}",
+            f"model={model}, size={size}, n={n}, "
+            f"seed={seed}, prompt_extend={prompt_extend}",
         )
 
         rsp = await asyncio.to_thread(
@@ -476,6 +527,8 @@ async def edit_image_qwen(
     n: int = 1,
     negative_prompt: str = "",
     prompt_extend: bool = True,
+    seed: int | None = None,
+    api_key: str | None = None,
 ) -> ToolResponse:
     """Edit or fuse images using Qwen-Image models.
 
@@ -511,6 +564,12 @@ async def edit_image_qwen(
             Describe what to exclude from the output.
         prompt_extend (bool, optional):
             Enable prompt auto-optimization. Default: True.
+        seed (int, optional):
+            Random seed for reproducible edits. Default: None (random).
+        api_key (str, optional):
+            Explicit DashScope API key. When provided, bypasses the
+            agent-context configuration lookup. When omitted, the
+            agent-context-driven config flow is used.
 
     Returns:
         ToolResponse: Contains edited images and metadata.
@@ -529,8 +588,12 @@ async def edit_image_qwen(
                 ],
             )
 
-        tool_config = get_tool_config("edit_image_qwen")
-        if not tool_config:
+        resolved = _resolve_tool_config(
+            "edit_image_qwen",
+            api_key,
+            default_model="qwen-image-2.0-pro",
+        )
+        if resolved is None:
             return ToolResponse(
                 content=[
                     TextBlock(
@@ -542,11 +605,7 @@ async def edit_image_qwen(
                     ),
                 ],
             )
-
-        api_key, endpoint, timeout, model = _extract_config(
-            tool_config,
-            default_model="qwen-image-2.0-pro",
-        )
+        api_key, endpoint, timeout, model = resolved
         if not api_key:
             return ToolResponse(
                 content=[
@@ -619,11 +678,14 @@ async def edit_image_qwen(
             call_kwargs["size"] = size
         if negative_prompt:
             call_kwargs["negative_prompt"] = negative_prompt
+        if seed is not None:
+            call_kwargs["seed"] = seed
 
         logger.info(
             f"Editing image with Qwen-Image: "
             f"model={model}, "
-            f"reference_images={len(reference_images)}, n={n}",
+            f"reference_images={len(reference_images)}, n={n}, "
+            f"seed={seed}, prompt_extend={prompt_extend}",
         )
 
         rsp = await asyncio.to_thread(

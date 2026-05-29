@@ -1,0 +1,204 @@
+# Style catalog for the storybook-video skill.
+#
+# Each entry is a reusable aesthetic preset:
+#   - positive_template: text appended to image-gen prompts. {prompt}
+#     gets substituted with the per-scene description. Following the
+#     Fooocus convention (sdxl_styles_fooocus.json, MIT-licensed).
+#   - negative_prompt: what to keep OUT (used by SDXL-family models;
+#     gpt-image-2 ignores negative_prompt, but we keep it for the
+#     Replicate-fallback path and for future provider portability).
+#   - sample_ref: path (relative to styles/) of the canonical reference
+#     image for the v15 anchor-locking pipeline. Populated lazily when
+#     a style is first used in a project.
+#   - safety_notes: known gpt-image-2 safety-filter caveats.
+#
+# Provenance: seeded from Fooocus's sdxl_styles_fooocus.json (Apache 2.0)
+# and Stable Diffusion community templates, then tightened for the
+# gpt-image-2 content policy (which restricts named-living-artist
+# references like "Hayao Miyazaki" and inconsistently restricts named
+# studios like "Studio Ghibli").
+
+styles:
+
+  # ── Watercolor / Hand-painted family ─────────────────────────────
+  - id: ghibli_watercolor
+    display_name: "Soft watercolor (Ghibli-adjacent, no name needed)"
+    description: |
+      The Ghibli aesthetic described by its visible attributes, not by
+      naming the studio or artist. Use for storybook video, children's
+      tales, peaceful narratives.
+    positive_template: |
+      {prompt}. Soft hand-painted watercolor with visible paper
+      texture, warm golden-amber palette, rounded organic shapes,
+      billowing painterly clouds, soft natural lighting, hand-painted
+      background look, 2D cel-animation aesthetic, traditional
+      Japanese animation feel.
+    negative_prompt: >-
+      photorealistic, 3D-rendered, digital art, hard outlines, harsh
+      lighting, modern photo, CGI, anime sharp lines, cel-shaded
+      hard-edge cartoon
+    sample_ref: samples/ghibli_watercolor.png
+    safety_notes: |
+      DO NOT include "Studio Ghibli", "Hayao Miyazaki", "My Neighbor
+      Totoro", "Spirited Away" or other Ghibli film/artist names in
+      the prompt — gpt-image-2's content-policy filter rejects these.
+      Describe the visible characteristics instead.
+
+  - id: watercolor_painting
+    display_name: "Traditional watercolor painting"
+    description: |
+      Generic watercolor, less anime-feeling than ghibli_watercolor.
+      Use for nature scenes, botanical illustrations, journal sketches.
+    positive_template: |
+      {prompt}. Traditional watercolor painting on textured paper,
+      visible brushstrokes and water blooms, soft color transitions,
+      muted natural palette, plein-air feel, vibrant yet restrained.
+    negative_prompt: >-
+      photorealistic, digital, sharp lines, anime, cartoon, neon
+    sample_ref: samples/watercolor_painting.png
+
+  - id: pastel_storybook
+    display_name: "Children's pastel storybook"
+    description: |
+      Beatrix Potter / Wind in the Willows / vintage British children's
+      book aesthetic. Soft, cozy, slightly faded.
+    positive_template: |
+      {prompt}. Soft pastel children's storybook illustration, gentle
+      muted hues, slightly faded vintage paper feel, rounded cozy
+      shapes, warm and inviting, hand-illustrated, traditional ink
+      and watercolor.
+    negative_prompt: >-
+      sharp lines, modern, digital, photorealistic, dark, gritty,
+      neon, anime
+    sample_ref: samples/pastel_storybook.png
+
+  - id: oil_painting_classical
+    display_name: "Classical oil painting"
+    description: |
+      Old Master oil-painting feel — Vermeer / Rembrandt lighting,
+      visible brush texture, chiaroscuro.
+    positive_template: |
+      {prompt}. Classical oil painting on canvas, rich impasto brush
+      strokes, chiaroscuro lighting, deep earth tones, dramatic
+      contrast, museum-quality fine art, hand-painted.
+    negative_prompt: >-
+      photorealistic, digital art, anime, cartoon, modern, neon,
+      flat colors
+    sample_ref: samples/oil_painting_classical.png
+
+  - id: ink_wash_sumie
+    display_name: "Japanese ink wash (sumi-e)"
+    description: |
+      Minimalist East Asian ink-and-wash painting. Mostly black on
+      cream paper, occasional accent colors.
+    positive_template: |
+      {prompt}. Traditional Japanese sumi-e ink wash painting,
+      minimalist composition, black ink brush strokes on cream
+      paper, restrained palette with occasional muted color accents,
+      meditative atmosphere, hand-painted with bamboo brush.
+    negative_prompt: >-
+      photorealistic, 3D, anime, cartoon, neon colors, busy
+      composition, digital
+    sample_ref: samples/ink_wash_sumie.png
+
+  # ── Anime / Animation family ─────────────────────────────────────
+  - id: anime_modern
+    display_name: "Modern anime (clean linework)"
+    description: |
+      Demon Slayer / Kimetsu / Jujutsu Kaisen — vibrant, sharp clean
+      lines, high color saturation. Different feel from Ghibli's
+      soft-painted look.
+    positive_template: |
+      {prompt}. Modern anime artwork, clean black linework, vibrant
+      saturated colors, dynamic composition, dramatic lighting,
+      detailed character design, key visual quality.
+    negative_prompt: >-
+      photorealistic, 3D-rendered, hand-painted blur, blurry,
+      sketchy, soft edges, muted colors
+    sample_ref: samples/anime_modern.png
+
+  - id: anime_retro_80s
+    display_name: "Retro 80s/90s anime"
+    description: |
+      Cel-animation aesthetic from the late-80s/early-90s — Akira,
+      Ghost in the Shell, Patlabor era. Painted backgrounds, slight
+      film grain.
+    positive_template: |
+      {prompt}. Retro 1980s/1990s Japanese animation cel style,
+      hand-painted background art, slightly grainy film-cel
+      aesthetic, restrained palette, atmospheric mood lighting,
+      classic animation feel.
+    negative_prompt: >-
+      photorealistic, modern CGI, sharp digital lines, neon,
+      contemporary anime
+    sample_ref: samples/anime_retro_80s.png
+
+  - id: cinematic_3d_animation
+    display_name: "Modern 3D animated feature film"
+    description: |
+      Pixar / DreamWorks / Sony Animation — polished 3D-rendered
+      look, expressive character design, soft cinematic lighting.
+    positive_template: |
+      {prompt}. Modern 3D animated feature film aesthetic, polished
+      character design with expressive proportions, soft cinematic
+      lighting, depth of field, vibrant warm palette, theatrical
+      composition.
+    negative_prompt: >-
+      photorealistic photo, anime, 2D cel, hand-painted, sketchy
+    sample_ref: samples/cinematic_3d_animation.png
+
+  # ── Stylized illustration family ─────────────────────────────────
+  - id: comic_book
+    display_name: "American comic book"
+    description: |
+      Modern comic book illustration — bold inks, halftone-style
+      shading, dynamic poses.
+    positive_template: |
+      {prompt}. American comic book illustration, bold black ink
+      outlines, dynamic composition, halftone shading, vibrant
+      saturated colors, dramatic angles, comic-panel art style.
+    negative_prompt: >-
+      photorealistic, soft watercolor, anime, pastel, muted
+    sample_ref: samples/comic_book.png
+
+  - id: pixel_art
+    display_name: "16-bit pixel art"
+    description: |
+      Retro game-art aesthetic — limited palette, visible pixels,
+      SNES / Genesis era.
+    positive_template: |
+      {prompt}. 16-bit pixel art, retro video game aesthetic, limited
+      palette, visible square pixels, sprite-style character design,
+      classic SNES / Genesis-era graphics.
+    negative_prompt: >-
+      smooth, anti-aliased, high resolution, photorealistic,
+      modern, painterly
+    sample_ref: samples/pixel_art.png
+
+  # ── Photo-real anchors (for non-stylized projects) ────────────────
+  - id: photoreal_documentary
+    display_name: "Documentary photography"
+    description: |
+      Real-world reportage look — Magnum / National Geographic.
+      The "opposite" anchor when you want NO stylization.
+    positive_template: |
+      {prompt}. Documentary photography style, natural light, candid
+      composition, 35mm photojournalism aesthetic, realistic skin
+      tones, slight film grain, photojournalist composition.
+    negative_prompt: >-
+      anime, cartoon, illustration, painted, stylized, digital art,
+      3D-rendered
+    sample_ref: samples/photoreal_documentary.png
+
+  - id: photoreal_cinema
+    display_name: "Cinematic photo-real"
+    description: |
+      Polished cinema-grade look — wide aspect, dramatic lighting,
+      shallow depth of field.
+    positive_template: |
+      {prompt}. Cinematic photography, dramatic lighting, shallow
+      depth of field, anamorphic lens look, professional color
+      grading, theatrical composition, film-still aesthetic.
+    negative_prompt: >-
+      anime, cartoon, illustration, painted, stylized
+    sample_ref: samples/photoreal_cinema.png

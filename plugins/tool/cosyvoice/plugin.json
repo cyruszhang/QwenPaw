@@ -1,0 +1,67 @@
+{
+  "id": "cosyvoice-tool",
+  "name": "CosyVoice TTS Tool",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "Synthesize speech from text using Alibaba CosyVoice models via DashScope",
+  "description_i18n": {
+    "zh-CN": "使用阿里云 CosyVoice 模型通过 DashScope 合成语音",
+    "en-US": "Synthesize speech from text using Alibaba CosyVoice models via DashScope"
+  },
+  "author": "QwenPaw Team",
+  "entry": {
+    "backend": "cosyvoice.py"
+  },
+  "dependencies": ["dashscope>=1.25.16"],
+  "min_version": "1.1.6",
+  "meta": {
+    "tools": [
+      {
+        "name": "synthesize_speech_cosyvoice",
+        "description": "Generate speech audio from text using CosyVoice (bilingual EN+ZH, multiple voice presets)",
+        "icon": "🎙️",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "DashScope API Key",
+            "type": "password",
+            "required": true,
+            "placeholder": "sk-...",
+            "help": "Get your API key from https://bailian.console.aliyun.com/"
+          },
+          {
+            "name": "model",
+            "label": "Model",
+            "type": "select",
+            "required": false,
+            "default": "cosyvoice-v2",
+            "options": ["cosyvoice-v2", "cosyvoice-v1"],
+            "help": "cosyvoice-v2 uses _v2-suffixed voices (longshu_v2, longwan_v2, ...). cosyvoice-v1 uses unsuffixed voices (longxiaochun, ...)."
+          },
+          {
+            "name": "endpoint",
+            "label": "API Endpoint",
+            "type": "text",
+            "required": false,
+            "placeholder": "https://dashscope.aliyuncs.com/api/v1",
+            "help": "Beijing: https://dashscope.aliyuncs.com/api/v1  Singapore: https://dashscope-intl.aliyuncs.com/api/v1"
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "120",
+            "min": 30,
+            "max": 600,
+            "help": "HTTP request timeout in seconds (default: 120)"
+          }
+        ]
+      }
+    ],
+    "api_key_url": "https://bailian.console.aliyun.com/",
+    "api_key_hint": "Get your DashScope API key from Alibaba Cloud Bailian console",
+    "model_url": "https://help.aliyun.com/zh/model-studio/cosyvoice-quick-start"
+  }
+}

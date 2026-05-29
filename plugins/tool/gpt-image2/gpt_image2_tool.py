@@ -6,7 +6,7 @@ import base64
 import logging
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import httpx
 from agentscope.message import ImageBlock, TextBlock
@@ -17,10 +17,36 @@ from qwenpaw.plugins import get_tool_config
 logger = logging.getLogger(__name__)
 
 
+def _resolve_tool_config(
+    tool_name: str,
+    api_key_override: Optional[str],
+    default_endpoint: str,
+) -> tuple[str, str, float] | None:
+    """Resolve (api_key, endpoint, timeout), preferring an explicit override.
+
+    Same dual-path pattern as qwen-image / wan27 / cosyvoice / qwen-vl:
+    when ``api_key_override`` is provided, bypass the agent-context
+    ``get_tool_config`` lookup so the tool is callable from standalone
+    scripts (benchmarks, CLIs) without an active agent.
+    """
+    if api_key_override and api_key_override.strip():
+        return api_key_override.strip(), default_endpoint, 480.0
+
+    tool_config = get_tool_config(tool_name)
+    if not tool_config:
+        return None
+    api_key = tool_config.get("api_key", "")
+    endpoint = tool_config.get("endpoint") or default_endpoint
+    timeout_raw = tool_config.get("timeout")
+    timeout = float(timeout_raw) if timeout_raw and float(timeout_raw) > 0 else 480.0
+    return api_key, endpoint, timeout
+
+
 async def generate_image_gpt(
     prompt: str,
     size: str = "1024x1024",
     quality: str = "auto",
+    api_key: Optional[str] = None,
 ) -> ToolResponse:
     """Generate an image using OpenAI GPT Image 2 model.
 
@@ -52,46 +78,19 @@ async def generate_image_gpt(
         ... )
     """
     try:
-        # Get tool config (API key and endpoint)
-        tool_config = get_tool_config("generate_image_gpt")
-        if not tool_config:
-            return ToolResponse(
-                content=[
-                    TextBlock(
-                        type="text",
-                        text=(
-                            "Error: Tool not configured. "
-                            "Please set your API key in the tool settings."
-                        ),
-                    ),
-                ],
-            )
-
-        api_key = tool_config.get("api_key")
+        resolved = _resolve_tool_config(
+            "generate_image_gpt", api_key,
+            default_endpoint="https://api.openai.com/v1/images/generations",
+        )
+        if resolved is None:
+            return ToolResponse(content=[TextBlock(type="text", text=(
+                "Error: Tool not configured. Please set your API key."
+            ))])
+        api_key, endpoint, timeout = resolved
         if not api_key:
-            return ToolResponse(
-                content=[
-                    TextBlock(
-                        type="text",
-                        text=(
-                            "Error: OpenAI API key not configured. "
-                            "Please set your API key in the tool settings."
-                        ),
-                    ),
-                ],
-            )
-
-        # Get endpoint from config, use default if not set
-        endpoint = tool_config.get("endpoint")
-        if not endpoint or not endpoint.strip():
-            endpoint = "https://api.openai.com/v1/images/generations"
-
-        # Get timeout from config, use default if not set
-        timeout = tool_config.get("timeout")
-        if timeout is None or timeout <= 0:
-            timeout = 60.0
-        else:
-            timeout = float(timeout)
+            return ToolResponse(content=[TextBlock(type="text", text=(
+                "Error: OpenAI API key not configured."
+            ))])
 
         # Validate parameters
         valid_sizes = {"1024x1024", "1024x1792", "1792x1024"}
@@ -247,6 +246,7 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
     reference_images: List[str],
     size: str = "1024x1024",
     quality: str = "auto",
+    api_key: Optional[str] = None,
 ) -> ToolResponse:
     """Edit or generate image using reference images with GPT Image 2.
 
@@ -310,46 +310,19 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
                 ],
             )
 
-        # Get tool config
-        tool_config = get_tool_config("edit_image_gpt")
-        if not tool_config:
-            return ToolResponse(
-                content=[
-                    TextBlock(
-                        type="text",
-                        text=(
-                            "Error: Tool not configured. "
-                            "Please set your API key in the tool settings."
-                        ),
-                    ),
-                ],
-            )
-
-        api_key = tool_config.get("api_key")
+        resolved = _resolve_tool_config(
+            "edit_image_gpt", api_key,
+            default_endpoint="https://api.openai.com/v1/images/edits",
+        )
+        if resolved is None:
+            return ToolResponse(content=[TextBlock(type="text", text=(
+                "Error: Tool not configured. Please set your API key."
+            ))])
+        api_key, endpoint, timeout = resolved
         if not api_key:
-            return ToolResponse(
-                content=[
-                    TextBlock(
-                        type="text",
-                        text=(
-                            "Error: OpenAI API key not configured. "
-                            "Please set your API key in the tool settings."
-                        ),
-                    ),
-                ],
-            )
-
-        # Get endpoint from config, use default if not set
-        endpoint = tool_config.get("endpoint")
-        if not endpoint or not endpoint.strip():
-            endpoint = "https://api.openai.com/v1/images/edits"
-
-        # Get timeout from config
-        timeout = tool_config.get("timeout")
-        if timeout is None or timeout <= 0:
-            timeout = 60.0
-        else:
-            timeout = float(timeout)
+            return ToolResponse(content=[TextBlock(type="text", text=(
+                "Error: OpenAI API key not configured."
+            ))])
 
         # Validate parameters
         valid_sizes = {"auto", "1024x1024", "1024x1536", "1536x1024"}

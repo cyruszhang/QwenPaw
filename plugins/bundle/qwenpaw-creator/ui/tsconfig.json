@@ -1,0 +1,19 @@
+{
+  "//": [
+    "`types: []` disables automatic @types/* registration so the",
+    "`const React = host.React` line in `src/index.tsx` doesn't clash",
+    "with @types/react's global namespace declaration.",
+    "Window globals are declared explicitly in `src/qwenpaw-host.d.ts`."
+  ],
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src"]
+}

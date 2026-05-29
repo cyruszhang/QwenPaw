@@ -122,3 +122,6 @@ src/.hypothesis/
 
 # Local File
 /localfile/
+
+# Local Python venv at repo root
+/venv/
