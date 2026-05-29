@@ -970,7 +970,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     const scenes = (draft.scenes || []).map((s: any) => s.id);
     if (!scenes.length) return;
     const gc = draft.global_config || {};
-    const conc = Math.max(1, Math.min(5, Number(gc.concurrency) || 3));
+    const conc = Math.max(1, Math.min(5, Number(gc.concurrency) || 5));
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage(stage);
@@ -1709,7 +1709,7 @@ function SettingsCard({ draft, onSaveDraft }: any) {
       ? gc.style_directives.join("\n") : "",
   );
   const [concurrency, setConcurrency] = React.useState<number>(
-    Number(gc.concurrency) || 3,
+    Number(gc.concurrency) || 5,
   );
   const [saving, setSaving] = React.useState(false);
   const [open, setOpen] = React.useState(false);
@@ -1726,7 +1726,7 @@ function SettingsCard({ draft, onSaveDraft }: any) {
     setDirectives(
       Array.isArray(g.style_directives) ? g.style_directives.join("\n") : "",
     );
-    setConcurrency(Number(g.concurrency) || 3);
+    setConcurrency(Number(g.concurrency) || 5);
   }, [draft]);
 
   const save = async () => {
@@ -1875,7 +1875,7 @@ function SettingsCard({ draft, onSaveDraft }: any) {
           },
             React.createElement(InputNumber, {
               min: 1, max: 5, value: concurrency,
-              onChange: (v: any) => setConcurrency(Number(v) || 3),
+              onChange: (v: any) => setConcurrency(Number(v) || 5),
               style: { width: 100 },
             }),
           ),
@@ -2678,7 +2678,7 @@ function DraftPanel({
         loading: busy && activeStage === "2",
         disabled: !status?.has_openai,
         onClick: () => onRunStageAllParallel("2", false),
-        children: `Run Stage 2 (×${Math.max(1, Math.min(5, Number((draft.global_config || {}).concurrency) || 3))})`,
+        children: `Run Stage 2 (×${Math.max(1, Math.min(5, Number((draft.global_config || {}).concurrency) || 5))})`,
       }),
     },
       React.createElement(FrameGallery, {
@@ -2710,7 +2710,7 @@ function DraftPanel({
         onClick: () => {
           const n = draft.scenes?.length || 0;
           const conc = Math.max(1, Math.min(5,
-            Number((draft.global_config || {}).concurrency) || 3));
+            Number((draft.global_config || {}).concurrency) || 5));
           const wallMin = Math.ceil((n / conc) * 10);
           Modal.confirm({
             title: "Animate ALL scenes?",

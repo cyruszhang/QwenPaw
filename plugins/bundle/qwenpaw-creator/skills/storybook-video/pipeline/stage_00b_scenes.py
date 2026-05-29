@@ -75,7 +75,7 @@ async def run_stage_00b(
     report: dict = {"scene_refs": [], "stage": "0b", "provider": provider}
 
     gc = project_spec.global_config or {}
-    concurrency = max(1, min(8, int(gc.get("concurrency") or 3)))
+    concurrency = max(1, min(8, int(gc.get("concurrency") or 5)))
 
     to_gen: list[tuple[str, SceneRefAsset]] = []
     for sid, scene_ref in project_spec.assets.scene_refs.items():

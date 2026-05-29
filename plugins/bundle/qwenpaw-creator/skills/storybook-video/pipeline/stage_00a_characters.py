@@ -191,7 +191,7 @@ async def run_stage_00a(
     # directly, queue the rest for parallel generation. Concurrency
     # matches the client-side fan-out cap used by Stage 2/3.
     gc = project_spec.global_config or {}
-    concurrency = max(1, min(8, int(gc.get("concurrency") or 3)))
+    concurrency = max(1, min(8, int(gc.get("concurrency") or 5)))
 
     to_gen: list[tuple[str, CharacterRef]] = []
     for cid, character in project_spec.assets.characters.items():
