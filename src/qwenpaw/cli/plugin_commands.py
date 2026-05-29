@@ -492,6 +492,121 @@ def _download_plugin_from_url(url: str) -> tuple[Path, Path]:
         zip_path.unlink()
 
 
+def _build_frontend_if_needed(source_path: Path, manifest: dict) -> None:
+    """Build ``ui/dist`` for bundles that ship a ``ui/`` source tree.
+
+    Skips quietly when the bundle has no ``ui/package.json``, when no
+    ``entry.frontend`` is declared, or when the existing frontend
+    output is newer than every source file under ``ui/src/``.
+
+    Runs ``npm install`` only when ``node_modules/`` is absent — the
+    common dev-iteration case (source edited, dist stale) just runs
+    ``npm run build`` and is fast.
+    """
+    ui_dir = source_path / "ui"
+    if not (ui_dir / "package.json").exists():
+        return
+
+    frontend_entry = (manifest.get("entry") or {}).get("frontend") or ""
+    if not frontend_entry:
+        return
+
+    out_path = source_path / frontend_entry
+    src_dir = ui_dir / "src"
+
+    needs_build = not out_path.exists()
+    if not needs_build and src_dir.exists():
+        out_mtime = out_path.stat().st_mtime
+        for p in src_dir.rglob("*"):
+            if p.is_file() and p.stat().st_mtime > out_mtime:
+                needs_build = True
+                break
+
+    if not needs_build:
+        click.echo(f"   Frontend bundle up-to-date ({frontend_entry})")
+        return
+
+    if not shutil.which("npm"):
+        click.echo(
+            f"⚠️  Frontend bundle needs rebuild but `npm` not on PATH — "
+            f"install will use existing {frontend_entry} (may be stale).",
+            err=True,
+        )
+        return
+
+    click.echo("Building frontend bundle...")
+    if not (ui_dir / "node_modules").exists():
+        click.echo("   Running `npm install` (one-time)...")
+        try:
+            r = subprocess.run(["npm", "install"], cwd=ui_dir, timeout=600)
+        except subprocess.TimeoutExpired:
+            click.echo("❌ npm install timed out (>10 min).", err=True)
+            return
+        if r.returncode != 0:
+            click.echo("❌ npm install failed.", err=True)
+            return
+
+    click.echo("   Running `npm run build`...")
+    try:
+        r = subprocess.run(["npm", "run", "build"], cwd=ui_dir, timeout=300)
+    except subprocess.TimeoutExpired:
+        click.echo("❌ npm run build timed out (>5 min).", err=True)
+        return
+    if r.returncode != 0:
+        click.echo("❌ npm run build failed.", err=True)
+        return
+    click.echo(f"   ✅ Built {frontend_entry}")
+
+
+def _install_required_plugins(
+    source_path: Path, manifest: dict, force: bool,
+) -> None:
+    """Recursively install any sibling plugins declared in plugin.json.
+
+    The bundle's ``plugin.json`` may carry a ``requires_plugins`` list
+    of paths (relative to the bundle dir) pointing at other plugin
+    source directories. Each is installed via the same ``install``
+    command so any further requirements / frontend builds cascade.
+
+    Missing or malformed entries warn and skip rather than aborting —
+    a partial install is more useful than no install when the user is
+    iterating.
+    """
+    # ``list`` is shadowed by the @plugin.command `list` further down,
+    # so accept any iterable and coerce up-front. A non-iterable value
+    # in the manifest is a user typo — log and skip rather than crash.
+    raw = manifest.get("requires_plugins") or []
+    try:
+        items = tuple(raw)
+    except TypeError:
+        click.echo(
+            f"⚠️  requires_plugins must be a list, got {type(raw).__name__} "
+            f"— skipping.",
+            err=True,
+        )
+        return
+    if not items:
+        return
+    click.echo(f"\nResolving {len(items)} required plugin(s)...")
+    for rel in items:
+        if not isinstance(rel, str) or not rel.strip():
+            continue
+        req = (source_path / rel.strip()).resolve()
+        if not req.is_dir() or not (req / "plugin.json").is_file():
+            click.echo(
+                f"⚠️  requires_plugins entry not found: {rel} "
+                f"(resolved to {req}) — skipping.",
+                err=True,
+            )
+            continue
+        click.echo(f"\n📦 Required plugin: {rel}")
+        # Recurse through the same click command so the entire flow
+        # (preflight + online/offline branching) is reused identically.
+        cb = install.callback
+        assert cb is not None
+        cb(str(req), force)
+
+
 @click.group()
 def plugin():
     """Plugin management commands."""
@@ -511,11 +626,39 @@ def install(source: str, force: bool):
     the API (no restart required).  When QwenPaw is stopped, the
     plugin files are copied and will be loaded on next start.
 
+    For local-directory sources, the installer also:
+      - recursively installs any sibling plugins declared in
+        ``plugin.json``'s ``requires_plugins`` array;
+      - rebuilds the frontend (``ui/dist``) when the bundle ships a
+        ``ui/`` source tree and the output is missing or stale.
+
     Examples:
         qwenpaw plugin install examples/plugins/idealab-provider
         qwenpaw plugin install /path/to/plugin
         qwenpaw plugin install https://example.com/plugin.zip
     """
+    # ── Preflight (local-dir sources only) ──────────────────────────
+    # Installs required sibling plugins and rebuilds the frontend
+    # before delegating to the online/offline install branches.
+    if not source.startswith(("http://", "https://")):
+        try:
+            _sp_preflight = Path(source).resolve()
+            _manifest_path = _sp_preflight / "plugin.json"
+            if _sp_preflight.is_dir() and _manifest_path.is_file():
+                with open(_manifest_path, encoding="utf-8") as f:
+                    _manifest_preflight = json.load(f)
+                _install_required_plugins(
+                    _sp_preflight, _manifest_preflight, force,
+                )
+                _build_frontend_if_needed(
+                    _sp_preflight, _manifest_preflight,
+                )
+        except Exception as exc:  # noqa: BLE001
+            click.echo(
+                f"⚠️  Preflight error (continuing with install): {exc}",
+                err=True,
+            )
+
     # If the app is running, delegate to the live API for hot-install
     if _is_running():
         click.echo(
@@ -642,7 +785,14 @@ def install(source: str, force: bool):
 
     click.echo("Copying plugin files...")
     try:
-        shutil.copytree(source_path, target_dir)
+        # Skip build/dev artifacts that runtime doesn't need — keeps
+        # the installed copy small (ui/node_modules alone is 150+ MB).
+        shutil.copytree(
+            source_path, target_dir,
+            ignore=shutil.ignore_patterns(
+                "node_modules", "__pycache__", ".vite", "*.pyc",
+            ),
+        )
     except Exception as e:
         click.echo(f"❌ Failed to copy plugin files: {e}", err=True)
         return
