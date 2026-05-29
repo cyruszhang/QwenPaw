@@ -110,6 +110,13 @@ async def run_stage_00a(
     gpt = _load_gpt_image_tool()
     report: dict = {"characters": [], "stage": "0a"}
 
+    # Walk characters once: drain cached/excluded into the report
+    # directly, queue the rest for parallel generation. Concurrency
+    # matches the client-side fan-out cap used by Stage 2/3.
+    gc = project_spec.global_config or {}
+    concurrency = max(1, min(8, int(gc.get("concurrency") or 3)))
+
+    to_gen: list[tuple[str, CharacterRef]] = []
     for cid, character in project_spec.assets.characters.items():
         if only_character and cid != only_character:
             continue
@@ -119,50 +126,65 @@ async def run_stage_00a(
             character.reference_image = target
             report["characters"].append({"id": cid, "skipped": True, "path": str(target)})
             continue
+        to_gen.append((cid, character))
 
-        prompt = _ref_prompt(character, style_template)
-        logger.info(f"[stage 0a gen] character={cid}  prompt={len(prompt)} chars")
-        t0 = time.time()
-        try:
-            resp = await gpt.generate_image_gpt(
-                prompt=prompt,
-                size=size,
-                quality=quality,
-                api_key=api_key,
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _gen_one(cid: str, character: CharacterRef) -> dict:
+        async with sem:
+            target = refs_dir / f"{cid}_ref.png"
+            prompt = _ref_prompt(character, style_template)
+            logger.info(
+                f"[stage 0a gen] character={cid}  "
+                f"prompt={len(prompt)} chars",
             )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"  ✗ {cid} failed: {e}")
-            report["characters"].append({"id": cid, "error": str(e)})
-            continue
+            t0 = time.time()
+            try:
+                resp = await gpt.generate_image_gpt(
+                    prompt=prompt,
+                    size=size,
+                    quality=quality,
+                    api_key=api_key,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"  ✗ {cid} failed: {e}")
+                return {"id": cid, "error": str(e)}
 
-        # Check for error in TextBlock
-        summary = _block_text(resp.content[-1]) if resp.content else ""
-        if summary.startswith("Error:"):
-            logger.error(f"  ✗ {cid}: {summary}")
-            report["characters"].append({"id": cid, "error": summary})
-            continue
+            summary = _block_text(resp.content[-1]) if resp.content else ""
+            if summary.startswith("Error:"):
+                logger.error(f"  ✗ {cid}: {summary}")
+                return {"id": cid, "error": summary}
 
-        saved = _parse_saved_path(resp)
-        if saved is None or not saved.exists():
-            logger.error(f"  ✗ {cid}: could not parse 'Saved to:' from response")
-            report["characters"].append({"id": cid, "error": "missing saved path"})
-            continue
+            saved = _parse_saved_path(resp)
+            if saved is None or not saved.exists():
+                logger.error(
+                    f"  ✗ {cid}: could not parse 'Saved to:' from response",
+                )
+                return {"id": cid, "error": "missing saved path"}
 
-        # Copy under our project's refs dir with the canonical name
-        shutil.copy2(saved, target)
-        character.reference_image = target
-        elapsed = time.time() - t0
-        logger.info(f"  ✓ {cid}: {target.stat().st_size/1e6:.1f} MB in {elapsed:.0f}s → {target.name}")
-        report["characters"].append({
-            "id": cid,
-            "path": str(target),
-            "bytes": target.stat().st_size,
-            "elapsed_s": round(elapsed, 1),
-        })
-        await asyncio.sleep(2.0)   # rate-limit padding
+            shutil.copy2(saved, target)
+            character.reference_image = target
+            elapsed = time.time() - t0
+            logger.info(
+                f"  ✓ {cid}: {target.stat().st_size / 1e6:.1f} MB in "
+                f"{elapsed:.0f}s → {target.name}",
+            )
+            return {
+                "id": cid,
+                "path": str(target),
+                "bytes": target.stat().st_size,
+                "elapsed_s": round(elapsed, 1),
+            }
+
+    if to_gen:
+        results = await asyncio.gather(*(_gen_one(c, ch) for c, ch in to_gen))
+        report["characters"].extend(results)
 
     n_ok = sum(1 for c in report["characters"] if "path" in c and not c.get("skipped"))
     n_skip = sum(1 for c in report["characters"] if c.get("skipped"))
     n_err = sum(1 for c in report["characters"] if "error" in c)
-    logger.info(f"[stage 0a] done — generated {n_ok}, skipped {n_skip}, failed {n_err}")
+    logger.info(
+        f"[stage 0a] done — generated {n_ok}, skipped {n_skip}, "
+        f"failed {n_err} (concurrency={concurrency})",
+    )
     return report

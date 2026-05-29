@@ -72,6 +72,10 @@ async def run_stage_00b(
     gpt = _load_gpt_image_tool()
     report: dict = {"scene_refs": [], "stage": "0b"}
 
+    gc = project_spec.global_config or {}
+    concurrency = max(1, min(8, int(gc.get("concurrency") or 3)))
+
+    to_gen: list[tuple[str, SceneRefAsset]] = []
     for sid, scene_ref in project_spec.assets.scene_refs.items():
         if only_scene_ref and sid != only_scene_ref:
             continue
@@ -81,48 +85,63 @@ async def run_stage_00b(
             scene_ref.reference_image = target
             report["scene_refs"].append({"id": sid, "skipped": True, "path": str(target)})
             continue
+        to_gen.append((sid, scene_ref))
 
-        prompt = _ref_prompt(scene_ref, style_template)
-        logger.info(f"[stage 0b gen] scene_ref={sid}  prompt={len(prompt)} chars")
-        t0 = time.time()
-        try:
-            resp = await gpt.generate_image_gpt(
-                prompt=prompt,
-                size=size,
-                quality=quality,
-                api_key=api_key,
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _gen_one(sid: str, scene_ref: SceneRefAsset) -> dict:
+        async with sem:
+            target = refs_dir / f"scene_{sid}_ref.png"
+            prompt = _ref_prompt(scene_ref, style_template)
+            logger.info(
+                f"[stage 0b gen] scene_ref={sid}  "
+                f"prompt={len(prompt)} chars",
             )
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"  ✗ {sid} failed: {e}")
-            report["scene_refs"].append({"id": sid, "error": str(e)})
-            continue
+            t0 = time.time()
+            try:
+                resp = await gpt.generate_image_gpt(
+                    prompt=prompt,
+                    size=size,
+                    quality=quality,
+                    api_key=api_key,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"  ✗ {sid} failed: {e}")
+                return {"id": sid, "error": str(e)}
 
-        summary = _block_text(resp.content[-1]) if resp.content else ""
-        if summary.startswith("Error:"):
-            logger.error(f"  ✗ {sid}: {summary}")
-            report["scene_refs"].append({"id": sid, "error": summary})
-            continue
+            summary = _block_text(resp.content[-1]) if resp.content else ""
+            if summary.startswith("Error:"):
+                logger.error(f"  ✗ {sid}: {summary}")
+                return {"id": sid, "error": summary}
 
-        saved = _parse_saved_path(resp)
-        if saved is None or not saved.exists():
-            logger.error(f"  ✗ {sid}: missing saved path")
-            report["scene_refs"].append({"id": sid, "error": "missing saved path"})
-            continue
+            saved = _parse_saved_path(resp)
+            if saved is None or not saved.exists():
+                logger.error(f"  ✗ {sid}: missing saved path")
+                return {"id": sid, "error": "missing saved path"}
 
-        shutil.copy2(saved, target)
-        scene_ref.reference_image = target
-        elapsed = time.time() - t0
-        logger.info(f"  ✓ {sid}: {target.stat().st_size/1e6:.1f} MB in {elapsed:.0f}s → {target.name}")
-        report["scene_refs"].append({
-            "id": sid,
-            "path": str(target),
-            "bytes": target.stat().st_size,
-            "elapsed_s": round(elapsed, 1),
-        })
-        await asyncio.sleep(2.0)
+            shutil.copy2(saved, target)
+            scene_ref.reference_image = target
+            elapsed = time.time() - t0
+            logger.info(
+                f"  ✓ {sid}: {target.stat().st_size / 1e6:.1f} MB in "
+                f"{elapsed:.0f}s → {target.name}",
+            )
+            return {
+                "id": sid,
+                "path": str(target),
+                "bytes": target.stat().st_size,
+                "elapsed_s": round(elapsed, 1),
+            }
+
+    if to_gen:
+        results = await asyncio.gather(*(_gen_one(s, sr) for s, sr in to_gen))
+        report["scene_refs"].extend(results)
 
     n_ok = sum(1 for s in report["scene_refs"] if "path" in s and not s.get("skipped"))
     n_skip = sum(1 for s in report["scene_refs"] if s.get("skipped"))
     n_err = sum(1 for s in report["scene_refs"] if "error" in s)
-    logger.info(f"[stage 0b] done — generated {n_ok}, skipped {n_skip}, failed {n_err}")
+    logger.info(
+        f"[stage 0b] done — generated {n_ok}, skipped {n_skip}, "
+        f"failed {n_err} (concurrency={concurrency})",
+    )
     return report
