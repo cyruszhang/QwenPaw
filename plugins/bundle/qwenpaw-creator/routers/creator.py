@@ -239,6 +239,10 @@ class DecomposeRequest(BaseModel):
     story_anchor: Optional[str] = None
     style_directives: Optional[list[str]] = None
     world_bible: Optional[str] = None
+    # Per-project model picks — propagated to every scene so the
+    # downstream stages don't have to re-resolve from globals.
+    frame_provider: Optional[str] = None  # Stage 2: gpt-image-2 | qwen-image
+    video_provider: Optional[str] = None  # Stage 3: wan27 | happyhorse | seedance
 
 
 class StageRunRequest(BaseModel):
@@ -315,6 +319,10 @@ class SceneEditRequest(BaseModel):
     regen_notes: Optional[str] = None
     # Which Stage 3 video model to use: "wan27" (default) or "happyhorse".
     video_provider: Optional[str] = None
+    # Which Stage 2 image model to use: "gpt-image-2" (default) or
+    # "qwen-image". qwen-image is ~5× cheaper but weaker on multi-ref
+    # identity coherence — switch for cost-sensitive iteration.
+    frame_provider: Optional[str] = None
 
 
 # ── router build ─────────────────────────────────────────────────────
@@ -849,6 +857,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 story_anchor=body.story_anchor,
                 style_directives=body.style_directives,
                 world_bible=body.world_bible,
+                frame_provider=body.frame_provider,
+                video_provider=body.video_provider,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[creator] stage_00 failed")
@@ -1174,12 +1184,34 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         async def _run_2():
             from pipeline.stage_02_v15_compose import run_stage_02_v15
+            # Scenes may pick gpt-image-2 (OpenAI key) or qwen-image
+            # (DashScope key) per-scene. Only require the keys that
+            # actually-used providers need.
+            scenes_to_run = [
+                s for s in (draft.get("scenes") or [])
+                if (
+                    body.only_scene is None
+                    or str(s.get("id")) == body.only_scene
+                    or f"{s.get('id')}_{s.get('name')}" == body.only_scene
+                )
+            ]
+            providers_used = {
+                str(s.get("frame_provider") or "gpt-image-2")
+                for s in scenes_to_run
+            }
             oa = _resolve_openai_key()
-            if not oa:
-                raise HTTPException(400, "OPENAI_API_KEY missing")
+            ds = _resolve_dashscope_key()
+            if "gpt-image-2" in providers_used and not oa:
+                raise HTTPException(
+                    400, "OPENAI_API_KEY missing (required by gpt-image-2)",
+                )
+            if "qwen-image" in providers_used and not ds:
+                raise HTTPException(
+                    400, "DASHSCOPE_API_KEY missing (required by qwen-image)",
+                )
             return await run_stage_02_v15(
                 spec, output_dir,
-                api_key=oa,
+                keys={"openai": oa, "dashscope": ds},
                 only_scene=body.only_scene,
                 overwrite=body.overwrite,
             )

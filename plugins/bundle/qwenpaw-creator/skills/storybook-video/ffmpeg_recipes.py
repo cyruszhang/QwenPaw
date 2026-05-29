@@ -60,6 +60,7 @@ def audio_mix_with_narration(
     *,
     ambient_volume: float = 0.25,
     narration_volume: float = 1.2,
+    has_ambient: bool = True,
 ) -> list[str]:
     """Mix Wan ambient (low) + TTS narration (foreground) into one MP4.
 
@@ -68,28 +69,50 @@ def audio_mix_with_narration(
     scene length and a 2-second fade smooths the audio cut when
     narration ends before the video.
 
+    When ``has_ambient=False`` (Seedance/HappyHorse return silent
+    video) the amix step is skipped and the narration is muxed in as
+    the sole audio track — the foreground/background mental model
+    collapses to "narration only" with no ambient bed.
+
     Args:
-        raw_video: ``{##}_{name}_raw.mp4`` from stage 03 (video + ambient).
+        raw_video: ``{##}_{name}_raw.mp4`` from stage 03.
         narration_audio: ``{##}_{name}_narration.mp3`` from stage 01.
         output: ``{##}_{name}_mixed.mp4``.
-        ambient_volume: Pre-amix volume of Wan's ambient track. Default
-            0.25 → effective ~12.5% after amix normalization.
-        narration_volume: Pre-amix volume of TTS narration. Default 1.2
-            → effective ~60% after amix normalization.
+        ambient_volume: Pre-amix volume of the raw's ambient track.
+        narration_volume: Pre-amix volume of TTS narration.
+        has_ambient: Whether ``raw_video`` actually has an audio stream.
 
     Returns:
         ffmpeg argv list.
     """
-    filt = (
-        f"[0:a]volume={ambient_volume}[ambient];"
-        f"[1:a]volume={narration_volume}[narr];"
-        f"[ambient][narr]amix=inputs=2:duration=first:dropout_transition=2[aout]"
-    )
+    if has_ambient:
+        filt = (
+            f"[0:a]volume={ambient_volume}[ambient];"
+            f"[1:a]volume={narration_volume}[narr];"
+            f"[ambient][narr]amix=inputs=2:duration=first"
+            f":dropout_transition=2[aout]"
+        )
+        return [
+            "ffmpeg", "-y",
+            "-i", str(raw_video),
+            "-i", str(narration_audio),
+            "-filter_complex", filt,
+            "-map", "0:v:0", "-map", "[aout]",
+            "-c:v", "copy",
+            "-c:a", AUDIO_CODEC,
+            "-ar", AUDIO_SAMPLE_RATE,
+            "-ac", AUDIO_CHANNELS,
+            "-b:a", AUDIO_BITRATE,
+            "-shortest", "-movflags", "+faststart",
+            str(output),
+        ]
+    # Silent raw — narration becomes the only audio track. Boost it to
+    # roughly the same effective level the amix path produced (~60%).
     return [
         "ffmpeg", "-y",
         "-i", str(raw_video),
         "-i", str(narration_audio),
-        "-filter_complex", filt,
+        "-filter_complex", f"[1:a]volume={narration_volume}[aout]",
         "-map", "0:v:0", "-map", "[aout]",
         "-c:v", "copy",
         "-c:a", AUDIO_CODEC,
@@ -104,6 +127,8 @@ def audio_mix_with_narration(
 def uniform_scale(
     input_video: Path,
     output: Path,
+    *,
+    has_audio: bool = True,
 ) -> list[str]:
     """Scale any input to a uniform 1920×816 letterboxed in 1920×1080.
 
@@ -112,10 +137,16 @@ def uniform_scale(
     bars per scene — without this, each scene's bar height varies and
     cuts look broken.
 
+    When ``has_audio=False`` a silent stereo AAC track is synthesized
+    via ``anullsrc`` so the output is always a well-formed video+audio
+    MP4. Stage 04d concat requires every input to carry both streams,
+    so any silent raw (Seedance/HappyHorse intro/outro with no overlay
+    narration) needs this padding before being stitched.
+
     Args:
-        input_video: Either ``_mixed.mp4`` (story scene) or
-            ``_text.mp4`` (intro/outro after overlay).
+        input_video: ``_mixed.mp4`` / ``_text.mp4`` / ``_raw.mp4``.
         output: ``{##}_{name}_scaled.mp4``.
+        has_audio: Whether ``input_video`` carries an audio stream.
 
     Returns:
         ffmpeg argv list.
@@ -125,9 +156,16 @@ def uniform_scale(
         f"pad={CONTENT_W}:{CONTENT_H}:(ow-iw)/2:(oh-ih)/2,"
         f"pad={CANVAS_W}:{CANVAS_H}:0:{LETTERBOX_Y}"
     )
-    return [
-        "ffmpeg", "-y",
-        "-i", str(input_video),
+    args = ["ffmpeg", "-y", "-i", str(input_video)]
+    if not has_audio:
+        # Synthesize a silent stereo track for the duration of the
+        # video input; -shortest below clips it to match.
+        args += [
+            "-f", "lavfi",
+            "-i", f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_SAMPLE_RATE}",
+            "-map", "0:v", "-map", "1:a",
+        ]
+    args += [
         "-vf", vf,
         "-c:v", VIDEO_CODEC,
         "-preset", VIDEO_PRESET,
@@ -136,10 +174,19 @@ def uniform_scale(
         "-profile:v", VIDEO_PROFILE,
         "-level", VIDEO_LEVEL,
         "-g", VIDEO_GOP, "-keyint_min", VIDEO_GOP,
-        "-c:a", "copy",
-        "-movflags", "+faststart",
-        str(output),
     ]
+    if has_audio:
+        args += ["-c:a", "copy"]
+    else:
+        args += [
+            "-c:a", AUDIO_CODEC,
+            "-ar", AUDIO_SAMPLE_RATE,
+            "-ac", AUDIO_CHANNELS,
+            "-b:a", AUDIO_BITRATE,
+            "-shortest",
+        ]
+    args += ["-movflags", "+faststart", str(output)]
+    return args
 
 
 def concat_filter_stitch(
@@ -224,27 +271,41 @@ def encode_frames_with_audio(
     output: Path,
     *,
     fps: int = 30,
+    has_audio: bool = True,
 ) -> list[str]:
-    """Encode a frame sequence into an MP4, muxing audio from the source.
+    """Encode a frame sequence into an MP4.
 
-    Used by overlays_render.py to reassemble Pillow-edited frames into
-    a video while preserving the original Wan ambient audio track.
+    When ``has_audio=True`` (default) the audio track from
+    ``audio_source`` is muxed into the output via stream-copy. When
+    ``has_audio=False`` (e.g. Seedance/HappyHorse raws which return
+    silent video) the audio input is skipped and the output is
+    video-only — caller is responsible for mixing narration in later.
 
     Args:
         frame_pattern: e.g. ``out_frames/frame_%04d.png``.
-        audio_source: MP4 with the audio track to copy through.
+        audio_source: MP4 with the audio track to copy through. Ignored
+            when ``has_audio=False``.
         output: ``{##}_{name}_text.mp4``.
         fps: Frame rate. Default 30.
+        has_audio: Whether ``audio_source`` actually contains an audio
+            stream. Caller should probe with ffprobe and set accordingly.
 
     Returns:
         ffmpeg argv list.
     """
-    return [
+    base = [
         "ffmpeg", "-y",
         "-framerate", str(fps),
         "-i", frame_pattern,
-        "-i", str(audio_source),
-        "-map", "0:v", "-map", "1:a",
+    ]
+    if has_audio:
+        base += [
+            "-i", str(audio_source),
+            "-map", "0:v", "-map", "1:a",
+        ]
+    else:
+        base += ["-map", "0:v"]
+    base += [
         "-c:v", VIDEO_CODEC,
         "-preset", VIDEO_PRESET,
         "-crf", VIDEO_CRF,
@@ -252,10 +313,11 @@ def encode_frames_with_audio(
         "-profile:v", VIDEO_PROFILE,
         "-level", VIDEO_LEVEL,
         "-g", VIDEO_GOP, "-keyint_min", VIDEO_GOP,
-        "-c:a", "copy",
-        "-shortest", "-movflags", "+faststart",
-        str(output),
     ]
+    if has_audio:
+        base += ["-c:a", "copy", "-shortest"]
+    base += ["-movflags", "+faststart", str(output)]
+    return base
 
 
 def probe_duration(input_media: Path) -> list[str]:

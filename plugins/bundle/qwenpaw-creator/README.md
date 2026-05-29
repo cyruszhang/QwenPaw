@@ -77,8 +77,8 @@ plugins/bundle/qwenpaw-creator/
             ├── stage_00c_style.py       # style ref resolution
             ├── stage_01_script.py       # CosyVoice TTS
             ├── stage_02_v15_compose.py  # multi-ref edit composition
-            ├── stage_03_shots.py        # Wan I2V (CLI-driven)
-            └── stage_04_assemble.py     # ffmpeg + Pillow (CLI-driven)
+            ├── stage_03_shots.py        # per-scene I2V dispatcher
+            └── stage_04_assemble.py     # ffmpeg + Pillow assembly
 ```
 
 ## Skill catalog

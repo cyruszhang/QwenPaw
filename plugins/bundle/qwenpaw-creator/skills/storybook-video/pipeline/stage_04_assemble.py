@@ -135,11 +135,16 @@ def stage_04b_audio_mix(
             raise FileNotFoundError(f"Need {raw} for audio mix")
         if not narr.exists():
             raise FileNotFoundError(f"Need {narr} for audio mix")
-        logger.info(f"[4b  ] mix    {scene.scene_id}_{scene.name}")
+        has_ambient = "audio" in _probe_info(raw)
+        logger.info(
+            f"[4b  ] mix    {scene.scene_id}_{scene.name}"
+            f" (ambient={'yes' if has_ambient else 'no'})",
+        )
         _run(audio_mix_with_narration(
             raw, narr, out,
             ambient_volume=AMBIENT_VOLUME,
             narration_volume=NARRATION_VOLUME,
+            has_ambient=has_ambient,
         ))
         results[scene.scene_id] = out
     return results
@@ -184,8 +189,12 @@ def stage_04c_uniform_scale(
                 f"No input found for scaling scene {scene.scene_id}"
             )
 
-        logger.info(f"[4c  ] scale  {scene.scene_id}_{scene.name} ← {src.name}")
-        _run(uniform_scale(src, out))
+        has_audio = "audio" in _probe_info(src)
+        logger.info(
+            f"[4c  ] scale  {scene.scene_id}_{scene.name} ← {src.name}"
+            f" (audio={'yes' if has_audio else 'silence-pad'})",
+        )
+        _run(uniform_scale(src, out, has_audio=has_audio))
         results[scene.scene_id] = out
     return results
 
@@ -298,43 +307,3 @@ def run_stage_04_smoke(
     return next(iter(scaled_map.values()))
 
 
-def main():
-    import argparse
-    from prompts import OLD_MAN_PROJECT  # noqa: E402
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", default="output")
-    parser.add_argument("--mode", choices=["full", "smoke"], default="full")
-    parser.add_argument("--scene", default=None,
-                        help="Required for --mode=smoke; e.g. '01'")
-    parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--final-name", default="old_man_and_the_sea_qwen_final.mp4")
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
-    )
-
-    out_dir = Path(args.output_dir)
-    if args.mode == "smoke":
-        if not args.scene:
-            print("ERROR: --scene required for smoke mode")
-            sys.exit(1)
-        # Resolve scene_id from either "01" or "01_solitary_sailor".
-        sid = args.scene.split("_")[0] if "_" in args.scene else args.scene
-        path = run_stage_04_smoke(
-            OLD_MAN_PROJECT, out_dir, sid, overwrite=args.overwrite,
-        )
-        print(f"Smoke output: {path}")
-    else:
-        report = run_stage_04_full(
-            OLD_MAN_PROJECT, out_dir,
-            final_name=args.final_name, overwrite=args.overwrite,
-        )
-        import json
-        print(json.dumps(report, indent=2))
-
-
-if __name__ == "__main__":
-    main()

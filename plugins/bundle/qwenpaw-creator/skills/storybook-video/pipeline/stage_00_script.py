@@ -432,6 +432,8 @@ _GLOBAL_CONFIG_DEFAULTS: dict = {
     "tts_format": "mp3",
     "tts_sample_rate": 22050,
     "tts_speech_rate": 1.0,
+    "frame_provider": "gpt-image-2",
+    "video_provider": "wan27",
 }
 
 
@@ -492,6 +494,8 @@ async def decompose_script(
     story_anchor: Optional[str] = None,
     style_directives: Optional[list[str]] = None,
     world_bible: Optional[str] = None,
+    frame_provider: Optional[str] = None,
+    video_provider: Optional[str] = None,
 ) -> dict:
     """Run the LLM decomposition and return a draft ProjectSpec dict.
 
@@ -551,6 +555,20 @@ async def decompose_script(
         cleaned = [d.strip() for d in style_directives if d and d.strip()]
         if cleaned:
             gc["style_directives"] = cleaned
+    # Provider picks come from the decompose form (the "first step" UX)
+    # and are written both to global_config and to every scene so the
+    # later stages don't have to re-resolve from globals.
+    if frame_provider:
+        gc["frame_provider"] = frame_provider
+    if video_provider:
+        gc["video_provider"] = video_provider
+    fp_apply = gc.get("frame_provider")
+    vp_apply = gc.get("video_provider")
+    for scene in draft.get("scenes", []) or []:
+        if fp_apply:
+            scene["frame_provider"] = fp_apply
+        if vp_apply:
+            scene["video_provider"] = vp_apply
     logger.info(
         "[stage 00] draft built: %d scenes, %d characters, %d scene_refs, "
         "style=%s",

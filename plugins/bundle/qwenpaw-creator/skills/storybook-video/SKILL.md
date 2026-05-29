@@ -17,10 +17,11 @@ metadata:
 
 # storybook-video
 
-A four-stage agentic pipeline for narrated story videos. v0.1 ships as
-a linear Python skill consumed directly by `examples/storybook-video/
-run_benchmark.py`. v0.2+ will wrap it in stage-specialist agents with
-HITL gates between stages (the `proposal_choice` pattern from cloudpaw).
+A four-stage agentic pipeline for narrated story videos. The pipeline
+is driven end-to-end by the QwenPaw Creator console panel
+(`/plugin/qwenpaw-creator/storybook`); v0.3+ will wrap it in
+stage-specialist agents with HITL gates between stages (the
+`proposal_choice` pattern from cloudpaw).
 
 ## When to use
 
@@ -83,24 +84,19 @@ oversize narration before any expensive call.
 | `quirks/wan27.md` | Per-model gotchas: motion-prompt limb anchoring, output-resolution variability, retry handling |
 | `quirks/cosyvoice.md` | Per-model gotchas: v1 vs v2 voice suffix, format×sample-rate matrix, measured wpm |
 
-## How to run (v0.1 — standalone benchmark)
+## How to run
 
-```bash
-cd /Users/yilei.z/dev/QwenPaw
-source venv/bin/activate
-set -a; source .env; set +a
-cd examples/storybook-video
+Open the Creator panel at `/plugin/qwenpaw-creator/storybook`,
+upload a source file (or paste text), and walk through Stage 00 →
+0a/0b/0c → 01 → 02 → 03 → 04. The panel persists each project as
+`<working_dir>/creator/<project_id>/project.yml`; reopen the
+project at any time to resume.
 
-python3 run_benchmark.py --phase a              # audit (free, ~5s)
-python3 run_benchmark.py --phase b              # smoke (~$0.66, ~5min)
-python3 run_benchmark.py --phase c              # full (~$5, ~25-45min)
-```
+The skill modules in this directory are imported by the bundle's
+HTTP routes (`plugins/bundle/qwenpaw-creator/routers/creator.py`)
+— there is no standalone CLI entry point.
 
-The benchmark's `ProjectSpec` literal (`examples/storybook-video/
-prompts.py`) is what the skill operates on. Replace it with any
-other `ProjectSpec` to drive the same skill with different content.
-
-## How it will be invoked (v0.2+ — through an agent)
+## How it will be invoked (v0.3+ — through an agent)
 
 ```python
 # (pseudocode; the API shape lands when v0.2 ships)
@@ -118,19 +114,8 @@ that re-runs only the affected per-scene artifacts.
 
 ## Iteration model
 
-Per-scene artifacts are idempotent and addressable:
-
-```bash
-# Re-generate ONLY scene 04's frame after tuning the prompt
-python3 run_benchmark.py --phase b --scene 04_the_catch --overwrite
-
-# Re-animate just that one shot (frame stays cached)
-python3 -m pipeline.stage_03_shots --scene 04 --overwrite
-
-# Re-stitch the whole thing
-python3 -m pipeline.stage_04_assemble --mode full --overwrite
-```
-
-This is the manual version of the agent loop. The agent will do it
-autonomously with `proposal_choice` gates surfacing the cost of each
-iteration BEFORE running it.
+Per-scene artifacts are idempotent and addressable. From the panel,
+each scene card has a per-stage "regenerate" button that re-runs
+only that scene's frame / shot / audio (cached artifacts elsewhere
+stay intact). The HTTP layer accepts an `only_scene` parameter on
+every stage endpoint to support the same selective re-run.

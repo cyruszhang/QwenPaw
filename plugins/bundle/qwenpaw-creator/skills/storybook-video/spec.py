@@ -107,6 +107,13 @@ class SceneSpec:
     # When adding a provider, also extend stage_03_shots.run_stage_03.
     video_provider: str = "wan27"
 
+    # Which image model Stage 2 uses to compose this scene's frame.
+    # "gpt-image-2" (default) uses OpenAI's /v1/images/edits — strong
+    # prompt adherence but ~$0.20-0.30 per frame at high quality.
+    # "qwen-image" uses DashScope's edit_image_qwen — roughly 5× cheaper
+    # but weaker multi-ref identity coherence.
+    frame_provider: str = "gpt-image-2"
+
 
 @dataclass
 class SceneValidationRules:

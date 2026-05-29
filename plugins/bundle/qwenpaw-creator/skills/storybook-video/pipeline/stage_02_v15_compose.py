@@ -41,6 +41,73 @@ from pipeline.stage_00a_characters import (  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+def _load_qwen_image_tool():
+    from tools_loader import load_tool_module  # type: ignore
+
+    return load_tool_module(
+        tool_id="qwen-image",
+        tool_file="qwen_image_tool.py",
+        module_name="qwen_image_tool",
+    )
+
+
+_PROVIDER_CACHE: dict[str, object] = {}
+
+
+def _provider_module(provider: str):
+    if provider not in _PROVIDER_CACHE:
+        if provider == "gpt-image-2":
+            _PROVIDER_CACHE[provider] = _load_gpt_image_tool()
+        elif provider == "qwen-image":
+            _PROVIDER_CACHE[provider] = _load_qwen_image_tool()
+        else:
+            raise ValueError(
+                f"unknown frame_provider {provider!r}; expected one of "
+                f"'gpt-image-2', 'qwen-image'",
+            )
+    return _PROVIDER_CACHE[provider]
+
+
+async def _call_provider_edit(
+    provider: str,
+    *,
+    prompt: str,
+    refs: list[str],
+    size: str,
+    quality: str,
+    keys: dict[str, str],
+):
+    """Dispatch the multi-ref edit call to the per-scene image provider.
+
+    gpt-image-2 wants ``size`` in ``WIDTHxHEIGHT`` form and consumes a
+    ``quality`` knob ("high"/"low"). qwen-image wants ``WIDTH*HEIGHT``
+    and has no quality knob — qwen-image-2.0-pro is the highest tier.
+    """
+    mod = _provider_module(provider)
+    if provider == "gpt-image-2":
+        oa = (keys.get("openai") or "").strip()
+        if not oa:
+            raise RuntimeError(
+                "frame_provider=gpt-image-2 requires OPENAI_API_KEY",
+            )
+        return await mod.edit_image_gpt(
+            prompt=prompt, reference_images=refs,
+            size=size, quality=quality, api_key=oa,
+        )
+    if provider == "qwen-image":
+        ds = (keys.get("dashscope") or "").strip()
+        if not ds:
+            raise RuntimeError(
+                "frame_provider=qwen-image requires DASHSCOPE_API_KEY",
+            )
+        qsize = size.replace("x", "*") if size else ""
+        return await mod.edit_image_qwen(
+            prompt=prompt, reference_images=refs,
+            size=qsize, api_key=ds,
+        )
+    raise ValueError(f"unknown frame_provider {provider!r}")
+
+
 def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> list[str]:
     """Return the list of reference-image paths for a scene, in the
     order they should be passed to /v1/images/edits.
@@ -232,26 +299,28 @@ async def run_stage_02_v15(
     project_spec: ProjectSpec,
     output_dir: Path,
     *,
-    api_key: str,
+    keys: dict[str, str],
     only_scene: Optional[str] = None,
     overwrite: bool = False,
     size: str = "1024x1024",
     quality: str = "high",
 ) -> dict:
-    """Compose each scene's frame via multi-ref edit.
+    """Compose each scene's frame via the scene's chosen image provider.
 
     Args:
         project_spec: ProjectSpec with assets already populated by
             Stage 0a/0b/0c.
         output_dir: Where to write ``{##}_{name}_frame.png``.
-        api_key: OpenAI key.
+        keys: Map of provider key names to API keys, e.g.
+            ``{"openai": "sk-...", "dashscope": "sk-..."}``. Only the
+            keys for providers actually used by scenes need to be set.
         only_scene: When set, compose only this scene id.
         overwrite: Force regeneration even if frame exists.
-        size: gpt-image-2 image size (1024x1024 default).
-        quality: gpt-image-2 quality (high default).
+        size: Image size in ``WIDTHxHEIGHT`` form (qwen-image's
+            ``WIDTH*HEIGHT`` is derived automatically).
+        quality: gpt-image-2 quality (ignored by qwen-image).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    gpt = _load_gpt_image_tool()
     report: dict = {"stage": "02_v15", "scenes": []}
 
     # The project id is the immediate parent of the output_dir for the
@@ -287,21 +356,24 @@ async def run_stage_02_v15(
             continue
 
         prompt = _compose_prompt(project_spec, scene)
+        provider = getattr(scene, "frame_provider", None) or "gpt-image-2"
         logger.info(
             f"[stage 02 compose] scene={scene.scene_id}_{scene.name}  "
-            f"refs={len(refs)}  prompt={len(prompt)} chars",
+            f"provider={provider}  refs={len(refs)}  "
+            f"prompt={len(prompt)} chars",
         )
         for i, r in enumerate(refs):
             logger.debug(f"    ref[{i}] = {r}")
 
         t0 = time.time()
         try:
-            resp = await gpt.edit_image_gpt(
+            resp = await _call_provider_edit(
+                provider,
                 prompt=prompt,
-                reference_images=refs,
+                refs=refs,
                 size=size,
                 quality=quality,
-                api_key=api_key,
+                keys=keys,
             )
         except Exception as e:  # noqa: BLE001
             logger.error(f"  ✗ scene {scene.scene_id} failed: {e}")
@@ -332,6 +404,7 @@ async def run_stage_02_v15(
             "bytes": target.stat().st_size,
             "elapsed_s": round(elapsed, 1),
             "refs_used": len(refs),
+            "provider": provider,
         })
         _try_emit(pid, "scene_done", stage="2",
                   scene_id=scene.scene_id, name=scene.name,

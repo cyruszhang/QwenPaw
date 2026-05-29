@@ -133,6 +133,7 @@ def load_project_spec_from_dict(raw: dict) -> ProjectSpec:
             uses_style=bool(s.get("uses_style", True)),
             regen_notes=_flatten_prose(s.get("regen_notes", "")),
             video_provider=str(s.get("video_provider") or "wan27"),
+            frame_provider=str(s.get("frame_provider") or "gpt-image-2"),
         )
         scenes.append(scene)
         if scene.has_narration:

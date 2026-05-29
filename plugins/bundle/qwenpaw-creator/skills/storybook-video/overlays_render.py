@@ -30,6 +30,7 @@ from ffmpeg_recipes import (
     encode_frames_with_audio,
     extract_frames,
     probe_duration,
+    probe_video_info,
 )
 from spec import OverlaySpec
 
@@ -158,12 +159,16 @@ def render_overlays_on_video(
         out_path = out_frames / f"frame_{i + 1:04d}.png"
         img.convert("RGB").save(out_path)
 
-    # Re-encode the edited frames with the original audio muxed back.
+    # Re-encode the edited frames; preserve the original audio if the
+    # raw scene has one. Seedance / HappyHorse return silent video, so
+    # detect first and skip the audio map when absent.
+    has_audio = _has_audio_stream(raw_video)
     _run(encode_frames_with_audio(
         frame_pattern=str(out_frames / "frame_%04d.png"),
         audio_source=raw_video,
         output=output,
         fps=fps,
+        has_audio=has_audio,
     ))
 
     # Clean up the frame work dir on success.
@@ -182,6 +187,19 @@ def _probe_duration_s(media: Path) -> float:
         capture_output=True, text=True, check=True,
     )
     return float(res.stdout.strip())
+
+
+def _has_audio_stream(media: Path) -> bool:
+    """True iff ``media`` has at least one audio stream.
+
+    Probes via ``probe_video_info`` (which prints one row per stream
+    in csv form including ``codec_type``) and looks for ``audio``.
+    """
+    res = subprocess.run(
+        probe_video_info(media),
+        capture_output=True, text=True, check=False,
+    )
+    return "audio" in (res.stdout or "")
 
 
 def _run(argv: list[str]) -> None:

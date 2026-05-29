@@ -765,6 +765,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   const [storyAnchor, setStoryAnchor] = React.useState("");
   const [styleDirectives, setStyleDirectives] = React.useState("");
   const [worldBible, setWorldBible] = React.useState("");
+  // Per-project model picks — chosen at decompose time and propagated
+  // to every scene by Stage 00. Per-scene override stays available in
+  // the SceneEditModal.
+  const [frameProvider, setFrameProvider] = React.useState("gpt-image-2");
+  const [videoProvider, setVideoProvider] = React.useState("wan27");
 
   const reload = React.useCallback(async () => {
     try {
@@ -863,6 +868,8 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           .split("\n")
           .map((s) => s.trim())
           .filter(Boolean),
+        frame_provider: frameProvider,
+        video_provider: videoProvider,
       });
       setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
       onChange?.();
@@ -1131,6 +1138,8 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           storyAnchor, setStoryAnchor,
           styleDirectives, setStyleDirectives,
           worldBible, setWorldBible,
+          frameProvider, setFrameProvider,
+          videoProvider, setVideoProvider,
           styles, busy, activeStage, status,
           onSubmit: onDecompose,
         })
@@ -1232,6 +1241,9 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
   const [videoProvider, setVideoProvider] = React.useState(
     scene.video_provider ?? "wan27",
   );
+  const [frameProvider, setFrameProvider] = React.useState(
+    scene.frame_provider ?? "gpt-image-2",
+  );
   const [submitting, setSubmitting] = React.useState(false);
 
   const charOptions = (draft.assets?.characters ?? []).map((c: any) => ({
@@ -1276,6 +1288,7 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
             n_candidates: nCandidates,
             regen_notes: regenNotes.trim(),
             video_provider: videoProvider,
+            frame_provider: frameProvider,
           });
         } finally {
           setSubmitting(false);
@@ -1418,6 +1431,20 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
           value: regenNotes,
           onChange: (e: any) => setRegenNotes(e.target.value),
           placeholder: "marlin should be about the same length as the skiff, not larger",
+        }),
+      ),
+      React.createElement(Form.Item, {
+        label: "frame_provider (Stage 2)",
+        extra: "gpt-image-2 — strong multi-ref identity (~$0.20-0.30 / frame). qwen-image — ~5× cheaper but weaker character coherence; good for cost-sensitive iteration.",
+      },
+        React.createElement(Select, {
+          value: frameProvider,
+          onChange: setFrameProvider,
+          style: { width: "100%" },
+          options: [
+            { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, expensive" },
+            { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
+          ],
         }),
       ),
       React.createElement(Form.Item, {
@@ -2064,6 +2091,8 @@ function DecomposeForm({
   storyAnchor, setStoryAnchor,
   styleDirectives, setStyleDirectives,
   worldBible, setWorldBible,
+  frameProvider, setFrameProvider,
+  videoProvider, setVideoProvider,
   styles, busy, activeStage, status,
   onSubmit,
 }: any) {
@@ -2126,6 +2155,42 @@ function DecomposeForm({
               { label: "longxiaochun_v2 (neutral)", value: "longxiaochun_v2" },
             ],
             style: { width: "100%" },
+          }),
+        ),
+      ),
+    ),
+
+    React.createElement(Row, { gutter: 16 },
+      React.createElement(Col, { span: 12 },
+        React.createElement(Form.Item, {
+          label: "Frame model (Stage 2)",
+          extra: "Applied to every scene; per-scene override available later via the pencil icon.",
+        },
+          React.createElement(Select, {
+            value: frameProvider,
+            onChange: setFrameProvider,
+            style: { width: "100%" },
+            options: [
+              { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, ~$0.20-0.30 / frame" },
+              { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper, weaker identity" },
+            ],
+          }),
+        ),
+      ),
+      React.createElement(Col, { span: 12 },
+        React.createElement(Form.Item, {
+          label: "Video model (Stage 3)",
+          extra: "Applied to every scene; per-scene override available later via the pencil icon.",
+        },
+          React.createElement(Select, {
+            value: videoProvider,
+            onChange: setVideoProvider,
+            style: { width: "100%" },
+            options: [
+              { value: "wan27", label: "🎬 Wan 2.7 — wan2.7-i2v-2026-04-25" },
+              { value: "happyhorse", label: "🐎 HappyHorse 1.0 — faster + cheaper" },
+              { value: "seedance", label: "🌱 Doubao Seedance 2.0" },
+            ],
           }),
         ),
       ),
@@ -2699,7 +2764,10 @@ function DraftSummary({
   const styleId = draft.assets?.style?.catalog_id;
   const defaultProvider =
     (draft.global_config?.video_provider as string | undefined) || "wan27";
+  const defaultFrameProvider =
+    (draft.global_config?.frame_provider as string | undefined) || "gpt-image-2";
   const [savingProvider, setSavingProvider] = React.useState(false);
+  const [savingFrameProvider, setSavingFrameProvider] = React.useState(false);
 
   const updateDefaultProvider = async (next: string) => {
     setSavingProvider(true);
@@ -2732,6 +2800,32 @@ function DraftSummary({
     }
   };
 
+  const updateDefaultFrameProvider = async (next: string) => {
+    setSavingFrameProvider(true);
+    try {
+      const newDraft = JSON.parse(JSON.stringify(draft));
+      newDraft.global_config = newDraft.global_config || {};
+      newDraft.global_config.frame_provider = next;
+      let synced = 0;
+      for (const s of (newDraft.scenes || [])) {
+        if (s.frame_provider !== next) {
+          s.frame_provider = next;
+          synced += 1;
+        }
+      }
+      await onSaveDraft(newDraft);
+      if (synced > 0) {
+        antMessage.success(
+          `Default set to ${next}; ${synced} scene(s) synced.`,
+        );
+      }
+    } catch (e: any) {
+      antMessage.error(`Save failed: ${e.message ?? e}`);
+    } finally {
+      setSavingFrameProvider(false);
+    }
+  };
+
   return React.createElement(
     Card,
     {
@@ -2748,6 +2842,24 @@ function DraftSummary({
       extra: React.createElement(
         Space,
         { size: 8 },
+        React.createElement(
+          Tooltip,
+          {
+            title:
+              "Default Stage 2 frame model. Changing this re-syncs every scene's frame_provider. Per-scene override via the pencil icon on each scene card.",
+          },
+          React.createElement(Select, {
+            value: defaultFrameProvider,
+            disabled: savingFrameProvider,
+            onChange: updateDefaultFrameProvider,
+            size: "small",
+            style: { minWidth: 170 },
+            options: [
+              { value: "gpt-image-2", label: "🖼️ gpt-image-2" },
+              { value: "qwen-image", label: "🪶 qwen-image" },
+            ],
+          }),
+        ),
         React.createElement(
           Tooltip,
           {
@@ -3119,6 +3231,17 @@ function FrameGallery({
                 : React.createElement(ExclamationCircleOutlined, { style: { color: "#bbb" } }),
               `${s.id} — ${s.name}`,
               React.createElement(Tag, null, `${s.duration}s`),
+              (() => {
+                const fp = s.frame_provider || "gpt-image-2";
+                const tagSpec = fp === "qwen-image"
+                  ? { color: "cyan", label: "🪶 qwen" }
+                  : { color: "purple", label: "🖼️ gpt" };
+                return React.createElement(
+                  Tag,
+                  { color: tagSpec.color, style: { fontSize: 10 } },
+                  tagSpec.label,
+                );
+              })(),
               liveBusy
                 ? React.createElement(
                     Tag,
