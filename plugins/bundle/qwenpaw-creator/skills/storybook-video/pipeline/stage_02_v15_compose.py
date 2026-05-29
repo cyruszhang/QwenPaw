@@ -69,15 +69,15 @@ def _provider_module(provider: str):
     return _PROVIDER_CACHE[provider]
 
 
-# Stage 2 composition is multi-image fusion — always route qwen-image
-# calls through `qwen-image-edit-plus`, the multi-image-fusion variant
-# (the default `qwen-image-2.0-pro` alias maps server-side to a
-# 2-in-1 cluster that caps at 3 inputs).
+# Stage 2 composition is multi-image fusion — route qwen-image calls
+# through `qwen-image-edit-plus`, the variant designed for it.
 _QWEN_EDIT_MODEL = "qwen-image-edit-plus"
-# edit-plus accepts more inputs than 2-in-1; we cap at 6 as a safe
-# upper bound. If the model returns "Too many input items" at this
-# limit, lower the constant — the warning surfaces what got dropped.
-_QWEN_MAX_REFS = 6
+# All DashScope qwen image-edit endpoints (2.0-pro, 2.0-2in1,
+# edit-plus, edit) currently enforce a hard 3-reference cap at the
+# API layer ("For image editing, the message must contain 1~3 image
+# content items"). Even edit-plus, despite the "fusion" framing,
+# rejects 4+ refs. Truncate to 3 with character-first prioritization.
+_QWEN_MAX_REFS = 3
 
 
 async def _call_provider_edit(
