@@ -689,8 +689,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
       React.createElement(Row, { gutter: 16 },
         React.createElement(Col, { span: 12 },
           React.createElement(Form.Item, {
-            label: "Frame model (Stage 2)",
-            extra: "gpt-image-2: strong identity, ~$0.20-0.30 / frame. qwen-image: ~5× cheaper, weaker identity. Saved with the project; per-scene override available later.",
+            label: "Image model (Stage 0 refs + Stage 2 frames)",
+            extra: "Routes every image-gen call for this project — character/setting/style refs (Stage 0) and per-scene frame composition (Stage 2). gpt-image-2: strong identity, ~$0.20-0.30 / frame. qwen-image: ~5× cheaper, weaker identity, 3-ref cap. Per-scene Stage 2 override available later.",
           },
             React.createElement(Select, {
               value: frameProvider,
@@ -1493,8 +1493,8 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
         }),
       ),
       React.createElement(Form.Item, {
-        label: "frame_provider (Stage 2)",
-        extra: "gpt-image-2 — strong multi-ref identity (~$0.20-0.30 / frame). qwen-image — ~5× cheaper but weaker character coherence; good for cost-sensitive iteration.",
+        label: "frame_provider (Stage 2 override for this scene)",
+        extra: "Overrides the project-wide image model just for this scene's Stage 2 frame. Stage 0 anchor refs always use the project-wide pick (set at the Source step).",
       },
         React.createElement(Select, {
           value: frameProvider,
@@ -2222,8 +2222,8 @@ function DecomposeForm({
     React.createElement(Row, { gutter: 16 },
       React.createElement(Col, { span: 12 },
         React.createElement(Form.Item, {
-          label: "Frame model (Stage 2)",
-          extra: "Applied to every scene; per-scene override available later via the pencil icon.",
+          label: "Image model (Stage 0 refs + Stage 2 frames)",
+          extra: "Drives every image-gen call: Stage 0 anchor refs AND Stage 2 per-scene frames. Per-scene Stage 2 override available later via the pencil icon.",
         },
           React.createElement(Select, {
             value: frameProvider,
@@ -2905,7 +2905,7 @@ function DraftSummary({
           Tooltip,
           {
             title:
-              "Default Stage 2 frame model. Changing this re-syncs every scene's frame_provider. Per-scene override via the pencil icon on each scene card.",
+              "Default image model — used for both Stage 0 anchor refs and Stage 2 per-scene frames. Changing this re-syncs every scene's frame_provider. Per-scene Stage 2 override via the pencil icon on each scene card.",
           },
           React.createElement(Select, {
             value: defaultFrameProvider,

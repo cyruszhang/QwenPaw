@@ -23,6 +23,7 @@ import logging
 import shutil
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -68,20 +69,28 @@ def _provider_module(provider: str):
     return _PROVIDER_CACHE[provider]
 
 
+# qwen-image-2.0-pro currently routes through the 2-in-1 variant
+# which caps at 3 reference image inputs. We truncate, prioritizing
+# characters (hardest to recover from text) over scene_ref over style.
+_QWEN_MAX_REFS = 3
+
+
 async def _call_provider_edit(
     provider: str,
     *,
     prompt: str,
-    refs: list[str],
+    refs: "_SceneRefs",
     size: str,
     quality: str,
     keys: dict[str, str],
+    scene_id: str = "?",
 ):
     """Dispatch the multi-ref edit call to the per-scene image provider.
 
-    gpt-image-2 wants ``size`` in ``WIDTHxHEIGHT`` form and consumes a
-    ``quality`` knob ("high"/"low"). qwen-image wants ``WIDTH*HEIGHT``
-    and has no quality knob — qwen-image-2.0-pro is the highest tier.
+    Picks ref ordering per provider so the most important anchors
+    survive any model-side truncation:
+      - gpt-image-2 (16-ref cap): [style, scene_ref, *chars]
+      - qwen-image (3-ref cap): [*chars, scene_ref, style], truncated
     """
     mod = _provider_module(provider)
     if provider == "gpt-image-2":
@@ -91,7 +100,7 @@ async def _call_provider_edit(
                 "frame_provider=gpt-image-2 requires OPENAI_API_KEY",
             )
         return await mod.edit_image_gpt(
-            prompt=prompt, reference_images=refs,
+            prompt=prompt, reference_images=refs.gpt_order(),
             size=size, quality=quality, api_key=oa,
         )
     if provider == "qwen-image":
@@ -100,35 +109,64 @@ async def _call_provider_edit(
             raise RuntimeError(
                 "frame_provider=qwen-image requires DASHSCOPE_API_KEY",
             )
+        ordered = refs.qwen_order()
+        if len(ordered) > _QWEN_MAX_REFS:
+            dropped = ordered[_QWEN_MAX_REFS:]
+            logger.warning(
+                f"[scene {scene_id}] qwen-image: {len(ordered)} refs > "
+                f"{_QWEN_MAX_REFS} cap; keeping the first "
+                f"{_QWEN_MAX_REFS} (characters-first); dropping: "
+                f"{[Path(p).name for p in dropped]}",
+            )
+            ordered = ordered[:_QWEN_MAX_REFS]
         qsize = size.replace("x", "*") if size else ""
         return await mod.edit_image_qwen(
-            prompt=prompt, reference_images=refs,
+            prompt=prompt, reference_images=ordered,
             size=qsize, api_key=ds,
         )
     raise ValueError(f"unknown frame_provider {provider!r}")
 
 
-def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> list[str]:
-    """Return the list of reference-image paths for a scene, in the
-    order they should be passed to /v1/images/edits.
+@dataclass
+class _SceneRefs:
+    """Reference-image paths for one scene, grouped by anchor kind.
 
-    Order:
-      1. Style ref (most general, sets aesthetic)
-      2. Scene ref (sets environment)
-      3. Character refs (in order listed in scene.uses_characters)
+    The dispatcher reorders/truncates per provider:
+      - gpt-image-2 (16-ref cap): pass all in [style, scene_ref, *chars]
+        order — style first sets aesthetic strongest.
+      - qwen-image (3-ref cap): pass [*chars, scene_ref, style] order,
+        truncated to 3 — character identity is the hardest thing to
+        recover from text, so it gets the slots first.
+    """
 
-    Paths are returned as strings (the gpt-image2 tool accepts both
-    URLs and local paths).
+    style: list[str]      # 0 or 1 path
+    scene_ref: list[str]  # 0 or 1 path
+    characters: list[str] # 0..N paths
 
-    Missing refs (asset doesn't exist or hasn't been generated) are
+    def gpt_order(self) -> list[str]:
+        return [*self.style, *self.scene_ref, *self.characters]
+
+    def qwen_order(self) -> list[str]:
+        return [*self.characters, *self.scene_ref, *self.style]
+
+    def total(self) -> int:
+        return len(self.style) + len(self.scene_ref) + len(self.characters)
+
+
+def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> _SceneRefs:
+    """Resolve every reference-image path for a scene, grouped by kind.
+
+    Missing refs (asset doesn't exist or hasn't been generated yet) are
     skipped with a log warning — Stage 02 still runs but with fewer
     anchors.
     """
-    refs: list[str] = []
+    style: list[str] = []
+    scene_ref: list[str] = []
+    chars: list[str] = []
     assets = project_spec.assets
 
     if scene.uses_style and assets.style and assets.style.reference_image:
-        refs.append(str(assets.style.reference_image))
+        style.append(str(assets.style.reference_image))
     elif scene.uses_style:
         logger.warning(
             f"[scene {scene.scene_id}] uses_style=True but no style_ref",
@@ -137,7 +175,7 @@ def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> list[str]:
     if scene.uses_scene_ref:
         sref = assets.scene_refs.get(scene.uses_scene_ref)
         if sref and sref.reference_image:
-            refs.append(str(sref.reference_image))
+            scene_ref.append(str(sref.reference_image))
         else:
             logger.warning(
                 f"[scene {scene.scene_id}] uses_scene_ref="
@@ -147,13 +185,13 @@ def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> list[str]:
     for cid in scene.uses_characters:
         c = assets.characters.get(cid)
         if c and c.reference_image:
-            refs.append(str(c.reference_image))
+            chars.append(str(c.reference_image))
         else:
             logger.warning(
                 f"[scene {scene.scene_id}] uses_character={cid!r} but no "
                 f"reference_image",
             )
-    return refs
+    return _SceneRefs(style=style, scene_ref=scene_ref, characters=chars)
 
 
 def _compose_prompt(project_spec: ProjectSpec, scene) -> str:
@@ -345,7 +383,7 @@ async def run_stage_02_v15(
             continue
 
         refs = _resolve_refs_for_scene(project_spec, scene)
-        if not refs:
+        if refs.total() == 0:
             logger.error(
                 f"[scene {scene.scene_id}] no references available — "
                 f"Stage 0a/0b/0c must run first or scene must be standalone",
@@ -359,11 +397,10 @@ async def run_stage_02_v15(
         provider = getattr(scene, "frame_provider", None) or "gpt-image-2"
         logger.info(
             f"[stage 02 compose] scene={scene.scene_id}_{scene.name}  "
-            f"provider={provider}  refs={len(refs)}  "
-            f"prompt={len(prompt)} chars",
+            f"provider={provider}  refs={refs.total()} "
+            f"(style={len(refs.style)} scene_ref={len(refs.scene_ref)} "
+            f"chars={len(refs.characters)})  prompt={len(prompt)} chars",
         )
-        for i, r in enumerate(refs):
-            logger.debug(f"    ref[{i}] = {r}")
 
         t0 = time.time()
         try:
@@ -374,6 +411,7 @@ async def run_stage_02_v15(
                 size=size,
                 quality=quality,
                 keys=keys,
+                scene_id=scene.scene_id,
             )
         except Exception as e:  # noqa: BLE001
             logger.error(f"  ✗ scene {scene.scene_id} failed: {e}")
@@ -403,7 +441,7 @@ async def run_stage_02_v15(
             "path": str(target),
             "bytes": target.stat().st_size,
             "elapsed_s": round(elapsed, 1),
-            "refs_used": len(refs),
+            "refs_used": refs.total(),
             "provider": provider,
         })
         _try_emit(pid, "scene_done", stage="2",

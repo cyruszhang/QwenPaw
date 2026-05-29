@@ -25,11 +25,12 @@ sys.path.insert(0, str(_SKILL_DIR))
 
 from spec import ProjectSpec, SceneRefAsset  # noqa: E402
 
-# Re-use stage 0a's loader + parsers
+# Re-use stage 0a's loader + parsers + provider-routing infra.
 from pipeline.stage_00a_characters import (  # noqa: E402
     _block_text,
-    _load_gpt_image_tool,
+    _call_provider_gen,
     _parse_saved_path,
+    _resolve_frame_provider,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ async def run_stage_00b(
     project_spec: ProjectSpec,
     output_dir: Path,
     *,
-    api_key: str,
+    keys: dict[str, str],
     only_scene_ref: Optional[str] = None,
     overwrite: bool = False,
     size: str = "1792x1024",   # landscape default — gpt-image-2 native
@@ -57,6 +58,7 @@ async def run_stage_00b(
     """Generate reference images for every scene/environment.
 
     Mutates ``project_spec.assets.scene_refs[<id>].reference_image`` in place.
+    Picks the image provider from ``global_config.frame_provider``.
     """
     if not project_spec.assets.scene_refs:
         logger.info("[stage 0b] no scene_refs — skipping")
@@ -69,8 +71,8 @@ async def run_stage_00b(
     refs_dir = output_dir / "refs"
     refs_dir.mkdir(parents=True, exist_ok=True)
 
-    gpt = _load_gpt_image_tool()
-    report: dict = {"scene_refs": [], "stage": "0b"}
+    provider = _resolve_frame_provider(project_spec)
+    report: dict = {"scene_refs": [], "stage": "0b", "provider": provider}
 
     gc = project_spec.global_config or {}
     concurrency = max(1, min(8, int(gc.get("concurrency") or 3)))
@@ -94,16 +96,17 @@ async def run_stage_00b(
             target = refs_dir / f"scene_{sid}_ref.png"
             prompt = _ref_prompt(scene_ref, style_template)
             logger.info(
-                f"[stage 0b gen] scene_ref={sid}  "
+                f"[stage 0b gen] scene_ref={sid}  provider={provider}  "
                 f"prompt={len(prompt)} chars",
             )
             t0 = time.time()
             try:
-                resp = await gpt.generate_image_gpt(
+                resp = await _call_provider_gen(
+                    provider,
                     prompt=prompt,
                     size=size,
                     quality=quality,
-                    api_key=api_key,
+                    keys=keys,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.error(f"  ✗ {sid} failed: {e}")
@@ -141,7 +144,7 @@ async def run_stage_00b(
     n_skip = sum(1 for s in report["scene_refs"] if s.get("skipped"))
     n_err = sum(1 for s in report["scene_refs"] if "error" in s)
     logger.info(
-        f"[stage 0b] done — generated {n_ok}, skipped {n_skip}, "
-        f"failed {n_err} (concurrency={concurrency})",
+        f"[stage 0b] done via {provider} — generated {n_ok}, "
+        f"skipped {n_skip}, failed {n_err} (concurrency={concurrency})",
     )
     return report

@@ -1150,11 +1150,35 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         report: dict = {"stage": body.stage, "results": {}}
 
+        def _stage0_keys_and_validate() -> dict[str, str]:
+            """Build {openai, dashscope} keys dict for Stage 0 dispatch.
+
+            Stage 0a/0b/0c read ``global_config.frame_provider`` and
+            dispatch per-call. Only require the key for the provider
+            actually picked; that way a qwen-image project doesn't
+            need an OPENAI_API_KEY set, and vice versa.
+            """
+            gc = (draft.get("global_config") or {})
+            provider = str(gc.get("frame_provider") or "gpt-image-2")
+            oa = _resolve_openai_key()
+            ds = _resolve_dashscope_key()
+            if provider == "gpt-image-2" and not oa:
+                raise HTTPException(
+                    400,
+                    "OPENAI_API_KEY missing (required by gpt-image-2)",
+                )
+            if provider == "qwen-image" and not ds:
+                raise HTTPException(
+                    400,
+                    "DASHSCOPE_API_KEY missing (required by qwen-image)",
+                )
+            return {"openai": oa, "dashscope": ds}
+
         async def _run_0a():
             from pipeline.stage_00a_characters import run_stage_00a
             return await run_stage_00a(
                 spec, output_dir,
-                api_key=_resolve_openai_key(),
+                keys=_stage0_keys_and_validate(),
                 only_character=body.only_character,
                 overwrite=body.overwrite,
             )
@@ -1163,7 +1187,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             from pipeline.stage_00b_scenes import run_stage_00b
             return await run_stage_00b(
                 spec, output_dir,
-                api_key=_resolve_openai_key(),
+                keys=_stage0_keys_and_validate(),
                 only_scene_ref=body.only_scene_ref,
                 overwrite=body.overwrite,
             )
@@ -1172,7 +1196,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             from pipeline.stage_00c_style import run_stage_00c
             return await run_stage_00c(
                 spec, output_dir,
-                api_key=_resolve_openai_key(),
+                keys=_stage0_keys_and_validate(),
                 overwrite=body.overwrite,
             )
 
@@ -1271,8 +1295,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         try:
             if body.stage == "0":
-                if not _resolve_openai_key():
-                    raise HTTPException(400, "OPENAI_API_KEY missing")
+                # Key validation lives in _stage0_keys_and_validate(),
+                # called from each sub-stage — fails fast with the
+                # right error message based on the picked provider.
                 # Style first → characters next → settings last. The
                 # style ref anchors the aesthetic that 0a/0b's text
                 # prompts then reference, and Stage 02 picks it up as

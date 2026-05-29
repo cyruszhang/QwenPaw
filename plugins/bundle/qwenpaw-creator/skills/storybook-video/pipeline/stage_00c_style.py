@@ -36,8 +36,9 @@ from spec import ProjectSpec  # noqa: E402
 
 from pipeline.stage_00a_characters import (  # noqa: E402
     _block_text,
-    _load_gpt_image_tool,
+    _call_provider_gen,
     _parse_saved_path,
+    _resolve_frame_provider,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ async def run_stage_00c(
     project_spec: ProjectSpec,
     output_dir: Path,
     *,
-    api_key: str,
+    keys: dict[str, str],
     overwrite: bool = False,
     size: str = "1024x1024",
     quality: str = "high",
@@ -73,7 +74,8 @@ async def run_stage_00c(
     """Resolve the style reference image and write its path onto
     ``project_spec.assets.style.reference_image``.
 
-    Returns a report dict.
+    Returns a report dict. Picks the image provider from
+    ``global_config.frame_provider``.
     """
     style = project_spec.assets.style
     if not style:
@@ -111,13 +113,16 @@ async def run_stage_00c(
 
     prompt = style.positive_template.replace("{prompt}", _neutral_style_subject())
     prompt += "\n\nStyle reference for re-use. No text or letters."
-    logger.info(f"[stage 0c gen] style={style.catalog_id}  prompt={len(prompt)} chars")
+    provider = _resolve_frame_provider(project_spec)
+    logger.info(
+        f"[stage 0c gen] style={style.catalog_id}  provider={provider}  "
+        f"prompt={len(prompt)} chars",
+    )
     t0 = time.time()
 
-    gpt = _load_gpt_image_tool()
     try:
-        resp = await gpt.generate_image_gpt(
-            prompt=prompt, size=size, quality=quality, api_key=api_key,
+        resp = await _call_provider_gen(
+            provider, prompt=prompt, size=size, quality=quality, keys=keys,
         )
     except Exception as e:  # noqa: BLE001
         logger.error(f"[stage 0c] gen failed: {e}")
@@ -147,6 +152,7 @@ async def run_stage_00c(
         "stage": "0c",
         "source": "fresh_gen",
         "catalog_id": style.catalog_id,
+        "provider": provider,
         "path": str(target),
         "bytes": target.stat().st_size,
         "elapsed_s": round(elapsed, 1),

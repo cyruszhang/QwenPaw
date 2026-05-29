@@ -50,6 +50,79 @@ def _load_gpt_image_tool():
     )
 
 
+def _load_qwen_image_tool():
+    from tools_loader import load_tool_module  # type: ignore
+
+    return load_tool_module(
+        tool_id="qwen-image",
+        tool_file="qwen_image_tool.py",
+        module_name="qwen_image_tool",
+    )
+
+
+# Shared provider-routing infra for the ref-generation stages (0a/0b/0c).
+# Stage 02 has its own analogue for multi-ref edit; this one is for
+# single-image generation (no input refs).
+_PROVIDER_CACHE_GEN: dict[str, object] = {}
+
+
+def _provider_module_gen(provider: str):
+    if provider not in _PROVIDER_CACHE_GEN:
+        if provider == "gpt-image-2":
+            _PROVIDER_CACHE_GEN[provider] = _load_gpt_image_tool()
+        elif provider == "qwen-image":
+            _PROVIDER_CACHE_GEN[provider] = _load_qwen_image_tool()
+        else:
+            raise ValueError(
+                f"unknown frame_provider {provider!r}; expected one of "
+                f"'gpt-image-2', 'qwen-image'",
+            )
+    return _PROVIDER_CACHE_GEN[provider]
+
+
+async def _call_provider_gen(
+    provider: str,
+    *,
+    prompt: str,
+    size: str,
+    quality: str,
+    keys: dict[str, str],
+):
+    """Single-image generation dispatcher used by Stage 0a / 0b / 0c.
+
+    Picks the right tool function + key per provider. gpt-image-2 wants
+    ``WIDTHxHEIGHT`` and a ``quality`` knob; qwen-image wants
+    ``WIDTH*HEIGHT`` and has no quality tier.
+    """
+    mod = _provider_module_gen(provider)
+    if provider == "gpt-image-2":
+        oa = (keys.get("openai") or "").strip()
+        if not oa:
+            raise RuntimeError(
+                "frame_provider=gpt-image-2 requires OPENAI_API_KEY",
+            )
+        return await mod.generate_image_gpt(
+            prompt=prompt, size=size, quality=quality, api_key=oa,
+        )
+    if provider == "qwen-image":
+        ds = (keys.get("dashscope") or "").strip()
+        if not ds:
+            raise RuntimeError(
+                "frame_provider=qwen-image requires DASHSCOPE_API_KEY",
+            )
+        qsize = size.replace("x", "*") if size else ""
+        return await mod.generate_image_qwen(
+            prompt=prompt, size=qsize, api_key=ds,
+        )
+    raise ValueError(f"unknown frame_provider {provider!r}")
+
+
+def _resolve_frame_provider(project_spec) -> str:
+    """Resolve the project's frame_provider, defaulting to gpt-image-2."""
+    gc = project_spec.global_config or {}
+    return str(gc.get("frame_provider") or "gpt-image-2")
+
+
 def _block_text(block) -> str:
     if isinstance(block, dict):
         return block.get("text", "")
@@ -85,7 +158,7 @@ async def run_stage_00a(
     project_spec: ProjectSpec,
     output_dir: Path,
     *,
-    api_key: str,
+    keys: dict[str, str],
     only_character: Optional[str] = None,
     overwrite: bool = False,
     size: str = "1024x1024",
@@ -95,6 +168,10 @@ async def run_stage_00a(
 
     Mutates ``project_spec.assets.characters[<id>].reference_image`` in
     place to point at the saved path. Returns a report dict.
+
+    Picks the image provider from ``global_config.frame_provider``
+    (default ``gpt-image-2``). ``keys`` must contain whichever key
+    that provider needs — caller is responsible for that check.
     """
     if not project_spec.assets.characters:
         logger.info("[stage 0a] no characters in project — skipping")
@@ -107,8 +184,8 @@ async def run_stage_00a(
     refs_dir = output_dir / "refs"
     refs_dir.mkdir(parents=True, exist_ok=True)
 
-    gpt = _load_gpt_image_tool()
-    report: dict = {"characters": [], "stage": "0a"}
+    provider = _resolve_frame_provider(project_spec)
+    report: dict = {"characters": [], "stage": "0a", "provider": provider}
 
     # Walk characters once: drain cached/excluded into the report
     # directly, queue the rest for parallel generation. Concurrency
@@ -135,16 +212,17 @@ async def run_stage_00a(
             target = refs_dir / f"{cid}_ref.png"
             prompt = _ref_prompt(character, style_template)
             logger.info(
-                f"[stage 0a gen] character={cid}  "
+                f"[stage 0a gen] character={cid}  provider={provider}  "
                 f"prompt={len(prompt)} chars",
             )
             t0 = time.time()
             try:
-                resp = await gpt.generate_image_gpt(
+                resp = await _call_provider_gen(
+                    provider,
                     prompt=prompt,
                     size=size,
                     quality=quality,
-                    api_key=api_key,
+                    keys=keys,
                 )
             except Exception as e:  # noqa: BLE001
                 logger.error(f"  ✗ {cid} failed: {e}")
@@ -184,7 +262,7 @@ async def run_stage_00a(
     n_skip = sum(1 for c in report["characters"] if c.get("skipped"))
     n_err = sum(1 for c in report["characters"] if "error" in c)
     logger.info(
-        f"[stage 0a] done — generated {n_ok}, skipped {n_skip}, "
-        f"failed {n_err} (concurrency={concurrency})",
+        f"[stage 0a] done via {provider} — generated {n_ok}, "
+        f"skipped {n_skip}, failed {n_err} (concurrency={concurrency})",
     )
     return report
