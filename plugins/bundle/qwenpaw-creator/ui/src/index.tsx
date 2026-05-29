@@ -1215,6 +1215,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           forecast,
           status,
           onRunStage,
+          onRunStageAllParallel,
           onSaveDraft,
           onReload: reload,
           onAddAnchor: (kind: "character" | "scene_ref") =>
@@ -2367,6 +2368,7 @@ function DraftPanel({
   forecast,
   status,
   onRunStage,
+  onRunStageAllParallel,
   onSaveDraft,
   onReload,
   onAddAnchor,
