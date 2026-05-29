@@ -583,6 +583,11 @@ function NewProjectPane({ styles, status, onCreated }: any) {
   const [title, setTitle] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [file, setFile] = React.useState<File | null>(null);
+  // Model picks chosen at the source step. Persisted to project meta
+  // on save → ProjectPane hydrates Decompose form state from there →
+  // Stage 00 writes the choice to global_config and every scene.
+  const [frameProvider, setFrameProvider] = React.useState("gpt-image-2");
+  const [videoProvider, setVideoProvider] = React.useState("wan27");
 
   const onPasteSubmit = async () => {
     if (text.trim().length < 30) {
@@ -594,6 +599,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
       const r = await apiJson("POST", "/creator/sources/text", {
         text,
         title: title || undefined,
+        frame_provider: frameProvider,
+        video_provider: videoProvider,
       });
       antMessage.success(`Project created: ${r.project_id}`);
       onCreated(r.project_id);
@@ -613,6 +620,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
     try {
       const r = await apiUpload("/creator/sources/upload", file, {
         ...(title ? { title } : {}),
+        frame_provider: frameProvider,
+        video_provider: videoProvider,
       });
       antMessage.success(`Project created: ${r.project_id}`);
       onCreated(r.project_id);
@@ -676,6 +685,41 @@ function NewProjectPane({ styles, status, onCreated }: any) {
           value: title,
           onChange: (e: any) => setTitle(e.target.value),
         }),
+      ),
+      React.createElement(Row, { gutter: 16 },
+        React.createElement(Col, { span: 12 },
+          React.createElement(Form.Item, {
+            label: "Frame model (Stage 2)",
+            extra: "gpt-image-2: strong identity, ~$0.20-0.30 / frame. qwen-image: ~5× cheaper, weaker identity. Saved with the project; per-scene override available later.",
+          },
+            React.createElement(Select, {
+              value: frameProvider,
+              onChange: setFrameProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, expensive" },
+                { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
+              ],
+            }),
+          ),
+        ),
+        React.createElement(Col, { span: 12 },
+          React.createElement(Form.Item, {
+            label: "Video model (Stage 3)",
+            extra: "Wan 2.7 includes ambient audio. HappyHorse / Seedance are silent (narration mixed in Stage 4). Per-scene override available later.",
+          },
+            React.createElement(Select, {
+              value: videoProvider,
+              onChange: setVideoProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "wan27", label: "🎬 Wan 2.7" },
+                { value: "happyhorse", label: "🐎 HappyHorse 1.0 — faster + cheaper" },
+                { value: "seedance", label: "🌱 Doubao Seedance 2.0" },
+              ],
+            }),
+          ),
+        ),
       ),
       tab === "paste"
         ? React.createElement(Form.Item, { label: "Story / script / prompt", required: true },
@@ -765,9 +809,10 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   const [storyAnchor, setStoryAnchor] = React.useState("");
   const [styleDirectives, setStyleDirectives] = React.useState("");
   const [worldBible, setWorldBible] = React.useState("");
-  // Per-project model picks — chosen at decompose time and propagated
-  // to every scene by Stage 00. Per-scene override stays available in
-  // the SceneEditModal.
+  // Per-project model picks — initially chosen at the Source step and
+  // persisted to meta.json. Hydrated from project.meta below so a
+  // re-decompose or per-stage rerun uses the saved choice without the
+  // user re-picking. Per-scene override stays in SceneEditModal.
   const [frameProvider, setFrameProvider] = React.useState("gpt-image-2");
   const [videoProvider, setVideoProvider] = React.useState("wan27");
 
@@ -797,6 +842,20 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   React.useEffect(() => {
     reload();
   }, [reload]);
+
+  // Hydrate model picks from meta whenever the project changes.
+  // The source step writes them to meta.json; this seeds the local
+  // state so downstream decompose / per-stage runs reuse the choice.
+  // Also seed from global_config (post-decompose) so re-opens after a
+  // decompose pick up the value even if meta predates the feature.
+  React.useEffect(() => {
+    const meta = (project as any)?.meta || {};
+    const gc = (project as any)?.draft?.global_config || {};
+    const fp = meta.frame_provider || gc.frame_provider;
+    const vp = meta.video_provider || gc.video_provider;
+    if (fp) setFrameProvider(fp);
+    if (vp) setVideoProvider(vp);
+  }, [project]);
 
   // Open an SSE stream for live progress events from the pipeline.
   React.useEffect(() => {

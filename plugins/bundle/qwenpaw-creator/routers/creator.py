@@ -220,6 +220,11 @@ class TextSourceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(..., min_length=1, max_length=200_000)
     title: Optional[str] = None
+    # Project-level model picks chosen at the source step. Persisted to
+    # meta.json so ProjectPane can hydrate the Decompose form state and
+    # propagate the choice through to every scene at decompose time.
+    frame_provider: Optional[str] = None
+    video_provider: Optional[str] = None
 
 
 class DecomposeRequest(BaseModel):
@@ -763,12 +768,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         proj = project_dir(pid, create=True)
         text = body.text
         (proj / "source.txt").write_text(text, encoding="utf-8")
-        _write_meta(pid, {
+        meta_extra: dict = {
             "title": title_str,
             "created_at": _now_iso(),
             "source_origin": "paste",
             "source_ext": ".txt",
-        })
+        }
+        if body.frame_provider:
+            meta_extra["frame_provider"] = body.frame_provider
+        if body.video_provider:
+            meta_extra["video_provider"] = body.video_provider
+        _write_meta(pid, meta_extra)
         preview = text.strip().splitlines()[:6]
         return {
             "project_id": pid,
@@ -783,6 +793,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         file: UploadFile = File(...),
         title: Optional[str] = Form(None),
         project_id: Optional[str] = Form(None),
+        frame_provider: Optional[str] = Form(None),
+        video_provider: Optional[str] = Form(None),
     ) -> dict:
         """Save an uploaded file (.txt/.md/.pdf/.docx) as a new project."""
         ext = Path(file.filename or "upload.txt").suffix.lower() or ".txt"
@@ -808,12 +820,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 400, f"failed to extract text from {ext}: {exc}",
             ) from exc
         (proj / "source.txt").write_text(text, encoding="utf-8")
-        _write_meta(pid, {
+        meta_extra = {
             "title": title_str,
             "created_at": _now_iso(),
             "source_origin": "upload",
             "source_ext": ext,
-        })
+        }
+        if frame_provider:
+            meta_extra["frame_provider"] = frame_provider
+        if video_provider:
+            meta_extra["video_provider"] = video_provider
+        _write_meta(pid, meta_extra)
         preview = text.strip().splitlines()[:6]
         return {
             "project_id": pid,
