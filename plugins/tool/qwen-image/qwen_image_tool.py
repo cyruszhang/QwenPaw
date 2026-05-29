@@ -529,6 +529,7 @@ async def edit_image_qwen(
     prompt_extend: bool = True,
     seed: int | None = None,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> ToolResponse:
     """Edit or fuse images using Qwen-Image models.
 
@@ -570,6 +571,11 @@ async def edit_image_qwen(
             Explicit DashScope API key. When provided, bypasses the
             agent-context configuration lookup. When omitted, the
             agent-context-driven config flow is used.
+        model (str, optional):
+            Per-call model override. When provided + valid, overrides
+            whatever the resolved config / default would have picked.
+            Use this when the call's ref-count needs a multi-image
+            variant (e.g. ``qwen-image-edit-plus`` for ≥3 refs).
 
     Returns:
         ToolResponse: Contains edited images and metadata.
@@ -605,7 +611,14 @@ async def edit_image_qwen(
                     ),
                 ],
             )
+        # Capture the per-call model override before the tuple-unpack
+        # below shadows it. Used by callers (e.g. the qwenpaw-creator
+        # bundle) to force qwen-image-edit-plus for multi-image fusion
+        # when the resolved config defaults to a 2-in-1 alias.
+        _model_override = model
         api_key, endpoint, timeout, model = resolved
+        if _model_override and _model_override.strip():
+            model = _model_override.strip()
         if not api_key:
             return ToolResponse(
                 content=[

@@ -69,10 +69,15 @@ def _provider_module(provider: str):
     return _PROVIDER_CACHE[provider]
 
 
-# qwen-image-2.0-pro currently routes through the 2-in-1 variant
-# which caps at 3 reference image inputs. We truncate, prioritizing
-# characters (hardest to recover from text) over scene_ref over style.
-_QWEN_MAX_REFS = 3
+# Stage 2 composition is multi-image fusion — always route qwen-image
+# calls through `qwen-image-edit-plus`, the multi-image-fusion variant
+# (the default `qwen-image-2.0-pro` alias maps server-side to a
+# 2-in-1 cluster that caps at 3 inputs).
+_QWEN_EDIT_MODEL = "qwen-image-edit-plus"
+# edit-plus accepts more inputs than 2-in-1; we cap at 6 as a safe
+# upper bound. If the model returns "Too many input items" at this
+# limit, lower the constant — the warning surfaces what got dropped.
+_QWEN_MAX_REFS = 6
 
 
 async def _call_provider_edit(
@@ -123,6 +128,7 @@ async def _call_provider_edit(
         return await mod.edit_image_qwen(
             prompt=prompt, reference_images=ordered,
             size=qsize, api_key=ds,
+            model=_QWEN_EDIT_MODEL,
         )
     raise ValueError(f"unknown frame_provider {provider!r}")
 
