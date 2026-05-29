@@ -2599,29 +2599,56 @@ function DraftPanel({
       costUsd: forecast?.stage_0_usd,
       open: openStage === "stage-0",
       onToggle: toggleStage,
-      extra: React.createElement(
-        Space, null,
-        React.createElement(Button, {
-          type: "primary",
-          loading: busy && activeStage?.startsWith("0"),
-          disabled: !status?.has_openai,
-          onClick: () => onRunStage("0"),
-          children: "Run Stage 0 (all)",
-        }),
-        React.createElement(Button, {
-          size: "small",
-          icon: React.createElement(ReloadOutlined),
-          onClick: onReload,
-        }),
-      ),
+      extra: (() => {
+        // Stage 0 now respects frame_provider too (route through
+        // gpt-image-2 OR qwen-image). Disable on whichever key is
+        // missing for the picked provider.
+        const fp = (draft.global_config || {}).frame_provider
+          || "gpt-image-2";
+        const keyMissing = fp === "qwen-image"
+          ? !status?.has_dashscope
+          : !status?.has_openai;
+        const missingLabel = fp === "qwen-image"
+          ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
+          : "OPENAI_API_KEY missing — set it in Environment Variables";
+        return React.createElement(
+          Space, null,
+          React.createElement(
+            Tooltip,
+            { title: keyMissing ? missingLabel : "" },
+            React.createElement(Button, {
+              type: "primary",
+              loading: busy && activeStage?.startsWith("0"),
+              disabled: keyMissing,
+              onClick: () => onRunStage("0"),
+              children: "Run Stage 0 (all)",
+            }),
+          ),
+          React.createElement(Button, {
+            size: "small",
+            icon: React.createElement(ReloadOutlined),
+            onClick: onReload,
+          }),
+        );
+      })(),
     },
-      !status?.has_openai
-        ? React.createElement(Alert, {
-            type: "warning",
-            message: "OPENAI_API_KEY missing — needed for gpt-image-2.",
-            showIcon: true, style: { marginBottom: 12 },
-          })
-        : null,
+      (() => {
+        const fp = (draft.global_config || {}).frame_provider
+          || "gpt-image-2";
+        const keyMissing = fp === "qwen-image"
+          ? !status?.has_dashscope
+          : !status?.has_openai;
+        const needLabel = fp === "qwen-image"
+          ? "DASHSCOPE_API_KEY missing — needed for qwen-image."
+          : "OPENAI_API_KEY missing — needed for gpt-image-2.";
+        return keyMissing
+          ? React.createElement(Alert, {
+              type: "warning",
+              message: needLabel,
+              showIcon: true, style: { marginBottom: 12 },
+            })
+          : null;
+      })(),
       React.createElement(RefGallery, {
         pid, draft, projStatus, busy, activeStage,
         onRunPiece: (kind: string, id: string) =>
@@ -2673,13 +2700,32 @@ function DraftPanel({
       costUsd: forecast?.stage_2_usd,
       open: openStage === "stage-2",
       onToggle: toggleStage,
-      extra: React.createElement(Button, {
-        type: "primary",
-        loading: busy && activeStage === "2",
-        disabled: !status?.has_openai,
-        onClick: () => onRunStageAllParallel("2", false),
-        children: `Run Stage 2 (×${Math.max(1, Math.min(5, Number((draft.global_config || {}).concurrency) || 5))})`,
-      }),
+      extra: (() => {
+        // Disable the button when the key for the project's actual
+        // frame_provider is missing — used to hardcode has_openai
+        // which silently disabled the button for qwen-image projects.
+        const fp = (draft.global_config || {}).frame_provider
+          || "gpt-image-2";
+        const keyMissing = fp === "qwen-image"
+          ? !status?.has_dashscope
+          : !status?.has_openai;
+        const missingLabel = fp === "qwen-image"
+          ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
+          : "OPENAI_API_KEY missing — set it in Environment Variables";
+        const conc = Math.max(1, Math.min(5,
+          Number((draft.global_config || {}).concurrency) || 5));
+        return React.createElement(
+          Tooltip,
+          { title: keyMissing ? missingLabel : "" },
+          React.createElement(Button, {
+            type: "primary",
+            loading: busy && activeStage === "2",
+            disabled: keyMissing,
+            onClick: () => onRunStageAllParallel("2", false),
+            children: `Run Stage 2 (×${conc})`,
+          }),
+        );
+      })(),
     },
       React.createElement(FrameGallery, {
         pid, draft, projStatus, busy, activeStage,
