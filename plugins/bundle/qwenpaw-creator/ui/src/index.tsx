@@ -300,11 +300,22 @@ interface CostForecast {
 
 // ── helpers ──────────────────────────────────────────────────────────
 
-function refUrl(pid: string, name: string): string {
-  // Cache-bust on each refresh so freshly-generated refs replace the
-  // image instead of being served stale.
-  const t = Date.now();
-  return getApiUrl(`/creator/projects/${pid}/refs/${name}?t=${t}`);
+function refUrl(
+  pid: string,
+  name: string,
+  version: string | number = "",
+): string {
+  // Cache-bust ONLY when the underlying file changes — pass the file's
+  // `size` (from /status) as the version. Was previously `?t=Date.now()`
+  // on every call, which made every render of every gallery re-fetch
+  // every thumbnail; for 8+ scenes that saturated Chrome's 6-connection
+  // -per-origin limit, causing /stage POSTs to stall waiting for a slot.
+  // Stable version → browser caches the asset → connection pool stays
+  // available for the real RPCs.
+  const v = version === "" || version == null
+    ? ""
+    : `?v=${encodeURIComponent(String(version))}`;
+  return getApiUrl(`/creator/projects/${pid}/refs/${name}${v}`);
 }
 
 function yamlPreview(draft: any): string {
@@ -3499,7 +3510,10 @@ function RefGallery({
         },
         exists
           ? React.createElement(Image, {
-              src: refUrl(pid, it.refName),
+              src: refUrl(
+                pid, it.refName,
+                refsByName.get(it.refName)?.size,
+              ),
               style: { width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 4 },
               fallback: "",
             })
@@ -3818,7 +3832,10 @@ function FrameGallery({
           },
           exists
             ? React.createElement(Image, {
-                src: refUrl(pid, refName),
+                src: refUrl(
+                  pid, refName,
+                  framesByName.get(refName)?.size,
+                ),
                 style: { width: "100%", maxHeight: 360, objectFit: "cover", borderRadius: 4 },
                 fallback: "",
               })
@@ -3916,7 +3933,7 @@ function AudioGallery({ pid, draft, projStatus, busy, activeStage }: any) {
           exists
             ? React.createElement("audio", {
                 controls: true,
-                src: refUrl(pid, name),
+                src: refUrl(pid, name, audioByName.get(name)?.size),
                 style: { width: "100%" },
               })
             : React.createElement(
@@ -4010,7 +4027,9 @@ function ShotGallery({
           },
           exists
             ? React.createElement("video", {
-                src: refUrl(pid, refName),
+                src: refUrl(
+                  pid, refName, shotsByName.get(refName)?.size,
+                ),
                 controls: true,
                 preload: "metadata",
                 style: { width: "100%", maxHeight: 360, borderRadius: 4, background: "#000" },
@@ -4102,7 +4121,7 @@ function FinalGallery({ pid, draft, projStatus, busy, activeStage }: any) {
           style: { marginBottom: 8 },
         },
         React.createElement("video", {
-          src: refUrl(pid, f.name),
+          src: refUrl(pid, f.name, f.size),
           controls: true,
           preload: "metadata",
           style: { width: "100%", maxHeight: 480, borderRadius: 4, background: "#000" },
@@ -4111,7 +4130,7 @@ function FinalGallery({ pid, draft, projStatus, busy, activeStage }: any) {
           AntText,
           { type: "secondary", style: { fontSize: 11, display: "block", marginTop: 4 } },
           React.createElement("a", {
-            href: refUrl(pid, f.name),
+            href: refUrl(pid, f.name, f.size),
             download: f.name,
           }, "Download"),
         ),
