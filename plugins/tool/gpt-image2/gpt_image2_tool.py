@@ -21,6 +21,7 @@ def _resolve_tool_config(
     tool_name: str,
     api_key_override: Optional[str],
     default_endpoint: str,
+    default_timeout: float = 480.0,
 ) -> tuple[str, str, float] | None:
     """Resolve (api_key, endpoint, timeout), preferring an explicit override.
 
@@ -28,9 +29,13 @@ def _resolve_tool_config(
     when ``api_key_override`` is provided, bypass the agent-context
     ``get_tool_config`` lookup so the tool is callable from standalone
     scripts (benchmarks, CLIs) without an active agent.
+
+    ``default_timeout`` lets callers pick a different floor — the
+    DashScope eval-cluster path needs more headroom (broker queue +
+    model gen + OSS fetch) than OpenAI-direct.
     """
     if api_key_override and api_key_override.strip():
-        return api_key_override.strip(), default_endpoint, 480.0
+        return api_key_override.strip(), default_endpoint, default_timeout
 
     tool_config = get_tool_config(tool_name)
     if not tool_config:
@@ -38,7 +43,11 @@ def _resolve_tool_config(
     api_key = tool_config.get("api_key", "")
     endpoint = tool_config.get("endpoint") or default_endpoint
     timeout_raw = tool_config.get("timeout")
-    timeout = float(timeout_raw) if timeout_raw and float(timeout_raw) > 0 else 480.0
+    timeout = (
+        float(timeout_raw)
+        if timeout_raw and float(timeout_raw) > 0
+        else default_timeout
+    )
     return api_key, endpoint, timeout
 
 
@@ -522,6 +531,10 @@ _EVAL_ENDPOINT = (
     "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 )
 _EVAL_MODEL = "azure.gpt-image-2"
+# Higher than OpenAI-direct's 480s: the broker queues + proxies + the
+# OSS fetch at the end add ~30-90s on top of model gen, and multi-ref
+# edits on 5 large data URIs can sit in queue longer under load.
+_EVAL_DEFAULT_TIMEOUT = 900.0
 
 
 def _to_url_or_data_uri(image_path: str) -> str:
@@ -656,6 +669,7 @@ async def generate_image_gpt_eval(
         resolved = _resolve_tool_config(
             "generate_image_gpt_eval", api_key,
             default_endpoint=_EVAL_ENDPOINT,
+            default_timeout=_EVAL_DEFAULT_TIMEOUT,
         )
         if resolved is None:
             return ToolResponse(content=[TextBlock(
@@ -720,6 +734,7 @@ async def edit_image_gpt_eval(
         resolved = _resolve_tool_config(
             "edit_image_gpt_eval", api_key,
             default_endpoint=_EVAL_ENDPOINT,
+            default_timeout=_EVAL_DEFAULT_TIMEOUT,
         )
         if resolved is None:
             return ToolResponse(content=[TextBlock(
