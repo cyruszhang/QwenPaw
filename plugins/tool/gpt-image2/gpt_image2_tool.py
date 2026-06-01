@@ -18,6 +18,30 @@ from qwenpaw.plugins import get_tool_config
 logger = logging.getLogger(__name__)
 
 
+def _flush_logs() -> None:
+    """Force-flush all of the root logger's FileHandlers.
+
+    Python's FileHandler is block-buffered by default, so a single
+    ``logger.info()`` mid-call doesn't appear in the log file until
+    a few more writes accumulate or the call completes. For long-
+    running eval-cluster requests (3-10 min) that buffering hides
+    progress and makes debugging awful — explicitly flushing after
+    key log lines surfaces them in real time.
+    """
+    for h in logging.getLogger().handlers:
+        try:
+            h.flush()
+        except Exception:  # noqa: BLE001
+            pass
+    # Also flush this module's own logger's handlers (if any are
+    # configured separately from the root).
+    for h in logger.handlers:
+        try:
+            h.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _resolve_tool_config(
     tool_name: str,
     api_key_override: Optional[str],
@@ -663,6 +687,12 @@ async def _eval_call_and_save(
 
     for attempt in range(1, attempts + 1):
         t_attempt_start = time.time()
+        logger.info(
+            f"[eval] attempt {attempt}/{attempts} starting "
+            f"(read-timeout={timeout}s, model={payload.get('model')}, "
+            f"image_refs={len(payload.get('image') or [])})",
+        )
+        _flush_logs()
         try:
             body, first_byte_at = await _eval_post_once(
                 payload=payload, api_key=api_key,
@@ -674,6 +704,7 @@ async def _eval_call_and_save(
                 f"[eval] attempt {attempt}/{attempts} OK — "
                 f"ttfb={ttfb:.1f}s total={elapsed:.1f}s",
             )
+            _flush_logs()
             break
         except httpx.TimeoutException as exc:
             elapsed = time.time() - t_attempt_start
@@ -683,13 +714,16 @@ async def _eval_call_and_save(
                 f"{elapsed:.0f}s (read-timeout={timeout}s); "
                 + ("retrying..." if attempt < attempts else "giving up"),
             )
+            _flush_logs()
         except _EvalNon200Error as exc:
             logger.error(f"[eval] non-200: {exc}")
+            _flush_logs()
             return ToolResponse(content=[TextBlock(
                 type="text", text=f"Error: {exc}",
             )])
         except RuntimeError as exc:
             logger.error(f"[eval] stream error: {exc}")
+            _flush_logs()
             return ToolResponse(content=[TextBlock(
                 type="text", text=f"Error: {exc}",
             )])
@@ -815,6 +849,7 @@ async def generate_image_gpt_eval(
         logger.info(
             f"Generating image via eval cluster: size={size}, n={n}",
         )
+        _flush_logs()
         return await _eval_call_and_save(
             payload=payload, api_key=api_key, timeout=timeout,
             file_prefix="gpt_image2_eval",
@@ -895,6 +930,7 @@ async def edit_image_gpt_eval(
             f"Editing image via eval cluster: {len(reference_images)} "
             f"refs, size={size}",
         )
+        _flush_logs()
         return await _eval_call_and_save(
             payload=payload, api_key=api_key, timeout=timeout,
             file_prefix="gpt_image2_eval_edit",
