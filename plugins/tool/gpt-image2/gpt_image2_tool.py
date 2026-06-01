@@ -3,6 +3,7 @@
 """GPT Image 2 image generation tool."""
 
 import base64
+import json
 import logging
 import time
 from pathlib import Path
@@ -531,10 +532,14 @@ _EVAL_ENDPOINT = (
     "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 )
 _EVAL_MODEL = "azure.gpt-image-2"
-# Higher than OpenAI-direct's 480s: the broker queues + proxies + the
-# OSS fetch at the end add ~30-90s on top of model gen, and multi-ref
-# edits on 5 large data URIs can sit in queue longer under load.
-_EVAL_DEFAULT_TIMEOUT = 900.0
+# We call the eval endpoint with `stream: true` (SSE) so the timeout
+# below is the MAX SECONDS BETWEEN BYTES from the server, not a total
+# wall-clock ceiling. A stalled broker fails within this many seconds;
+# a slow-but-progressing gen keeps the connection warm and is allowed
+# to take as long as it needs. 120s is generous — Aliyun normally
+# emits its first packet within a few seconds of POST, and the broker
+# sends keepalives during long gens.
+_EVAL_DEFAULT_TIMEOUT = 120.0
 
 
 def _to_url_or_data_uri(image_path: str) -> str:
@@ -572,23 +577,77 @@ async def _eval_call_and_save(
     timeout: float,
     file_prefix: str,
 ) -> ToolResponse:
-    """POST to the eval endpoint and download the returned image."""
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            _EVAL_ENDPOINT,
+    """POST to the eval endpoint (streaming) and download the returned image.
+
+    Uses ``stream: true`` SSE: the broker holds the HTTP connection
+    open until the model finishes, but emits server-sent events as
+    activity. We configure httpx with a per-chunk read timeout instead
+    of a total-wait ceiling — so a true silence stall fails fast (~60s
+    without bytes) while a slow-but-progressing gen never hits a wall.
+
+    ``timeout`` is interpreted as the per-chunk read timeout (gap
+    between bytes from the server). Connect timeout is fixed at 30s.
+    There is no total-wall-clock ceiling — if the server keeps the
+    connection warm we wait as long as it takes.
+    """
+    payload = {**payload, "stream": True}
+    httpx_timeout = httpx.Timeout(
+        connect=30.0,
+        read=timeout,
+        write=60.0,
+        pool=30.0,
+    )
+
+    body: Optional[dict] = None
+    async with httpx.AsyncClient(timeout=httpx_timeout) as client:
+        async with client.stream(
+            "POST", _EVAL_ENDPOINT,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "Accept": "text/event-stream",
             },
             json=payload,
-        )
-    if resp.status_code != 200:
-        snippet = resp.text[:600]
-        msg = f"DashScope eval API error: {resp.status_code} - {snippet}"
-        logger.error(msg)
-        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {msg}")])
+        ) as resp:
+            if resp.status_code != 200:
+                # Need to drain to read the error body when streaming.
+                err_body = await resp.aread()
+                snippet = err_body.decode("utf-8", "replace")[:600]
+                msg = (
+                    f"DashScope eval API error: {resp.status_code} - "
+                    f"{snippet}"
+                )
+                logger.error(msg)
+                return ToolResponse(content=[
+                    TextBlock(type="text", text=f"Error: {msg}"),
+                ])
 
-    body = resp.json()
+            # Parse SSE lines. For gpt-image-2 the broker emits one
+            # `data: {full-json}` chunk at completion (no progressive
+            # frames). httpx's per-chunk read timeout keeps watch
+            # between bytes — a silent broker stall trips the timeout
+            # within `read` seconds, while a slow-but-progressing gen
+            # never hits a wall.
+            async for line in resp.aiter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                payload_text = line[5:].strip()
+                if not payload_text or payload_text == "[DONE]":
+                    continue
+                try:
+                    body = json.loads(payload_text)
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"SSE chunk not JSON ({e}): {payload_text[:200]}",
+                    )
+                    continue
+
+    if body is None:
+        return ToolResponse(content=[TextBlock(
+            type="text",
+            text="Error: eval stream ended without a data event.",
+        )])
+
     data_list = body.get("data") or []
     if not data_list:
         return ToolResponse(content=[TextBlock(
