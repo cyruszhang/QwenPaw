@@ -532,14 +532,19 @@ _EVAL_ENDPOINT = (
     "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 )
 _EVAL_MODEL = "azure.gpt-image-2"
-# We call the eval endpoint with `stream: true` (SSE) so the timeout
-# below is the MAX SECONDS BETWEEN BYTES from the server, not a total
-# wall-clock ceiling. A stalled broker fails within this many seconds;
-# a slow-but-progressing gen keeps the connection warm and is allowed
-# to take as long as it needs. 120s is generous — Aliyun normally
-# emits its first packet within a few seconds of POST, and the broker
-# sends keepalives during long gens.
-_EVAL_DEFAULT_TIMEOUT = 120.0
+# `stream: true` on this endpoint changes the RESPONSE FORMAT (SSE
+# `data: {...}` lines) but does NOT make gpt-image-2 emit progress
+# chunks — the upstream model holds the connection silent until the
+# final image is ready, and the broker passes that silence through.
+# So this is effectively a "max silent wait" knob, same as a blocking
+# POST's read timeout. 600s = 10 min, covers normal slow gens
+# (multi-ref edits routinely 3-5 min); failures above that are likely
+# true stalls or upstream quota issues worth investigating.
+_EVAL_DEFAULT_TIMEOUT = 600.0
+# How many times to retry on a connection-level timeout. The broker
+# does intermittently stall; one retry catches most flakes without
+# pretending we have a real reconnect protocol.
+_EVAL_RETRY_ON_TIMEOUT = 1
 
 
 def _to_url_or_data_uri(image_path: str) -> str:
@@ -570,35 +575,28 @@ def _to_url_or_data_uri(image_path: str) -> str:
     return f"data:{mime};base64,{data}"
 
 
-async def _eval_call_and_save(
+class _EvalNon200Error(RuntimeError):
+    """Non-200 response from the eval cluster — surface to caller
+    without retry. ``str(self)`` is the user-visible message."""
+
+
+async def _eval_post_once(
     *,
     payload: dict,
     api_key: str,
-    timeout: float,
-    file_prefix: str,
-) -> ToolResponse:
-    """POST to the eval endpoint (streaming) and download the returned image.
+    httpx_timeout: httpx.Timeout,
+) -> tuple[dict, float]:
+    """One streaming POST attempt. Returns (body_dict, ttfb_seconds).
 
-    Uses ``stream: true`` SSE: the broker holds the HTTP connection
-    open until the model finishes, but emits server-sent events as
-    activity. We configure httpx with a per-chunk read timeout instead
-    of a total-wait ceiling — so a true silence stall fails fast (~60s
-    without bytes) while a slow-but-progressing gen never hits a wall.
-
-    ``timeout`` is interpreted as the per-chunk read timeout (gap
-    between bytes from the server). Connect timeout is fixed at 30s.
-    There is no total-wall-clock ceiling — if the server keeps the
-    connection warm we wait as long as it takes.
+    Raises:
+      - httpx.TimeoutException: caller should retry per policy.
+      - _EvalNon200Error: non-2xx response; caller surfaces the message.
+      - RuntimeError: stream ended without a parseable data chunk.
     """
-    payload = {**payload, "stream": True}
-    httpx_timeout = httpx.Timeout(
-        connect=30.0,
-        read=timeout,
-        write=60.0,
-        pool=30.0,
-    )
-
+    t_start = time.time()
+    first_byte_at: Optional[float] = None
     body: Optional[dict] = None
+
     async with httpx.AsyncClient(timeout=httpx_timeout) as client:
         async with client.stream(
             "POST", _EVAL_ENDPOINT,
@@ -610,25 +608,16 @@ async def _eval_call_and_save(
             json=payload,
         ) as resp:
             if resp.status_code != 200:
-                # Need to drain to read the error body when streaming.
                 err_body = await resp.aread()
                 snippet = err_body.decode("utf-8", "replace")[:600]
-                msg = (
+                raise _EvalNon200Error(
                     f"DashScope eval API error: {resp.status_code} - "
-                    f"{snippet}"
+                    f"{snippet}",
                 )
-                logger.error(msg)
-                return ToolResponse(content=[
-                    TextBlock(type="text", text=f"Error: {msg}"),
-                ])
 
-            # Parse SSE lines. For gpt-image-2 the broker emits one
-            # `data: {full-json}` chunk at completion (no progressive
-            # frames). httpx's per-chunk read timeout keeps watch
-            # between bytes — a silent broker stall trips the timeout
-            # within `read` seconds, while a slow-but-progressing gen
-            # never hits a wall.
             async for line in resp.aiter_lines():
+                if first_byte_at is None:
+                    first_byte_at = time.time()
                 if not line or not line.startswith("data:"):
                     continue
                 payload_text = line[5:].strip()
@@ -640,12 +629,85 @@ async def _eval_call_and_save(
                     logger.warning(
                         f"SSE chunk not JSON ({e}): {payload_text[:200]}",
                     )
-                    continue
 
     if body is None:
+        raise RuntimeError("eval stream ended without a data event")
+    return body, (first_byte_at or t_start)
+
+
+async def _eval_call_and_save(
+    *,
+    payload: dict,
+    api_key: str,
+    timeout: float,
+    file_prefix: str,
+) -> ToolResponse:
+    """POST to the eval endpoint (streaming) and download the returned image.
+
+    Streams via ``stream: true`` SSE. gpt-image-2 itself doesn't emit
+    progressive frames — the broker holds silent until OpenAI returns,
+    so ``timeout`` here is effectively "max silent wait." Retry once
+    on timeout (broker stalls are real and often transient). Logs
+    time-to-first-byte and total wall time per attempt for debugging.
+    """
+    payload = {**payload, "stream": True}
+    httpx_timeout = httpx.Timeout(
+        connect=30.0,
+        read=timeout,
+        write=60.0,
+        pool=30.0,
+    )
+    attempts = _EVAL_RETRY_ON_TIMEOUT + 1
+    body: Optional[dict] = None
+    last_timeout: Optional[BaseException] = None
+
+    for attempt in range(1, attempts + 1):
+        t_attempt_start = time.time()
+        try:
+            body, first_byte_at = await _eval_post_once(
+                payload=payload, api_key=api_key,
+                httpx_timeout=httpx_timeout,
+            )
+            elapsed = time.time() - t_attempt_start
+            ttfb = first_byte_at - t_attempt_start
+            logger.info(
+                f"[eval] attempt {attempt}/{attempts} OK — "
+                f"ttfb={ttfb:.1f}s total={elapsed:.1f}s",
+            )
+            break
+        except httpx.TimeoutException as exc:
+            elapsed = time.time() - t_attempt_start
+            last_timeout = exc
+            logger.warning(
+                f"[eval] attempt {attempt}/{attempts} TIMED OUT after "
+                f"{elapsed:.0f}s (read-timeout={timeout}s); "
+                + ("retrying..." if attempt < attempts else "giving up"),
+            )
+        except _EvalNon200Error as exc:
+            logger.error(f"[eval] non-200: {exc}")
+            return ToolResponse(content=[TextBlock(
+                type="text", text=f"Error: {exc}",
+            )])
+        except RuntimeError as exc:
+            logger.error(f"[eval] stream error: {exc}")
+            return ToolResponse(content=[TextBlock(
+                type="text", text=f"Error: {exc}",
+            )])
+
+    if body is None:
+        if last_timeout is not None:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text=(
+                    f"Error: eval cluster timed out after "
+                    f"{attempts} attempt(s) of ~{timeout:.0f}s each. "
+                    "Broker is either backlogged or the request is "
+                    "malformed. Click Run again to retry."
+                ),
+            )])
         return ToolResponse(content=[TextBlock(
             type="text",
-            text="Error: eval stream ended without a data event.",
+            text="Error: eval call failed without a recognized error.",
         )])
 
     data_list = body.get("data") or []
