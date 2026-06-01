@@ -116,7 +116,7 @@ async def _call_provider_edit(
             raise RuntimeError(
                 "frame_provider=gpt-image-2-dashscope requires "
                 "DASHSCOPE_API_KEY (routes through Aliyun's eval "
-                "cluster brokering azure.gpt-image-2)",
+                "cluster brokering openai.gpt-image-2)",
             )
         return await mod.edit_image_gpt_eval(
             prompt=prompt, reference_images=refs.gpt_order(),

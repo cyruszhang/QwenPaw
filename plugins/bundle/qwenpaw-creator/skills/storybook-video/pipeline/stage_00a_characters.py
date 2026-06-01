@@ -112,7 +112,7 @@ async def _call_provider_gen(
             raise RuntimeError(
                 "frame_provider=gpt-image-2-dashscope requires DASHSCOPE_API_KEY "
                 "(routes through Aliyun DashScope eval cluster brokering "
-                "azure.gpt-image-2)",
+                "openai.gpt-image-2)",
             )
         return await mod.generate_image_gpt_eval(
             prompt=prompt, size=size, quality=quality, api_key=ds,
