@@ -101,26 +101,6 @@ def _build_pass1_prompt(
         for s in style_catalog
     )
 
-    anchor_block = ""
-    if story_anchor:
-        anchor_block = (
-            "\n# Story anchor (overall narrative context):\n"
-            f"{story_anchor.strip()}\n"
-        )
-    world_bible_block = ""
-    if world_bible:
-        world_bible_block = (
-            "\n# World bible (invariants — recurring set-design facts):\n"
-            f"{world_bible.strip()}\n"
-        )
-    directives_block = ""
-    if style_directives:
-        directives_block = (
-            "\n# Style directives:\n"
-            + "\n".join(f"  - {d}" for d in style_directives if d.strip())
-            + "\n"
-        )
-
     constraints = [
         f"- Total video duration: ~{duration_target_s} seconds",
         f"- Beat count: aim for {beat_count_hint}",
@@ -128,19 +108,30 @@ def _build_pass1_prompt(
         f"- Style hint: {style_hint or '(none — pick from catalog)'}",
         f"- Narration voice: {voice}",
     ]
-    if era:
-        constraints.append(f"- Era / time period: {era}")
-    if country:
-        constraints.append(f"- Country / setting: {country}")
-    if genre:
-        constraints.append(f"- Genre: {genre}")
-    if tone:
-        constraints.append(f"- Tone: {tone}")
+    # Each story-constraint field: "(user-provided)" means accept it
+    # as authoritative; "(blank — infer from source)" means extract.
+    def _fmt(label: str, val: Optional[str]) -> str:
+        if val and str(val).strip():
+            return f"- {label}: {val} (user-provided; use authoritatively)"
+        return f"- {label}: (blank — infer from source + cite evidence)"
+
+    constraints.append(_fmt("Era / time period", era))
+    constraints.append(_fmt("Country / setting", country))
+    constraints.append(_fmt("Genre", genre))
+    constraints.append(_fmt("Tone", tone))
+    constraints.append(_fmt("Story anchor", story_anchor))
+    constraints.append(_fmt("World bible", world_bible))
+    constraints.append(
+        _fmt(
+            "Style directives",
+            "; ".join(style_directives) if style_directives else None,
+        ),
+    )
 
     system = (
         "You are the storyboard PRODUCER. In this pass you do ONLY "
         "story structure — not visual descriptions.\n\n"
-        "Your four jobs:\n"
+        "Your jobs:\n"
         "  1. Identify recurring characters (brief, concrete physical "
         "     descriptions — they'll be rendered as reference images).\n"
         "  2. Identify recurring settings (locations the camera "
@@ -149,11 +140,19 @@ def _build_pass1_prompt(
         "  4. Slice the source into a beat sheet — an ordered list of "
         "     story moments. Each beat is 1-3 sentences SUMMARIZING "
         "     what happens; do NOT write full visual descriptions or "
-        "     narration text (that's the next pass's job).\n\n"
+        "     narration text (that's the next pass's job).\n"
+        "  5. INFER the story constraints (era, country, genre, tone, "
+        "     story_anchor, world_bible, style_directives) FROM the "
+        "     source. For each, also provide a short evidence quote "
+        "     from the source that justifies your inference, so the "
+        "     user can verify.\n\n"
         "Critically: don't drop story content to hit a beat count. If "
         "the source is long, use more beats. The beat-count hint is a "
         "target, not a hard cap — aggressive compression is the worst "
         "failure mode.\n\n"
+        "User-provided constraints (in Targets below) are AUTHORITATIVE "
+        "— echo them verbatim into global_config. Blank constraints — "
+        "you MUST INFER them from the source AND cite evidence.\n\n"
         "Output ONLY valid JSON matching the schema below. No "
         "markdown fences, no commentary."
     )
@@ -163,11 +162,7 @@ def _build_pass1_prompt(
         f"<source>\n{text.strip()}\n</source>\n\n"
         "# Targets\n\n"
         + "\n".join(constraints)
-        + "\n"
-        + anchor_block
-        + world_bible_block
-        + directives_block
-        + "\n"
+        + "\n\n"
         "# Available style catalog (pick ONE id for assets.style.catalog_id):\n"
         f"{styles_table}\n\n"
         "# Required JSON output schema:\n"
@@ -186,7 +181,29 @@ def _build_pass1_prompt(
         '    ],\n'
         '    "style": {"catalog_id": "<one id from the catalog above>"}\n'
         '  },\n'
-        '  "global_config": {},\n'
+        '  "global_config": {\n'
+        '    "era": "<e.g. 1940s, medieval, near-future>",\n'
+        '    "country": "<e.g. Cuba, rural China, fictional realm>",\n'
+        '    "genre": "<e.g. tragedy, fable, coming-of-age>",\n'
+        '    "tone": "<e.g. somber, playful, hopeful>",\n'
+        '    "story_anchor": "<one or two sentences summarizing the '
+        'overall narrative arc — propagates to every scene>",\n'
+        '    "world_bible": "<2-4 sentence list of invariants that '
+        'must hold across every scene: props, palette, lighting, '
+        'camera rules>",\n'
+        '    "style_directives": ["<short style suggestion>", '
+        '"<another>", "..."]\n'
+        '  },\n'
+        '  "constraint_evidence": {\n'
+        '    "era": "<short quote from source supporting this; OMIT '
+        "the field if it was user-provided>\",\n"
+        '    "country": "<short quote>",\n'
+        '    "genre": "<short quote or 1-sentence justification>",\n'
+        '    "tone": "<short quote>",\n'
+        '    "story_anchor": "<short quote(s) that capture the arc>",\n'
+        '    "world_bible": "<short quote(s) for the recurring facts>",\n'
+        '    "style_directives": "<short reason for these choices>"\n'
+        '  },\n'
         '  "beats": [\n'
         '    {\n'
         '      "name": "<short_snake_case_label, e.g. solitary_sailor>",\n'
@@ -452,21 +469,53 @@ async def extract_beats(
         b["setting_used"] = b.get("setting_used") or None
     draft["beats"] = beats
 
-    # Persist user-supplied story-level constraints + per-project
-    # provider picks into global_config.
+    # Merge story constraints: user-provided values override the LLM's
+    # extraction; otherwise keep the LLM-inferred value (which now
+    # comes back populated rather than blank). Move the LLM's evidence
+    # quotes into global_config._constraint_evidence so the UI can
+    # surface them for verification.
     gc = draft.setdefault("global_config", {})
-    if era: gc["era"] = era
-    if country: gc["country"] = country
-    if genre: gc["genre"] = genre
-    if tone: gc["tone"] = tone
-    if story_anchor and story_anchor.strip():
-        gc["story_anchor"] = story_anchor.strip()
-    if world_bible and world_bible.strip():
-        gc["world_bible"] = world_bible.strip()
+    evidence_in = draft.pop("constraint_evidence", None) or {}
+    evidence_out: dict[str, str] = {}
+
+    def _merge(key: str, user_val: Optional[str]):
+        if user_val and str(user_val).strip():
+            gc[key] = str(user_val).strip()
+            # User-provided: no evidence kept (it's just the user's input).
+            return
+        # User left blank → trust LLM's value if present; record evidence.
+        if gc.get(key) is None and key not in gc:
+            return
+        ev = evidence_in.get(key)
+        if ev and str(ev).strip():
+            evidence_out[key] = str(ev).strip()
+
+    _merge("era", era)
+    _merge("country", country)
+    _merge("genre", genre)
+    _merge("tone", tone)
+    _merge("story_anchor", story_anchor)
+    _merge("world_bible", world_bible)
+
+    # style_directives is a list — handle separately.
     if style_directives:
         cleaned = [d.strip() for d in style_directives if d and d.strip()]
         if cleaned:
             gc["style_directives"] = cleaned
+    else:
+        # Keep whatever the LLM proposed; ensure it's a list of strings.
+        llm_dirs = gc.get("style_directives") or []
+        if isinstance(llm_dirs, list):
+            gc["style_directives"] = [
+                str(d).strip() for d in llm_dirs if d and str(d).strip()
+            ]
+        ev = evidence_in.get("style_directives")
+        if ev and str(ev).strip():
+            evidence_out["style_directives"] = str(ev).strip()
+
+    if evidence_out:
+        gc["_constraint_evidence"] = evidence_out
+
     if frame_provider:
         gc["frame_provider"] = frame_provider
     if video_provider:

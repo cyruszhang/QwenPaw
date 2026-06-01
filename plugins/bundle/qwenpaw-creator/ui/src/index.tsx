@@ -1907,74 +1907,120 @@ function SettingsCard({ draft, onSaveDraft }: any) {
     },
     open
       ? React.createElement(Form, { layout: "vertical", style: { marginTop: 4 } },
-          React.createElement(Row, { gutter: 12 },
-            React.createElement(Col, { span: 6 },
-              React.createElement(Form.Item, { label: "Era" },
-                React.createElement(Input, {
-                  value: era, onChange: (e: any) => setEra(e.target.value),
-                  placeholder: "1940s",
+          (() => {
+            // Evidence quotes from Pass 1: when LLM inferred a
+            // constraint, it cites the source. We render it below
+            // each field so the user can verify the inference.
+            const ev = (draft.global_config || {})._constraint_evidence || {};
+            const evidenceExtra = (key: string, baseHint?: string) => {
+              const quote = ev[key];
+              if (!quote) return baseHint;
+              return React.createElement(
+                "div", null,
+                React.createElement(
+                  AntText,
+                  { type: "secondary", style: { fontSize: 11, fontStyle: "italic" } },
+                  `🔍 inferred from source: "${quote}"`,
+                ),
+                baseHint ? React.createElement(
+                  "div",
+                  { style: { fontSize: 11, marginTop: 2 } },
+                  baseHint,
+                ) : null,
+              );
+            };
+            return React.createElement(React.Fragment, null,
+              React.createElement(Row, { gutter: 12 },
+                React.createElement(Col, { span: 6 },
+                  React.createElement(Form.Item, {
+                    label: "Era",
+                    extra: evidenceExtra("era"),
+                  },
+                    React.createElement(Input, {
+                      value: era, onChange: (e: any) => setEra(e.target.value),
+                      placeholder: "1940s",
+                    }),
+                  ),
+                ),
+                React.createElement(Col, { span: 6 },
+                  React.createElement(Form.Item, {
+                    label: "Country",
+                    extra: evidenceExtra("country"),
+                  },
+                    React.createElement(Input, {
+                      value: country,
+                      onChange: (e: any) => setCountry(e.target.value),
+                      placeholder: "Cuba",
+                    }),
+                  ),
+                ),
+                React.createElement(Col, { span: 6 },
+                  React.createElement(Form.Item, {
+                    label: "Genre",
+                    extra: evidenceExtra("genre"),
+                  },
+                    React.createElement(Input, {
+                      value: genre,
+                      onChange: (e: any) => setGenre(e.target.value),
+                    }),
+                  ),
+                ),
+                React.createElement(Col, { span: 6 },
+                  React.createElement(Form.Item, {
+                    label: "Tone",
+                    extra: evidenceExtra("tone"),
+                  },
+                    React.createElement(Input, {
+                      value: tone,
+                      onChange: (e: any) => setTone(e.target.value),
+                    }),
+                  ),
+                ),
+              ),
+              React.createElement(Form.Item, {
+                label: "Story anchor",
+                extra: evidenceExtra(
+                  "story_anchor",
+                  "Narrative context propagated to every scene. Short (≤50 words).",
+                ),
+              },
+                React.createElement(TextArea, {
+                  value: storyAnchor,
+                  onChange: (e: any) => setStoryAnchor(e.target.value),
+                  rows: 2,
+                  placeholder: "A weathered Cuban fisherman's quiet test of endurance against the sea — dignified persistence, not defeat.",
                 }),
               ),
-            ),
-            React.createElement(Col, { span: 6 },
-              React.createElement(Form.Item, { label: "Country" },
-                React.createElement(Input, {
-                  value: country,
-                  onChange: (e: any) => setCountry(e.target.value),
-                  placeholder: "Cuba",
+              React.createElement(Form.Item, {
+                label: "World bible (recurring set-design facts)",
+                extra: evidenceExtra(
+                  "world_bible",
+                  "Invariants that should hold across every scene's setting + style. Stops scene-to-scene drift. 30-80 words.",
+                ),
+              },
+                React.createElement(TextArea, {
+                  value: worldBible,
+                  onChange: (e: any) => setWorldBible(e.target.value),
+                  rows: 3,
+                  placeholder: "Set design: wooden cottage-style fence; chalk-lettered wooden signs (NO blackboards); morning sun upper-right; cottagecore palette — pastel greens, soft creams.",
                 }),
               ),
-            ),
-            React.createElement(Col, { span: 6 },
-              React.createElement(Form.Item, { label: "Genre" },
-                React.createElement(Input, {
-                  value: genre,
-                  onChange: (e: any) => setGenre(e.target.value),
+              React.createElement(Form.Item, {
+                label: "Style directives (one per line, ≤5)",
+                extra: evidenceExtra(
+                  "style_directives",
+                  "Layered on every scene's compose prompt. Things like palette, physics rules, continuity.",
+                ),
+              },
+                React.createElement(TextArea, {
+                  value: directives,
+                  onChange: (e: any) => setDirectives(e.target.value),
+                  rows: 3,
+                  placeholder: "warm amber-rose palette\nreal-world physics, no floating objects",
                 }),
               ),
-            ),
-            React.createElement(Col, { span: 6 },
-              React.createElement(Form.Item, { label: "Tone" },
-                React.createElement(Input, {
-                  value: tone,
-                  onChange: (e: any) => setTone(e.target.value),
-                }),
-              ),
-            ),
-          ),
-          React.createElement(Form.Item, {
-            label: "Story anchor",
-            extra: "Narrative context propagated to every scene. Short (≤50 words).",
-          },
-            React.createElement(TextArea, {
-              value: storyAnchor,
-              onChange: (e: any) => setStoryAnchor(e.target.value),
-              rows: 2,
-              placeholder: "A weathered Cuban fisherman's quiet test of endurance against the sea — dignified persistence, not defeat.",
-            }),
-          ),
-          React.createElement(Form.Item, {
-            label: "World bible (recurring set-design facts)",
-            extra: "Invariants that should hold across every scene's setting + style. Stops scene-to-scene drift. 30-80 words.",
-          },
-            React.createElement(TextArea, {
-              value: worldBible,
-              onChange: (e: any) => setWorldBible(e.target.value),
-              rows: 3,
-              placeholder: "Set design: wooden cottage-style fence; chalk-lettered wooden signs (NO blackboards); morning sun upper-right; cottagecore palette — pastel greens, soft creams.",
-            }),
-          ),
-          React.createElement(Form.Item, {
-            label: "Style directives (one per line, ≤5)",
-            extra: "Layered on every scene's compose prompt. Things like palette, physics rules, continuity.",
-          },
-            React.createElement(TextArea, {
-              value: directives,
-              onChange: (e: any) => setDirectives(e.target.value),
-              rows: 3,
-              placeholder: "warm amber-rose palette\nreal-world physics, no floating objects",
-            }),
-          ),
+            );
+          })(),
           React.createElement(Form.Item, {
             label: "Parallel concurrency (Stage 2 + 3 'Run all')",
             extra: "Number of scenes to fire in parallel. 1 = sequential (current default). 3-5 = fast but watch for DashScope rate limits.",
