@@ -697,7 +697,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
               onChange: setFrameProvider,
               style: { width: "100%" },
               options: [
-                { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, expensive" },
+                { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI (needs OPENAI_API_KEY)" },
+                { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope — same model, DashScope key (needs IP whitelist)" },
                 { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
               ],
             }),
@@ -1558,7 +1559,8 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
           onChange: setFrameProvider,
           style: { width: "100%" },
           options: [
-            { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, expensive" },
+            { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI" },
+            { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope" },
             { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
           ],
         }),
@@ -2303,7 +2305,8 @@ function DecomposeForm({
             onChange: setFrameProvider,
             style: { width: "100%" },
             options: [
-              { value: "gpt-image-2", label: "🖼️ gpt-image-2 — high quality, ~$0.20-0.30 / frame" },
+              { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI, ~$0.20-0.30 / frame" },
+              { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope — same model, DashScope billed" },
               { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper, weaker identity" },
             ],
           }),
@@ -2854,15 +2857,18 @@ function DraftPanel({
       open: openStage === "stage-0",
       onToggle: toggleStage,
       extra: (() => {
-        // Stage 0 now respects frame_provider too (route through
-        // gpt-image-2 OR qwen-image). Disable on whichever key is
-        // missing for the picked provider.
+        // Stage 0 respects frame_provider. Three options: gpt-image-2
+        // (OpenAI direct, OPENAI_API_KEY), gpt-image-2-dashscope
+        // (Aliyun eval cluster, DASHSCOPE_API_KEY), qwen-image
+        // (DASHSCOPE_API_KEY). Disable when the relevant key is missing.
         const fp = (draft.global_config || {}).frame_provider
           || "gpt-image-2";
-        const keyMissing = fp === "qwen-image"
+        const needsDashScope = fp === "qwen-image"
+          || fp === "gpt-image-2-dashscope";
+        const keyMissing = needsDashScope
           ? !status?.has_dashscope
           : !status?.has_openai;
-        const missingLabel = fp === "qwen-image"
+        const missingLabel = needsDashScope
           ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
           : "OPENAI_API_KEY missing — set it in Environment Variables";
         return React.createElement(
@@ -2889,11 +2895,13 @@ function DraftPanel({
       (() => {
         const fp = (draft.global_config || {}).frame_provider
           || "gpt-image-2";
-        const keyMissing = fp === "qwen-image"
+        const needsDashScope = fp === "qwen-image"
+          || fp === "gpt-image-2-dashscope";
+        const keyMissing = needsDashScope
           ? !status?.has_dashscope
           : !status?.has_openai;
-        const needLabel = fp === "qwen-image"
-          ? "DASHSCOPE_API_KEY missing — needed for qwen-image."
+        const needLabel = needsDashScope
+          ? `DASHSCOPE_API_KEY missing — needed for ${fp}.`
           : "OPENAI_API_KEY missing — needed for gpt-image-2.";
         return keyMissing
           ? React.createElement(Alert, {
@@ -2956,14 +2964,17 @@ function DraftPanel({
       onToggle: toggleStage,
       extra: (() => {
         // Disable the button when the key for the project's actual
-        // frame_provider is missing — used to hardcode has_openai
-        // which silently disabled the button for qwen-image projects.
+        // frame_provider is missing. gpt-image-2-dashscope and
+        // qwen-image both need a DashScope key; gpt-image-2 (direct)
+        // needs the OpenAI key.
         const fp = (draft.global_config || {}).frame_provider
           || "gpt-image-2";
-        const keyMissing = fp === "qwen-image"
+        const needsDashScope = fp === "qwen-image"
+          || fp === "gpt-image-2-dashscope";
+        const keyMissing = needsDashScope
           ? !status?.has_dashscope
           : !status?.has_openai;
-        const missingLabel = fp === "qwen-image"
+        const missingLabel = needsDashScope
           ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
           : "OPENAI_API_KEY missing — set it in Environment Variables";
         const conc = Math.max(1, Math.min(5,
@@ -3212,9 +3223,10 @@ function DraftSummary({
             disabled: savingFrameProvider,
             onChange: updateDefaultFrameProvider,
             size: "small",
-            style: { minWidth: 170 },
+            style: { minWidth: 200 },
             options: [
-              { value: "gpt-image-2", label: "🖼️ gpt-image-2" },
+              { value: "gpt-image-2", label: "🖼️ gpt-image-2 (OpenAI)" },
+              { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 (DashScope)" },
               { value: "qwen-image", label: "🪶 qwen-image" },
             ],
           }),

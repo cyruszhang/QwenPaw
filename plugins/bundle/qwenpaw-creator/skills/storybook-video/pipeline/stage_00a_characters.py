@@ -68,14 +68,16 @@ _PROVIDER_CACHE_GEN: dict[str, object] = {}
 
 def _provider_module_gen(provider: str):
     if provider not in _PROVIDER_CACHE_GEN:
-        if provider == "gpt-image-2":
+        # gpt-image-2 and gpt-image-2-dashscope both live in the same tool
+        # module (different functions inside); reuse the loader.
+        if provider in ("gpt-image-2", "gpt-image-2-dashscope"):
             _PROVIDER_CACHE_GEN[provider] = _load_gpt_image_tool()
         elif provider == "qwen-image":
             _PROVIDER_CACHE_GEN[provider] = _load_qwen_image_tool()
         else:
             raise ValueError(
                 f"unknown frame_provider {provider!r}; expected one of "
-                f"'gpt-image-2', 'qwen-image'",
+                f"'gpt-image-2', 'gpt-image-2-dashscope', 'qwen-image'",
             )
     return _PROVIDER_CACHE_GEN[provider]
 
@@ -103,6 +105,17 @@ async def _call_provider_gen(
             )
         return await mod.generate_image_gpt(
             prompt=prompt, size=size, quality=quality, api_key=oa,
+        )
+    if provider == "gpt-image-2-dashscope":
+        ds = (keys.get("dashscope") or "").strip()
+        if not ds:
+            raise RuntimeError(
+                "frame_provider=gpt-image-2-dashscope requires DASHSCOPE_API_KEY "
+                "(routes through Aliyun DashScope eval cluster brokering "
+                "azure.gpt-image-2)",
+            )
+        return await mod.generate_image_gpt_eval(
+            prompt=prompt, size=size, quality=quality, api_key=ds,
         )
     if provider == "qwen-image":
         ds = (keys.get("dashscope") or "").strip()

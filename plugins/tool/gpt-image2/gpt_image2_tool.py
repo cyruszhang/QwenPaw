@@ -497,6 +497,284 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
         )
 
 
+# ── DashScope eval-cluster backend (brokered OpenAI gpt-image-2) ────
+#
+# The Aliyun eval cluster brokers OpenAI's gpt-image-2 behind a custom
+# chat-completions-style URL with a non-standard body shape:
+#
+#     POST https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+#     Authorization: Bearer <DASHSCOPE_API_KEY>
+#     {
+#       "model": "azure.gpt-image-2",
+#       "prompt": "...",
+#       "image": ["<url or data URI>", ...]   # optional, for edits
+#       "size": "1024x1024",
+#       "n": 1
+#     }
+#
+# Response: ``data[0].b64_json`` is a signed Aliyun OSS URL (despite
+# the field name), valid ~24h. Download → save → return local path.
+# Access requires the caller's egress IP to be whitelisted on the
+# eval cluster (RBAC-gated at istio gateway).
+
+
+_EVAL_ENDPOINT = (
+    "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+)
+_EVAL_MODEL = "azure.gpt-image-2"
+
+
+def _to_url_or_data_uri(image_path: str) -> str:
+    """Convert a local file path to a base64 data URI; pass HTTP URLs
+    through unchanged. The eval cluster accepts either form in the
+    ``image`` array.
+    """
+    if image_path.startswith(("http://", "https://")):
+        return image_path
+    path_obj = Path(image_path)
+    if not path_obj.exists():
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+    if not path_obj.is_file():
+        raise ValueError(f"Not a file: {image_path}")
+    ext = path_obj.suffix.lower()
+    mime = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(ext)
+    if not mime:
+        raise ValueError(
+            f"Unsupported image format: {ext}. Supported: "
+            f"{', '.join(['.png', '.jpg', '.jpeg', '.webp'])}",
+        )
+    data = base64.b64encode(path_obj.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{data}"
+
+
+async def _eval_call_and_save(
+    *,
+    payload: dict,
+    api_key: str,
+    timeout: float,
+    file_prefix: str,
+) -> ToolResponse:
+    """POST to the eval endpoint and download the returned image."""
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        resp = await client.post(
+            _EVAL_ENDPOINT,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if resp.status_code != 200:
+        snippet = resp.text[:600]
+        msg = f"DashScope eval API error: {resp.status_code} - {snippet}"
+        logger.error(msg)
+        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {msg}")])
+
+    body = resp.json()
+    data_list = body.get("data") or []
+    if not data_list:
+        return ToolResponse(content=[TextBlock(
+            type="text",
+            text=f"Error: eval response had no data: {body}",
+        )])
+    payload_field = data_list[0].get("b64_json") or ""
+    if not payload_field:
+        return ToolResponse(content=[TextBlock(
+            type="text",
+            text=f"Error: eval response missing b64_json: {body}",
+        )])
+
+    # ``b64_json`` may actually be a signed OSS URL (despite the
+    # field name) — DashScope returns either depending on its size.
+    if payload_field.startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            img_resp = await client.get(payload_field)
+        if img_resp.status_code != 200:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text=(
+                    f"Error: failed to download generated image from "
+                    f"{payload_field[:120]}: {img_resp.status_code}"
+                ),
+            )])
+        img_bytes = img_resp.content
+    else:
+        try:
+            img_bytes = base64.b64decode(payload_field)
+        except Exception as e:  # noqa: BLE001
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text=f"Error: could not decode b64_json: {e}",
+            )])
+
+    media_dir = DEFAULT_MEDIA_DIR / "gpt_image2"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = int(time.time() * 1000)
+    image_path = media_dir / f"{file_prefix}_{timestamp}.png"
+    image_path.write_bytes(img_bytes)
+    logger.info(f"Eval image saved to {image_path}")
+
+    usage = body.get("usage") or {}
+    size_actual = body.get("size") or "?"
+    return ToolResponse(content=[
+        ImageBlock(
+            type="image",
+            source={"type": "url", "url": str(image_path)},
+        ),
+        TextBlock(
+            type="text",
+            text=(
+                f"Generated image via DashScope eval cluster "
+                f"({_EVAL_MODEL})\n"
+                f"Prompt: {payload.get('prompt', '')[:200]}\n"
+                f"Size: {size_actual}\n"
+                f"Tokens: {usage.get('total_tokens', '?')}\n"
+                f"Saved to: {image_path}"
+            ),
+        ),
+    ])
+
+
+async def generate_image_gpt_eval(
+    prompt: str,
+    size: str = "1024x1024",
+    quality: str = "auto",
+    n: int = 1,
+    api_key: Optional[str] = None,
+) -> ToolResponse:
+    """T2I via DashScope's eval cluster brokering OpenAI gpt-image-2.
+
+    Uses ``DASHSCOPE_API_KEY`` (NOT ``OPENAI_API_KEY``). The caller's
+    egress IP must be whitelisted on the eval cluster.
+    """
+    try:
+        resolved = _resolve_tool_config(
+            "generate_image_gpt_eval", api_key,
+            default_endpoint=_EVAL_ENDPOINT,
+        )
+        if resolved is None:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text="Error: Tool not configured.",
+            )])
+        api_key, _, timeout = resolved
+        if not api_key:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text="Error: DashScope API key not configured.",
+            )])
+
+        payload = {
+            "model": _EVAL_MODEL,
+            "prompt": prompt,
+            "size": size,
+            "n": n,
+        }
+        if quality and quality != "auto":
+            payload["quality"] = quality
+        logger.info(
+            f"Generating image via eval cluster: size={size}, n={n}",
+        )
+        return await _eval_call_and_save(
+            payload=payload, api_key=api_key, timeout=timeout,
+            file_prefix="gpt_image2_eval",
+        )
+    except httpx.TimeoutException:
+        return ToolResponse(content=[TextBlock(
+            type="text",
+            text="Error: eval cluster timed out.",
+        )])
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"eval gen failed: {e}", exc_info=True)
+        return ToolResponse(content=[TextBlock(
+            type="text", text=f"Error: eval gen failed - {e}",
+        )])
+
+
+async def edit_image_gpt_eval(
+    prompt: str,
+    reference_images: List[str],
+    size: str = "1024x1024",
+    quality: str = "auto",
+    n: int = 1,
+    api_key: Optional[str] = None,
+) -> ToolResponse:
+    """Multi-ref edit via DashScope eval brokering OpenAI gpt-image-2.
+
+    Reference images are accepted as HTTP URLs (passed through) or
+    local file paths (converted to base64 data URIs). The eval
+    cluster accepts both.
+    """
+    try:
+        if not reference_images:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text="Error: reference_images is required.",
+            )])
+
+        resolved = _resolve_tool_config(
+            "edit_image_gpt_eval", api_key,
+            default_endpoint=_EVAL_ENDPOINT,
+        )
+        if resolved is None:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text="Error: Tool not configured.",
+            )])
+        api_key, _, timeout = resolved
+        if not api_key:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text="Error: DashScope API key not configured.",
+            )])
+
+        try:
+            image_payload = [_to_url_or_data_uri(p) for p in reference_images]
+        except FileNotFoundError as e:
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text=f"Error: reference image not found - {e}",
+            )])
+        except (ValueError, Exception) as e:  # noqa: BLE001
+            return ToolResponse(content=[TextBlock(
+                type="text",
+                text=f"Error: failed to process reference images - {e}",
+            )])
+
+        payload = {
+            "model": _EVAL_MODEL,
+            "prompt": prompt,
+            "image": image_payload,
+            "size": size,
+            "n": n,
+        }
+        if quality and quality != "auto":
+            payload["quality"] = quality
+        logger.info(
+            f"Editing image via eval cluster: {len(reference_images)} "
+            f"refs, size={size}",
+        )
+        return await _eval_call_and_save(
+            payload=payload, api_key=api_key, timeout=timeout,
+            file_prefix="gpt_image2_eval_edit",
+        )
+    except httpx.TimeoutException:
+        return ToolResponse(content=[TextBlock(
+            type="text",
+            text="Error: eval cluster timed out.",
+        )])
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"eval edit failed: {e}", exc_info=True)
+        return ToolResponse(content=[TextBlock(
+            type="text", text=f"Error: eval edit failed - {e}",
+        )])
+
+
 def _process_image_url(image_path: str) -> dict:
     """Convert image path/URL to API format.
 

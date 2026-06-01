@@ -1,7 +1,7 @@
 {
   "id": "gpt-image2-tool",
   "name": "GPT Image 2 Tool",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "tool",
   "description": "Generate and edit images using OpenAI GPT Image 2 model",
   "description_i18n": {
@@ -83,10 +83,62 @@
             "help": "HTTP request timeout in seconds (default: 60)"
           }
         ]
+      },
+      {
+        "name": "generate_image_gpt_eval",
+        "description": "Generate images via Aliyun DashScope's eval cluster brokering OpenAI GPT Image 2 (azure.gpt-image-2). Uses DashScope key; caller IP must be whitelisted.",
+        "icon": "🎨",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "DashScope API Key",
+            "type": "password",
+            "required": true,
+            "placeholder": "sk-...",
+            "help": "DashScope key with eval-cluster access. Different from the OpenAI key used by generate_image_gpt."
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "480",
+            "min": 30,
+            "max": 600,
+            "help": "HTTP request timeout in seconds (default: 480 to match the OpenAI-direct tool)"
+          }
+        ]
+      },
+      {
+        "name": "edit_image_gpt_eval",
+        "description": "Edit/compose images with multi-reference input via Aliyun DashScope's eval cluster brokering OpenAI GPT Image 2.",
+        "icon": "🖼️",
+        "requires_config": true,
+        "config_fields": [
+          {
+            "name": "api_key",
+            "label": "DashScope API Key",
+            "type": "password",
+            "required": true,
+            "placeholder": "sk-...",
+            "help": "DashScope key with eval-cluster access."
+          },
+          {
+            "name": "timeout",
+            "label": "Request Timeout (seconds)",
+            "type": "number",
+            "required": false,
+            "placeholder": "480",
+            "min": 30,
+            "max": 600,
+            "help": "HTTP request timeout in seconds (default: 480)"
+          }
+        ]
       }
     ],
     "api_key_url": "https://platform.openai.com/api-keys",
-    "api_key_hint": "Get your OpenAI API key from platform.openai.com",
+    "api_key_hint": "generate_image_gpt / edit_image_gpt use the OpenAI key. generate_image_gpt_eval / edit_image_gpt_eval use a DashScope key with eval-cluster access (separate config).",
     "model_url": "https://developers.openai.com/api/docs/models/gpt-image-2"
   }
 }
