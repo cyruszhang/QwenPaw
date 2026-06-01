@@ -555,7 +555,14 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
 _EVAL_ENDPOINT = (
     "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 )
-_EVAL_MODEL = "azure.gpt-image-2"
+# Both `openai.gpt-image-2` and `azure.gpt-image-2` are accepted on
+# the eval cluster's chat-completions endpoint. They route to
+# different upstream suppliers via Aliyun's broker:
+#   - openai.gpt-image-2 → typically slower in observation (~40s)
+#   - azure.gpt-image-2  → typically faster (~15s)
+# Switch the literal if Aliyun's relative latency flips, or if one
+# variant goes silent and the other still answers.
+_EVAL_MODEL = "openai.gpt-image-2"
 # `stream: true` on this endpoint changes the RESPONSE FORMAT (SSE
 # `data: {...}` lines) but does NOT make gpt-image-2 emit progress
 # chunks — the upstream model holds the connection silent until the
