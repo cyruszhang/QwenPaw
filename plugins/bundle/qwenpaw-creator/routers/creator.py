@@ -1040,12 +1040,61 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 spec, proj,
                 api_key=ds, only_scene=body.only_scene,
             )
+
+            # Separate REAL failures (VLM answered, answer was wrong)
+            # from INDETERMINATE checks (VLM call errored — 403, timeout,
+            # unparseable). An indeterminate check means "we couldn't
+            # verify," NOT "the frame is wrong" — regenerating on it
+            # wastes money and pollutes regen_notes with error strings.
+            def _real_failures(info: dict) -> list:
+                return [
+                    c for c in (info.get("failures") or [])
+                    if not c.get("indeterminate")
+                ]
+
             failing = [
                 (sid, info) for sid, info in report.items()
                 if sid != "_summary"
-                and not info.get("passed", True)
                 and info.get("rule_count", 0) > 0
+                and _real_failures(info)
             ]
+
+            # Global validator-health check: if NO scene produced any
+            # determinate check at all (every check indeterminate),
+            # the validator itself is down (e.g. Qwen-VL auth/403).
+            # Abort cleanly instead of regenerating every scene.
+            any_determinate = any(
+                any(not c.get("indeterminate")
+                    for c in (info.get("checks") or []))
+                for sid, info in report.items()
+                if sid != "_summary"
+            )
+            indeterminate_total = sum(
+                sum(1 for c in (info.get("checks") or [])
+                    if c.get("indeterminate"))
+                for sid, info in report.items()
+                if sid != "_summary"
+            )
+            if not any_determinate and indeterminate_total > 0:
+                # Surface a sample error so the user knows why.
+                sample = ""
+                for sid, info in report.items():
+                    if sid == "_summary":
+                        continue
+                    for c in (info.get("checks") or []):
+                        if c.get("indeterminate"):
+                            sample = str(c.get("vlm_answer", ""))[:160]
+                            break
+                    if sample:
+                        break
+                raise HTTPException(
+                    502,
+                    "Auto-fix aborted: the Qwen-VL validator could not "
+                    "evaluate any rule (every check errored). Fix the "
+                    "validator before retrying — no frames were "
+                    f"regenerated. Sample error: {sample}",
+                )
+
             iterations.append({
                 "iter": i,
                 "scenes_checked": report.get("_summary", {}).get(
@@ -1055,46 +1104,51 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     "scenes_passed", 0,
                 ),
                 "scenes_failed": len(failing),
+                "indeterminate_checks": indeterminate_total,
                 "failing_scene_ids": [sid for sid, _ in failing],
             })
 
             if not failing:
-                # Exit early — everything passes.
+                # Nothing with a real, determinate failure — done.
                 fixed_scenes.update(
                     s.get("id") for s in (draft.get("scenes") or [])
                 )
                 break
 
-            # Append VLM failure reasons to each failing scene's
-            # regen_notes (additive, deduped — don't lose prior user
-            # notes).
+            # Append the failed RULE TEXT to each failing scene's
+            # regen_notes (additive, deduped). Never include the VLM's
+            # raw answer/error string — only the actionable rule.
             for sid, info in failing:
                 fail_lines = []
-                for chk in info.get("failures", [])[:5]:
-                    rule = chk.get("rule", "")
-                    ans = chk.get("vlm_answer", "")
+                for chk in _real_failures(info)[:5]:
+                    rule = (chk.get("rule") or "").strip()
+                    if not rule:
+                        continue
                     kind = chk.get("kind", "")
-                    if kind == "must_contain":
-                        fail_lines.append(
-                            f"Must include: {rule} (VLM said: {ans[:60]})",
-                        )
-                    elif kind == "must_not_contain":
-                        fail_lines.append(
-                            f"Must NOT include: {rule}",
-                        )
+                    if kind == "must_not_contain":
+                        fail_lines.append(f"Remove from frame: {rule}")
+                    elif kind == "composition":
+                        fail_lines.append(f"Fix composition: {rule}")
                     else:
-                        fail_lines.append(f"Should be true: {rule}")
-                fail_block = (
-                    f"[auto-fix iter {i}] " + "; ".join(fail_lines)
-                )
+                        fail_lines.append(f"Make clearly visible: {rule}")
+                if not fail_lines:
+                    continue
+                fail_block = "[auto-fix] " + "; ".join(fail_lines)
                 for sc in draft.get("scenes") or []:
                     if str(sc.get("id")) == sid:
-                        existing = (sc.get("regen_notes") or "").strip()
-                        if fail_block in existing:
-                            continue  # already there from a prior iter
+                        # Strip any prior auto-fix lines (old polluted
+                        # "[auto-fix iter N] ... (VLM said: ...)" format
+                        # included) so notes don't accumulate stale or
+                        # error-laced text. Keep user-authored lines.
+                        existing = (sc.get("regen_notes") or "")
+                        user_lines = [
+                            ln for ln in existing.splitlines()
+                            if not ln.strip().startswith("[auto-fix")
+                        ]
+                        kept = "\n".join(user_lines).strip()
                         sc["regen_notes"] = (
-                            (existing + "\n" + fail_block).strip()
-                            if existing else fail_block
+                            (kept + "\n" + fail_block).strip()
+                            if kept else fail_block
                         )
                         break
             proj_yml.write_text(
@@ -1380,6 +1434,19 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
     @router.post("/projects/{pid}/stage")
     async def run_stage(pid: str, body: StageRunRequest) -> dict:
+        # Entry log + force-flush so we can SEE in qwenpaw.log whether
+        # the handler is being reached at all. Diagnostic for the "POST
+        # stalls 12+ min with empty log" problem — distinguishes
+        # middleware/body-parse hang from in-handler hang.
+        logger.info(
+            "[run_stage] ENTER pid=%s stage=%s only_scene=%s overwrite=%s",
+            pid, body.stage, body.only_scene, body.overwrite,
+        )
+        for h in logging.getLogger().handlers:
+            try:
+                h.flush()
+            except Exception:  # noqa: BLE001
+                pass
         if body.stage not in (
             "0", "0a", "0b", "0c", "1", "2", "2.5", "3", "4",
         ):
