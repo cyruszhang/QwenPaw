@@ -6,7 +6,7 @@
 For validation use cases: ask yes/no questions about generated images
 to check prop presence, composition rules, forbidden content, etc.
 
-Pricing: ~$0.001 per question on qwen-vl-max-latest. Per-panel
+Pricing: ~$0.001 per question on qwen-vl-max. Per-panel
 validation with 5-10 questions costs ~$0.05 — significantly less than
 the $0.60 wasted on a Wan animation against a bad frame.
 """
@@ -67,7 +67,10 @@ _DASHSCOPE_LOCK = threading.Lock()
 
 _DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1"
 _DEFAULT_TIMEOUT = 180.0   # bumped from 60s — DashScope can be slow under load
-_DEFAULT_MODEL = "qwen-vl-max-latest"
+# Default to the stable `qwen-vl-max` snapshot, NOT `-latest`: the
+# `-latest` alias is gated behind per-account access on DashScope and
+# returns 403 AccessDenied on keys that work fine for the bare alias.
+_DEFAULT_MODEL = "qwen-vl-max"
 
 _VALID_MODELS = {
     "qwen-vl-max-latest",

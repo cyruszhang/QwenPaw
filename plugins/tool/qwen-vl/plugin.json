@@ -35,14 +35,14 @@
             "label": "Model",
             "type": "select",
             "required": false,
-            "default": "qwen-vl-max-latest",
+            "default": "qwen-vl-max",
             "options": [
-              "qwen-vl-max-latest",
               "qwen-vl-max",
-              "qwen-vl-plus-latest",
-              "qwen-vl-plus"
+              "qwen-vl-max-latest",
+              "qwen-vl-plus",
+              "qwen-vl-plus-latest"
             ],
-            "help": "Model to use (default: qwen-vl-max-latest)"
+            "help": "Model to use (default: qwen-vl-max). The -latest variants need per-account access and may 403."
           },
           {
             "name": "endpoint",
