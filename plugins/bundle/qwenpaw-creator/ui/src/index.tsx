@@ -815,6 +815,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   // user re-picking. Per-scene override stays in SceneEditModal.
   const [frameProvider, setFrameProvider] = React.useState("gpt-image-2");
   const [videoProvider, setVideoProvider] = React.useState("wan27");
+  // Optional explicit beat-count override (Pass 1 of decomposition).
+  // Empty = auto-derive from duration_target_s in the backend prompt.
+  const [targetScenes, setTargetScenes] = React.useState<number | undefined>(
+    undefined,
+  );
 
   const reload = React.useCallback(async () => {
     try {
@@ -929,6 +934,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           .filter(Boolean),
         frame_provider: frameProvider,
         video_provider: videoProvider,
+        target_scenes: targetScenes,
       });
       setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
       onChange?.();
@@ -946,6 +952,42 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
         "Decompose failed",
         String(e?.message ?? e).slice(0, 200),
         { tag: "decompose-err", level: "error" },
+      );
+      setTabBadge(0, 0);
+    } finally {
+      setBusy(false);
+      setActiveStage(null);
+    }
+  };
+
+  /**
+   * Pass 2 of the two-pass decomposition. Reads beats from the
+   * current draft (optionally with caller-supplied edits) and asks
+   * the backend to craft full per-scene specifications.
+   */
+  const onCraft = async (editedBeats?: any[]) => {
+    maybeRequestNotificationPermission();
+    setBusy(true);
+    setActiveStage("craft");
+    setTabBadge(1, 0);
+    try {
+      const r = await apiJson("POST", `/creator/projects/${pid}/craft`, {
+        beats: editedBeats ?? undefined,
+      });
+      setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
+      onChange?.();
+      await reload();
+      notify(
+        "Craft done",
+        `Scenes generated — ${(r.draft?.scenes?.length || 0)} scenes ready.`,
+        { tag: "craft", level: "success" },
+      );
+      setTabBadge(0, 1);
+    } catch (e: any) {
+      notify(
+        "Craft failed",
+        String(e?.message ?? e).slice(0, 200),
+        { tag: "craft-err", level: "error" },
       );
       setTabBadge(0, 0);
     } finally {
@@ -1199,13 +1241,27 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           worldBible, setWorldBible,
           frameProvider, setFrameProvider,
           videoProvider, setVideoProvider,
+          targetScenes, setTargetScenes,
           styles, busy, activeStage, status,
           onSubmit: onDecompose,
         })
       : null,
 
-    // Step 2+: Draft viewer + ref/frame galleries
+    // Step 1.5: Beat sheet review (Pass 1 done, Pass 2 not yet run).
+    // Crafted projects skip this branch because draft.scenes is populated.
     hasDraft
+      && (draft.beats || []).length > 0
+      && (draft.scenes || []).length === 0
+      ? React.createElement(BeatSheetView, {
+          draft,
+          busy,
+          activeStage,
+          onCraft,
+        })
+      : null,
+
+    // Step 2+: Draft viewer + ref/frame galleries
+    hasDraft && (draft.scenes || []).length > 0
       ? React.createElement(DraftPanel, {
           pid,
           draft,
@@ -2153,6 +2209,7 @@ function DecomposeForm({
   worldBible, setWorldBible,
   frameProvider, setFrameProvider,
   videoProvider, setVideoProvider,
+  targetScenes, setTargetScenes,
   styles, busy, activeStage, status,
   onSubmit,
 }: any) {
@@ -2165,18 +2222,33 @@ function DecomposeForm({
     Form,
     { layout: "vertical" },
     React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 8 },
+      React.createElement(Col, { span: 6 },
         React.createElement(Form.Item, { label: "Target duration (s)" },
           React.createElement(InputNumber, {
             min: 20,
-            max: 300,
+            max: 600,
             value: duration,
             onChange: (v: any) => setDuration(v ?? 60),
             style: { width: "100%" },
           }),
         ),
       ),
-      React.createElement(Col, { span: 16 },
+      React.createElement(Col, { span: 6 },
+        React.createElement(Form.Item, {
+          label: "Beat count (optional)",
+          extra: "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
+        },
+          React.createElement(InputNumber, {
+            min: 3,
+            max: 60,
+            value: targetScenes ?? null,
+            onChange: (v: any) => setTargetScenes(v == null ? undefined : Number(v)),
+            placeholder: "auto",
+            style: { width: "100%" },
+          }),
+        ),
+      ),
+      React.createElement(Col, { span: 12 },
         React.createElement(Form.Item, {
           label: "Style hint (optional — LLM picks if blank)",
         },
@@ -2353,6 +2425,186 @@ function DecomposeForm({
         disabled: !status?.has_dashscope,
         children: "Decompose with LLM",
       }),
+    ),
+  );
+}
+
+// ── beat sheet view: HITL gate between decompose (Pass 1) and craft (Pass 2) ──
+
+function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
+  const beats: any[] = draft.beats || [];
+  const chars: any[] = draft.assets?.characters || [];
+  const scene_refs: any[] = draft.assets?.scene_refs || [];
+  const styleId = draft.assets?.style?.catalog_id;
+  const isCrafting = busy && activeStage === "craft";
+
+  // Locally-edited beats — copy out so user edits don't mutate the
+  // server-returned draft directly. POSTed via onCraft on click.
+  const [edited, setEdited] = React.useState<any[]>(beats);
+  React.useEffect(() => { setEdited(beats); }, [draft.beats]);
+
+  const updateBeat = (idx: number, patch: any) => {
+    setEdited((prev) => prev.map((b, i) => i === idx ? { ...b, ...patch } : b));
+  };
+  const deleteBeat = (idx: number) => {
+    setEdited((prev) => prev.filter((_, i) => i !== idx));
+  };
+  const moveBeat = (idx: number, dir: -1 | 1) => {
+    setEdited((prev) => {
+      const next = [...prev];
+      const j = idx + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[idx], next[j]] = [next[j], next[idx]];
+      return next;
+    });
+  };
+  const addBeat = () => {
+    setEdited((prev) => [...prev, {
+      name: `new_beat_${prev.length}`,
+      summary: "",
+      chars_used: [],
+      setting_used: null,
+      est_seconds: 8,
+      has_narration: true,
+    }]);
+  };
+
+  const totalSeconds = edited.reduce(
+    (s, b) => s + Number(b.est_seconds || 8), 0,
+  );
+
+  return React.createElement(
+    Card,
+    {
+      size: "small",
+      title: React.createElement(Space, null,
+        React.createElement(ScissorOutlined),
+        "Beat sheet — review before crafting scenes",
+      ),
+      style: { marginTop: 16 },
+      extra: React.createElement(Button, {
+        type: "primary",
+        loading: isCrafting,
+        disabled: !edited.length,
+        size: "large",
+        icon: React.createElement(PlayCircleOutlined),
+        onClick: () => onCraft(edited),
+        children: `Craft ${edited.length} scene${edited.length === 1 ? "" : "s"}`,
+      }),
+    },
+    // Anchor summary — small, since the next pass will show them in detail.
+    React.createElement(Paragraph, { type: "secondary", style: { fontSize: 12 } },
+      `Anchors locked: ${chars.length} character(s), ${scene_refs.length} setting(s), style "${styleId || "?"}". `,
+      `Total estimated runtime: ${totalSeconds}s across ${edited.length} beat(s).`,
+    ),
+
+    // Beat list — one row per beat, inline-editable.
+    edited.length === 0
+      ? React.createElement(Empty, {
+          description: "No beats. Add one or re-decompose from the source.",
+        })
+      : React.createElement(Space, {
+          direction: "vertical", size: 8, style: { width: "100%" },
+        },
+          ...edited.map((b, idx) => React.createElement(
+            Card,
+            {
+              key: idx,
+              size: "small",
+              bodyStyle: { padding: 8 },
+              style: { background: "#fafafa" },
+            },
+            React.createElement(Row, { gutter: 8, align: "middle" },
+              React.createElement(Col, { span: 1 },
+                React.createElement(AntText, { strong: true }, `${idx + 1}.`),
+              ),
+              React.createElement(Col, { span: 4 },
+                React.createElement(Input, {
+                  size: "small",
+                  value: b.name,
+                  onChange: (e: any) => updateBeat(idx, { name: e.target.value }),
+                  placeholder: "beat name",
+                }),
+              ),
+              React.createElement(Col, { span: 11 },
+                React.createElement(Input, {
+                  size: "small",
+                  value: b.summary,
+                  onChange: (e: any) => updateBeat(idx, { summary: e.target.value }),
+                  placeholder: "1-3 sentence summary of what happens",
+                }),
+              ),
+              React.createElement(Col, { span: 3 },
+                React.createElement(Select, {
+                  size: "small",
+                  mode: "multiple",
+                  maxTagCount: "responsive",
+                  placeholder: "chars",
+                  value: b.chars_used || [],
+                  onChange: (v: any) => updateBeat(idx, { chars_used: v }),
+                  options: chars.map((c: any) => ({ value: c.id, label: c.id })),
+                  style: { width: "100%" },
+                }),
+              ),
+              React.createElement(Col, { span: 2 },
+                React.createElement(Select, {
+                  size: "small",
+                  allowClear: true,
+                  placeholder: "setting",
+                  value: b.setting_used || undefined,
+                  onChange: (v: any) => updateBeat(idx, { setting_used: v || null }),
+                  options: scene_refs.map((r: any) => ({ value: r.id, label: r.id })),
+                  style: { width: "100%" },
+                }),
+              ),
+              React.createElement(Col, { span: 1 },
+                React.createElement(InputNumber, {
+                  size: "small",
+                  min: 3, max: 30,
+                  value: b.est_seconds,
+                  onChange: (v: any) => updateBeat(idx, { est_seconds: v ?? 8 }),
+                  style: { width: "100%" },
+                }),
+              ),
+              React.createElement(Col, { span: 2 },
+                React.createElement(Space, { size: 2 },
+                  React.createElement(Button, {
+                    size: "small", type: "text",
+                    disabled: idx === 0,
+                    icon: React.createElement(AntText, { style: { fontSize: 14 } }, "↑"),
+                    onClick: () => moveBeat(idx, -1),
+                  }),
+                  React.createElement(Button, {
+                    size: "small", type: "text",
+                    disabled: idx === edited.length - 1,
+                    icon: React.createElement(AntText, { style: { fontSize: 14 } }, "↓"),
+                    onClick: () => moveBeat(idx, 1),
+                  }),
+                  React.createElement(Tooltip, { title: "Delete beat" },
+                    React.createElement(Button, {
+                      size: "small", type: "text", danger: true,
+                      icon: React.createElement(DeleteOutlined),
+                      onClick: () => deleteBeat(idx),
+                    }),
+                  ),
+                ),
+              ),
+            ),
+          )),
+        ),
+    React.createElement("div", { style: { marginTop: 12, textAlign: "center" } },
+      React.createElement(Button, {
+        size: "small",
+        icon: React.createElement(PlusOutlined),
+        onClick: addBeat,
+        children: "Add beat",
+      }),
+    ),
+    React.createElement(Paragraph, {
+      type: "secondary",
+      style: { fontSize: 11, marginTop: 16 },
+    },
+      "Crafting scenes from the beats is one LLM call per project — costs ~$0.05 in tokens. Beats can be re-edited and re-crafted as often as needed; existing per-scene refs/frames stay on disk.",
     ),
   );
 }

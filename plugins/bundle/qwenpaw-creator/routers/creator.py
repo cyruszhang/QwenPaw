@@ -248,6 +248,21 @@ class DecomposeRequest(BaseModel):
     # downstream stages don't have to re-resolve from globals.
     frame_provider: Optional[str] = None  # Stage 2: gpt-image-2 | qwen-image
     video_provider: Optional[str] = None  # Stage 3: wan27 | happyhorse | seedance
+    # Optional explicit beat count override. When None, the Pass 1
+    # prompt suggests a range derived from duration_target_s.
+    target_scenes: Optional[int] = Field(default=None, ge=3, le=60)
+
+
+class CraftRequest(BaseModel):
+    """Body for POST /projects/{pid}/craft — Pass 2 of the two-pass
+    decomposition. Optional ``beats`` overrides whatever's currently
+    saved in ``project.yml`` (so the UI can craft from the user's
+    edited beat sheet without a separate save round-trip first).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    beats: Optional[list[dict]] = None
+    model: str = "qwen-max-latest"
 
 
 class StageRunRequest(BaseModel):
@@ -844,6 +859,14 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
     @router.post("/projects/{pid}/decompose")
     async def decompose(pid: str, body: DecomposeRequest) -> dict:
+        """Pass 1 of the two-pass decomposition: extract anchors + beat
+        sheet from the source. Does NOT generate per-scene visual
+        descriptions — that's the ``/craft`` endpoint's job.
+
+        The returned draft has ``scenes: []`` and a populated ``beats``
+        list. The UI is expected to surface the beats for HITL review
+        before calling ``/craft``.
+        """
         api_key = _resolve_dashscope_key()
         if not api_key:
             raise HTTPException(400, "DASHSCOPE_API_KEY not configured")
@@ -856,10 +879,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             )
         text = src.read_text(encoding="utf-8")
 
-        from pipeline.stage_00_script import decompose_script, draft_to_yaml
+        from pipeline.stage_00_v2 import extract_beats
+        from pipeline.stage_00_script import draft_to_yaml
 
         try:
-            draft = await decompose_script(
+            draft = await extract_beats(
                 text=text,
                 api_key=api_key,
                 duration_target_s=body.duration_target_s,
@@ -874,14 +898,16 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 story_anchor=body.story_anchor,
                 style_directives=body.style_directives,
                 world_bible=body.world_bible,
+                target_scenes=body.target_scenes,
                 frame_provider=body.frame_provider,
                 video_provider=body.video_provider,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("[creator] stage_00 failed")
+            logger.exception("[creator] stage_00 v2 extract_beats failed")
             raise HTTPException(500, f"decompose failed: {exc}") from exc
 
-        # Persist
+        # Persist. project.yml carries `beats: [...]` and `scenes: []`
+        # at this point; /craft will populate scenes later.
         (proj / "project.yml").write_text(
             draft_to_yaml(draft), encoding="utf-8",
         )
@@ -892,6 +918,56 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             "audience": body.audience,
             "voice": body.voice,
             "model": body.model,
+            "target_scenes": body.target_scenes,
+        })
+
+        return {"ok": True, "project_id": pid, "draft": draft}
+
+    @router.post("/projects/{pid}/craft")
+    async def craft(pid: str, body: CraftRequest) -> dict:
+        """Pass 2 of the two-pass decomposition: craft full scene
+        specifications from the beat sheet. Reads beats from
+        ``project.yml`` (or from ``body.beats`` if supplied — lets
+        the UI pass freshly-edited beats without a save round-trip).
+        """
+        api_key = _resolve_dashscope_key()
+        if not api_key:
+            raise HTTPException(400, "DASHSCOPE_API_KEY not configured")
+
+        proj = project_dir(pid, create=False)
+        proj_yml = proj / "project.yml"
+        if not proj_yml.is_file():
+            raise HTTPException(
+                404,
+                "project.yml missing — run /decompose first to produce "
+                "the beat sheet",
+            )
+        draft = _yaml_loads(proj_yml.read_text(encoding="utf-8"))
+        if body.beats is not None:
+            # Caller supplied (possibly-edited) beats; override.
+            draft["beats"] = list(body.beats)
+        if not (draft.get("beats") or []):
+            raise HTTPException(
+                400,
+                "no beats in project.yml and none supplied in body — "
+                "nothing to craft from",
+            )
+
+        from pipeline.stage_00_v2 import craft_scenes
+        from pipeline.stage_00_script import draft_to_yaml
+
+        try:
+            draft = await craft_scenes(
+                draft, api_key=api_key, model=body.model,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[creator] stage_00 v2 craft_scenes failed")
+            raise HTTPException(500, f"craft failed: {exc}") from exc
+
+        proj_yml.write_text(draft_to_yaml(draft), encoding="utf-8")
+        _write_meta(pid, {
+            "crafted_at": _now_iso(),
+            "n_scenes": len(draft.get("scenes") or []),
         })
 
         return {"ok": True, "project_id": pid, "draft": draft}
