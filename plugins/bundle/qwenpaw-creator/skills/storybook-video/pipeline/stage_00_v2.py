@@ -33,6 +33,8 @@ already have ``scenes:`` populated in their project.yml).
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
 import re
 from typing import Optional
@@ -235,11 +237,11 @@ def _build_pass1_prompt(
 # ── Pass 2 prompts ──────────────────────────────────────────────────
 
 
-def _build_pass2_prompt(draft_with_beats: dict) -> tuple[str, str]:
+def _pass2_anchor_context(draft_with_beats: dict) -> str:
+    """The shared 'locked anchors + story context' block injected into
+    every per-beat Pass 2 call."""
     assets = draft_with_beats.get("assets") or {}
-    beats = draft_with_beats.get("beats") or []
     gc = draft_with_beats.get("global_config") or {}
-
     chars = assets.get("characters") or []
     scene_refs = assets.get("scene_refs") or []
     style = assets.get("style") or {}
@@ -255,139 +257,107 @@ def _build_pass2_prompt(draft_with_beats: dict) -> tuple[str, str]:
     style_id = style.get("catalog_id") or "?"
     style_template = style.get("positive_template") or ""
 
-    beats_table = "\n".join(
-        f"  Beat {i:02d} ({b.get('name', '')}): "
-        f"{b.get('summary', '')} "
-        f"[chars: {','.join(b.get('chars_used') or []) or 'none'}; "
-        f"setting: {b.get('setting_used') or 'none'}; "
-        f"est_s: {b.get('est_seconds', 8)}; "
-        f"narration: {b.get('has_narration', True)}]"
-        for i, b in enumerate(beats)
-    )
-
-    anchor_block = ""
+    blocks = [
+        "# Locked anchors\n",
+        f"Characters:\n{chars_summary}\n",
+        f"Settings:\n{settings_summary}\n",
+        f"Style: {style_id}\n  template: {style_template[:300]}\n",
+    ]
     if gc.get("story_anchor"):
-        anchor_block = (
-            f"\nStory anchor (overall narrative context): "
-            f"{gc['story_anchor']}\n"
-        )
-    world_bible_block = ""
+        blocks.append(f"Story anchor: {gc['story_anchor']}\n")
     if gc.get("world_bible"):
-        world_bible_block = (
-            f"\nWorld bible (invariants across every scene): "
+        blocks.append(
+            f"World bible (invariants across every scene): "
             f"{gc['world_bible']}\n"
         )
-    directives_block = ""
     if gc.get("style_directives"):
-        directives_block = (
-            "\nStyle directives (apply to every scene's composition): "
-            + "; ".join(gc["style_directives"])
-            + "\n"
+        blocks.append(
+            "Style directives (apply to the composition): "
+            + "; ".join(gc["style_directives"]) + "\n"
         )
+    return "\n".join(blocks)
 
+
+def _build_pass2_beat_prompt(
+    anchor_context: str, beat: dict, beat_index: int,
+) -> tuple[str, str]:
+    """Build (system, user) for crafting ONE scene from ONE beat.
+
+    Per-beat instead of all-beats-in-one-call: keeps each LLM output
+    small (one scene object), guarantees a 1:1 beat→scene mapping, and
+    lets the caller fan out concurrently. The previous single-call
+    approach compressed long beat sheets (e.g. 8 beats → 1 scene) and
+    produced oversized JSON that malformed.
+    """
     system = (
         "You are the SCENE CRAFTER. The anchors (characters, "
-        "settings, style) are LOCKED — reference them by id, don't "
-        "invent new ones. For each beat in the beat sheet, write the "
-        "full scene specification.\n\n"
+        "settings, style) are LOCKED — reference them by id, never "
+        "invent new ones. You are given ONE story beat; write ONE "
+        "full scene specification for it.\n\n"
         "Key separation: scene_description describes ACTIONS happening "
         "in the frame — NOT character appearance (anchored), NOT "
-        "setting appearance (anchored), NOT style (anchored). The "
-        "downstream image model will compose the frame from the "
-        "character/setting/style reference images PLUS your "
-        "scene_description. Repeating anchor details in the "
-        "description crowds out the action signal.\n\n"
+        "setting appearance (anchored), NOT art style (anchored). The "
+        "downstream image model composes the frame from the "
+        "reference images PLUS your scene_description; repeating "
+        "anchor details crowds out the action signal.\n\n"
         "Output ONLY valid JSON matching the schema. No markdown, no "
-        "commentary."
+        "commentary, no array — a single JSON object."
     )
 
+    chars_used = beat.get("chars_used") or []
+    setting_used = beat.get("setting_used")
     user = (
-        "# Locked anchors\n\n"
-        f"Characters:\n{chars_summary}\n\n"
-        f"Settings:\n{settings_summary}\n\n"
-        f"Style: {style_id}\n"
-        f"  template: {style_template[:300]}\n"
-        + anchor_block + world_bible_block + directives_block
-        + "\n# Beat sheet (write one scene per beat, IN ORDER):\n\n"
-        f"{beats_table}\n\n"
-        "# Required JSON output schema:\n"
+        anchor_context
+        + "\n# The beat to craft (write exactly ONE scene for it):\n\n"
+        f"name: {beat.get('name', f'beat_{beat_index}')}\n"
+        f"summary: {beat.get('summary', '')}\n"
+        f"characters present (use these ids verbatim): "
+        f"{chars_used or 'none'}\n"
+        f"setting (use this id verbatim): {setting_used or 'none'}\n"
+        f"target duration: {beat.get('est_seconds', 8)}s\n"
+        f"has_narration: {beat.get('has_narration', True)}\n\n"
+        "# Required JSON output schema (ONE object, NOT an array):\n"
         "{\n"
-        '  "scenes": [\n'
-        '    {\n'
-        '      "name": "<copy from beat.name>",\n'
-        '      "scene_description": "<visual prose ~250-400 chars: '
-        'WHAT IS HAPPENING in this frame — actions, poses, '
-        'expressions, prop interactions. Do NOT describe '
-        'character appearance, setting appearance, or art style — '
-        'those are anchored.>",\n'
-        '      "motion_prompt": "<verbs + camera ~80-150 chars for '
-        'I2V animation: subject motion, camera move, transitions. '
-        'E.g. \\"slow push-in on the bow as the old man pulls the '
-        'line tight; subtle swell below.\\">",\n'
-        '      "narration": "<spoken text, MUST be ≤ duration*18 '
-        'chars (longshu_v2 budget at 1.0x rate). Empty string if '
-        'has_narration:false.>",\n'
-        '      "duration": <int seconds; default to beat.est_seconds '
-        'but you may adjust within 4-15>,\n'
-        '      "has_narration": <copy from beat>,\n'
-        '      "standalone": <true for title/credit scenes that '
-        "don't reference anchors, else false>,\n"
-        '      "uses_characters": <list, copy from beat.chars_used>,\n'
-        '      "uses_scene_ref": <string or null, copy from '
-        'beat.setting_used>,\n'
-        '      "uses_style": true,\n'
-        '      "n_candidates": 1,\n'
-        '      "overlay": [],\n'
-        '      "validation_rules": {\n'
-        '        "must_contain": [\n'
-        '          "<short visual claim that MUST be true of this '
-        'frame, e.g. \\"a wooden mast is clearly visible\\". 3-6 '
-        'rules; concrete + verifiable by a vision model in one '
-        "yes/no question. Don't restate the whole scene.>\"\n"
-        '        ],\n'
-        '        "must_not_contain": [\n'
-        '          "<short claim about something that MUST NOT be in '
-        'the frame, e.g. \\"other ships visible on the horizon\\". '
-        '0-3 rules; only when there is a real failure mode worth '
-        "guarding against>\"\n"
-        '        ],\n'
-        '        "composition": [\n'
-        '          "<short geometric/relational claim, e.g. \\"the '
-        'character occupies the right third of the frame\\". 0-3 '
-        "rules; skip if not applicable>\"\n"
-        '        ]\n'
-        '      }\n'
-        '    }\n'
-        '  ]\n'
+        '  "name": "<copy the beat name>",\n'
+        '  "scene_description": "<visual prose ~250-400 chars: WHAT '
+        'IS HAPPENING — actions, poses, expressions, prop '
+        'interactions. NOT character/setting/style appearance.>",\n'
+        '  "motion_prompt": "<verbs + camera ~80-150 chars for I2V: '
+        'subject motion, camera move. E.g. \\"slow push-in on the '
+        'bow as the old man pulls the line tight; subtle swell.\\">",\n'
+        '  "narration": "<spoken text, ≤ duration*18 chars; empty '
+        'string if has_narration is false>",\n'
+        '  "duration": <int seconds, 4-15; default to the target>,\n'
+        '  "has_narration": <copy from the beat>,\n'
+        '  "standalone": <true only for title/credit scenes>,\n'
+        '  "uses_characters": <list, copy the beat characters>,\n'
+        '  "uses_scene_ref": <string or null, copy the beat setting>,\n'
+        '  "uses_style": true,\n'
+        '  "n_candidates": 1,\n'
+        '  "overlay": [],\n'
+        '  "validation_rules": {\n'
+        '    "must_contain": ["<3-6 atomic, observable visual claims '
+        'a vision model can verify yes/no, e.g. \\"a wooden mast is '
+        'clearly visible\\">"],\n'
+        '    "must_not_contain": ["<0-3 claims for real failure modes, '
+        'e.g. \\"other characters visible\\" for a solo scene>"],\n'
+        '    "composition": ["<0-3 geometric claims; skip if N/A>"]\n'
+        "  }\n"
         "}\n\n"
-        "Crafting rules:\n"
-        "1. scene_description: ACTIONS only. 'The old man hauls the "
-        "line, knees braced against the gunwale, face strained.' "
-        "NOT 'an elderly Cuban fisherman in a weathered hat hauls...'\n"
-        "2. motion_prompt: imperative verbs + camera direction. "
-        "Avoid noun lists. Limit to one or two motion ideas per scene.\n"
-        "3. narration: respect duration*18 char budget. Match tone "
-        "to the voice and audience. Empty string when has_narration "
-        "is false.\n"
-        "4. standalone:true scenes (title/credits) leave "
-        "uses_characters=[] and uses_scene_ref=null.\n"
+        "Rules:\n"
+        "1. scene_description: ACTIONS only.\n"
+        "2. motion_prompt: imperative verbs + camera; one or two "
+        "ideas max.\n"
+        "3. narration: respect the duration*18 char budget; empty "
+        "string when has_narration is false.\n"
+        "4. standalone:true → uses_characters=[] and "
+        "uses_scene_ref=null.\n"
         "5. uses_characters / uses_scene_ref must EXACTLY match the "
-        "beat's chars_used / setting_used (copy them through).\n"
-        "6. Output ONE scene per beat, in the same order as the beat "
-        "sheet. Don't add or drop scenes.\n"
-        "7. Title-card beats may use overlay entries for the title "
-        "text; otherwise leave overlay as [].\n"
-        "8. validation_rules: write 3-6 must_contain claims that a "
-        "vision model could verify with one yes/no question each. Each "
-        "claim should be ATOMIC (one fact per claim) and OBSERVABLE "
-        "(visible in the frame, not motion or audio). Skip rules for "
-        "things the anchors already guarantee — focus on per-scene "
-        "specifics. must_not_contain: only add when there's a real "
-        "failure mode (e.g. \"other characters visible\" for a "
-        "solitary scene). composition: only when the geometry "
-        "matters. Empty arrays are OK.\n"
+        "beat's character/setting ids above.\n"
+        "6. validation_rules.must_contain: 3-6 atomic + observable "
+        "claims; skip what the anchors already guarantee. Empty "
+        "arrays are fine for must_not_contain / composition.\n"
     )
-
     return system, user
 
 
@@ -566,32 +536,87 @@ async def craft_scenes(
             "beats to the draft",
         )
 
-    system, user = _build_pass2_prompt(draft_with_beats)
+    # Per-beat fan-out: one focused LLM call per beat, bounded by the
+    # project's concurrency knob. Guarantees a 1:1 beat→scene mapping
+    # (the old single-call approach compressed long beat sheets) and
+    # keeps each output small enough to parse reliably.
+    gc = draft_with_beats.get("global_config") or {}
+    concurrency = max(1, min(8, int(gc.get("concurrency") or 5)))
+    anchor_context = _pass2_anchor_context(draft_with_beats)
+    sem = asyncio.Semaphore(concurrency)
     logger.info(
-        "[stage 00 v2 pass 2] crafting %d scenes from beats via %s",
-        len(beats), model,
+        "[stage 00 v2 pass 2] crafting %d scene(s), one call per beat "
+        "via %s (concurrency=%d)",
+        len(beats), model, concurrency,
     )
-    pass2 = await _call_llm_decompose(
-        system=system, user=user,
-        model=model, api_key=api_key, timeout_s=timeout_s,
+
+    async def _craft_one(beat_index: int, beat: dict) -> dict:
+        system, user = _build_pass2_beat_prompt(
+            anchor_context, beat, beat_index,
+        )
+        async with sem:
+            try:
+                resp = await _call_llm_decompose(
+                    system=system, user=user,
+                    model=model, api_key=api_key, timeout_s=timeout_s,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "[stage 00 v2 pass 2] beat %d (%s) craft failed: %s",
+                    beat_index, beat.get("name"), exc,
+                )
+                resp = {}
+        # The model may return the scene object directly, or wrapped
+        # in {"scene": {...}} or {"scenes": [{...}]}. Unwrap.
+        if isinstance(resp, dict):
+            if isinstance(resp.get("scene"), dict):
+                sc = resp["scene"]
+            elif isinstance(resp.get("scenes"), list) and resp["scenes"]:
+                sc = resp["scenes"][0]
+            elif "scene_description" in resp or "name" in resp:
+                sc = resp
+            else:
+                sc = {}
+        else:
+            sc = {}
+        # Fallback: if the LLM gave us nothing usable, synthesize a
+        # minimal scene from the beat so the project still has N scenes.
+        if not sc or not sc.get("scene_description"):
+            logger.warning(
+                "[stage 00 v2 pass 2] beat %d (%s) produced no usable "
+                "scene; falling back to beat summary",
+                beat_index, beat.get("name"),
+            )
+            sc = {
+                "name": beat.get("name", f"scene_{beat_index}"),
+                "scene_description": beat.get("summary", ""),
+                "motion_prompt": "",
+                "narration": (
+                    beat.get("summary", "")
+                    if beat.get("has_narration", True) else ""
+                ),
+                "duration": beat.get("est_seconds", 8),
+                "has_narration": beat.get("has_narration", True),
+                "uses_characters": beat.get("chars_used") or [],
+                "uses_scene_ref": beat.get("setting_used"),
+            }
+        # Carry the beat's anchor refs through if the LLM dropped them.
+        if not sc.get("uses_characters"):
+            sc["uses_characters"] = beat.get("chars_used") or []
+        if not sc.get("uses_scene_ref"):
+            sc["uses_scene_ref"] = beat.get("setting_used")
+        return sc
+
+    scenes = await asyncio.gather(
+        *(_craft_one(i, b) for i, b in enumerate(beats)),
     )
-    scenes = pass2.get("scenes") or []
+    scenes = list(scenes)
     if not scenes:
-        raise RuntimeError(
-            f"Pass 2 produced no scenes — raw response: {pass2}",
-        )
-    if len(scenes) != len(beats):
-        logger.warning(
-            "[stage 00 v2 pass 2] scene count %d != beat count %d — "
-            "LLM compressed or expanded the beat sheet against "
-            "instructions",
-            len(scenes), len(beats),
-        )
+        raise RuntimeError("Pass 2 produced no scenes")
 
     # Stamp ids + propagate per-project provider defaults onto each
     # scene so Stage 2 / 3 have what they need without re-resolving
-    # from global_config every call.
-    gc = draft_with_beats.get("global_config") or {}
+    # from global_config every call. (gc resolved above.)
     fp_default = gc.get("frame_provider") or "gpt-image-2"
     vp_default = gc.get("video_provider") or "wan27"
 
@@ -622,25 +647,35 @@ async def craft_scenes(
             sc["duration"] = 8
         sc["has_narration"] = bool(sc.get("has_narration", True))
 
-        # Extract inline validation_rules → per-scene block. Each
-        # rule list is filtered to non-empty strings.
-        rules_inline = sc.pop("validation_rules", None) or {}
+        # Extract inline validation_rules → per-scene block. The LLM
+        # sometimes returns validation_rules as a JSON *string* or even
+        # a bare list instead of the prescribed dict — coerce defensively
+        # (this was the `'str' object has no attribute 'get'` crash).
+        rules_inline = sc.pop("validation_rules", None)
+        if isinstance(rules_inline, str):
+            s = rules_inline.strip()
+            try:
+                rules_inline = json.loads(s) if s.startswith("{") else {}
+            except (json.JSONDecodeError, ValueError):
+                rules_inline = {}
+        if isinstance(rules_inline, list):
+            # A bare list → treat as must_contain claims.
+            rules_inline = {"must_contain": rules_inline}
+        if not isinstance(rules_inline, dict):
+            rules_inline = {}
+
+        def _rule_list(key: str) -> list[str]:
+            v = rules_inline.get(key)
+            if isinstance(v, str):
+                v = [v]
+            if not isinstance(v, list):
+                return []
+            return [str(r).strip() for r in v if r and str(r).strip()]
+
         cleaned = {
-            "must_contain": [
-                str(r).strip()
-                for r in (rules_inline.get("must_contain") or [])
-                if r and str(r).strip()
-            ],
-            "must_not_contain": [
-                str(r).strip()
-                for r in (rules_inline.get("must_not_contain") or [])
-                if r and str(r).strip()
-            ],
-            "composition": [
-                str(r).strip()
-                for r in (rules_inline.get("composition") or [])
-                if r and str(r).strip()
-            ],
+            "must_contain": _rule_list("must_contain"),
+            "must_not_contain": _rule_list("must_not_contain"),
+            "composition": _rule_list("composition"),
         }
         if any(cleaned.values()):
             per_scene_rules[sid] = cleaned
