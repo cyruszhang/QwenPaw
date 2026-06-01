@@ -1229,7 +1229,13 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   }
 
   const draft = project.draft ?? {};
-  const hasDraft = Boolean(draft?.scenes?.length);
+  // Two-pass decompose: a project can have beats (Pass 1 done) before
+  // it has scenes (Pass 2 craft). Either is enough to leave the
+  // initial Decompose form behind and show the next stage
+  // (BeatSheetView if only beats, DraftPanel if scenes are crafted).
+  const hasDraft = Boolean(
+    draft?.beats?.length || draft?.scenes?.length,
+  );
 
   // Current step computation
   let currentStep = 1; // source done
