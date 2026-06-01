@@ -998,6 +998,51 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   };
 
   /**
+   * Auto-fix loop: validate → regen failing scenes with VLM failure
+   * reasons appended to regen_notes → revalidate. Caps at maxIters.
+   * Each Stage 2 regen is paid ($0.20-0.30 on gpt-image-2 / ~$0.04
+   * on qwen-image / DashScope), so the UI confirms cost first.
+   */
+  const onAutofix = async (maxIters: number = 2) => {
+    maybeRequestNotificationPermission();
+    setBusy(true);
+    setActiveStage("autofix");
+    setTabBadge(1, 0);
+    try {
+      const r = await apiJson(
+        "POST", `/creator/projects/${pid}/autofix`,
+        { max_iters: maxIters },
+      );
+      const last = (r.iterations || []).slice(-1)[0] || {};
+      const checked = last.scenes_checked || 0;
+      const passed = last.scenes_passed || 0;
+      const failed = last.scenes_failed || 0;
+      await reload();
+      notify(
+        "Auto-fix done",
+        `After ${(r.iterations || []).length} iter(s): `
+          + `${passed}/${checked} scenes pass`
+          + (failed > 0 ? ` (${failed} still failing)` : ""),
+        {
+          tag: "autofix",
+          level: failed > 0 ? "warning" : "success",
+        },
+      );
+      setTabBadge(0, 1);
+    } catch (e: any) {
+      notify(
+        "Auto-fix failed",
+        String(e?.message ?? e).slice(0, 200),
+        { tag: "autofix-err", level: "error" },
+      );
+      setTabBadge(0, 0);
+    } finally {
+      setBusy(false);
+      setActiveStage(null);
+    }
+  };
+
+  /**
    * Fan-out across scenes with bounded concurrency. Each scene fires
    * its own /stage POST so the per-card SSE state lights up live and
    * any one failure doesn't tank the others.
@@ -1062,6 +1107,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       "0c": "Stage 0c — style ref",
       "1": "Stage 1 — narration",
       "2": "Stage 2 — frame compose",
+      "2.5": "Stage 2.5 — validate frames",
       "3": "Stage 3 — animation",
       "4": "Stage 4 — final MP4",
     };
@@ -1273,6 +1319,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           status,
           onRunStage,
           onRunStageAllParallel,
+          onAutofix,
           onSaveDraft,
           onReload: reload,
           onAddAnchor: (kind: "character" | "scene_ref") =>
@@ -2624,6 +2671,7 @@ function DraftPanel({
   status,
   onRunStage,
   onRunStageAllParallel,
+  onAutofix,
   onSaveDraft,
   onReload,
   onAddAnchor,
@@ -2979,16 +3027,57 @@ function DraftPanel({
           : "OPENAI_API_KEY missing — set it in Environment Variables";
         const conc = Math.max(1, Math.min(5,
           Number((draft.global_config || {}).concurrency) || 5));
+        // Validate / Auto-fix need DashScope (Qwen-VL) regardless of
+        // which image provider was used to compose the frames.
+        const validateDisabled = !status?.has_dashscope;
+        const validateTitle = validateDisabled
+          ? "DASHSCOPE_API_KEY missing — Qwen-VL needs it to validate"
+          : "Validate frames against per-scene rules (Qwen-VL)";
+        // Count failing scenes from the saved validation report
+        // (read out of projStatus). Drives the auto-fix label.
+        const vr = projStatus?.stages?.["2.5"]?.report || {};
+        const failingCount = Object.entries(vr)
+          .filter(([k, v]: [string, any]) =>
+            k !== "_summary"
+            && v && v.passed === false
+            && (v.rule_count || 0) > 0)
+          .length;
         return React.createElement(
-          Tooltip,
-          { title: keyMissing ? missingLabel : "" },
-          React.createElement(Button, {
-            type: "primary",
-            loading: busy && activeStage === "2",
-            disabled: keyMissing,
-            onClick: () => onRunStageAllParallel("2", false),
-            children: `Run Stage 2 (×${conc})`,
-          }),
+          Space, { size: 6 },
+          React.createElement(Tooltip, {
+            title: keyMissing ? missingLabel : "",
+          },
+            React.createElement(Button, {
+              type: "primary",
+              loading: busy && activeStage === "2",
+              disabled: keyMissing,
+              onClick: () => onRunStageAllParallel("2", false),
+              children: `Run Stage 2 (×${conc})`,
+            }),
+          ),
+          React.createElement(Tooltip, { title: validateTitle },
+            React.createElement(Button, {
+              loading: busy && activeStage === "2.5",
+              disabled: validateDisabled,
+              onClick: () => onRunStage("2.5"),
+              children: "Validate",
+            }),
+          ),
+          React.createElement(Tooltip, {
+            title: failingCount > 0
+              ? `Re-craft ${failingCount} failing scene(s) with VLM-extracted regen notes, up to 2 iters. Each iter regenerates one frame per failing scene (paid).`
+              : "Run Validate first; if any scenes fail, this button auto-regens them.",
+          },
+            React.createElement(Button, {
+              loading: busy && activeStage === "autofix",
+              disabled: validateDisabled || failingCount === 0,
+              danger: failingCount > 0,
+              onClick: () => onAutofix?.(2),
+              children: failingCount > 0
+                ? `Auto-fix ${failingCount}`
+                : "Auto-fix",
+            }),
+          ),
         );
       })(),
     },
@@ -3611,6 +3700,32 @@ function FrameGallery({
                   Tag,
                   { color: tagSpec.color, style: { fontSize: 10 } },
                   tagSpec.label,
+                );
+              })(),
+              (() => {
+                // Validation badge from the Stage 2.5 report.
+                const vr = projStatus?.stages?.["2.5"]?.report || {};
+                const myReport = vr[s.id];
+                if (!myReport || (myReport.rule_count || 0) === 0) return null;
+                const passed = myReport.passed;
+                const failures = (myReport.failures || []).length;
+                const total = myReport.rule_count || 0;
+                const tooltipBody = passed
+                  ? `All ${total} validation rule(s) pass`
+                  : `${failures}/${total} rule(s) failed:\n` +
+                    (myReport.failures || []).slice(0, 5).map(
+                      (f: any) => `• ${f.rule}`,
+                    ).join("\n");
+                return React.createElement(
+                  Tooltip, { title: tooltipBody },
+                  React.createElement(
+                    Tag,
+                    {
+                      color: passed ? "green" : "red",
+                      style: { fontSize: 10 },
+                    },
+                    passed ? `✓ ${total}` : `✗ ${failures}/${total}`,
+                  ),
                 );
               })(),
               liveBusy

@@ -320,7 +320,26 @@ def _build_pass2_prompt(draft_with_beats: dict) -> tuple[str, str]:
         'beat.setting_used>,\n'
         '      "uses_style": true,\n'
         '      "n_candidates": 1,\n'
-        '      "overlay": []\n'
+        '      "overlay": [],\n'
+        '      "validation_rules": {\n'
+        '        "must_contain": [\n'
+        '          "<short visual claim that MUST be true of this '
+        'frame, e.g. \\"a wooden mast is clearly visible\\". 3-6 '
+        'rules; concrete + verifiable by a vision model in one '
+        "yes/no question. Don't restate the whole scene.>\"\n"
+        '        ],\n'
+        '        "must_not_contain": [\n'
+        '          "<short claim about something that MUST NOT be in '
+        'the frame, e.g. \\"other ships visible on the horizon\\". '
+        '0-3 rules; only when there is a real failure mode worth '
+        "guarding against>\"\n"
+        '        ],\n'
+        '        "composition": [\n'
+        '          "<short geometric/relational claim, e.g. \\"the '
+        'character occupies the right third of the frame\\". 0-3 '
+        "rules; skip if not applicable>\"\n"
+        '        ]\n'
+        '      }\n'
         '    }\n'
         '  ]\n'
         "}\n\n"
@@ -341,6 +360,15 @@ def _build_pass2_prompt(draft_with_beats: dict) -> tuple[str, str]:
         "sheet. Don't add or drop scenes.\n"
         "7. Title-card beats may use overlay entries for the title "
         "text; otherwise leave overlay as [].\n"
+        "8. validation_rules: write 3-6 must_contain claims that a "
+        "vision model could verify with one yes/no question each. Each "
+        "claim should be ATOMIC (one fact per claim) and OBSERVABLE "
+        "(visible in the frame, not motion or audio). Skip rules for "
+        "things the anchors already guarantee — focus on per-scene "
+        "specifics. must_not_contain: only add when there's a real "
+        "failure mode (e.g. \"other characters visible\" for a "
+        "solitary scene). composition: only when the geometry "
+        "matters. Empty arrays are OK.\n"
     )
 
     return system, user
@@ -503,8 +531,18 @@ async def craft_scenes(
     gc = draft_with_beats.get("global_config") or {}
     fp_default = gc.get("frame_provider") or "gpt-image-2"
     vp_default = gc.get("video_provider") or "wan27"
+
+    # Lift per-scene validation_rules emitted inline by the LLM into
+    # the project-level validation.per_scene map (matches the schema
+    # ValidationRules / SceneValidationRules dataclasses expect). The
+    # inline shape is friendlier for the LLM to reason about; the
+    # lifted shape is what stage_02_5_validate reads.
+    validation_block = draft_with_beats.setdefault("validation", {})
+    per_scene_rules: dict = validation_block.get("per_scene") or {}
+
     for idx, sc in enumerate(scenes):
-        sc["id"] = f"{idx:02d}"
+        sid = f"{idx:02d}"
+        sc["id"] = sid
         sc["name"] = _snake(sc.get("name", f"scene_{idx}"))
         sc.setdefault("frame_provider", fp_default)
         sc.setdefault("video_provider", vp_default)
@@ -521,11 +559,43 @@ async def craft_scenes(
             sc["duration"] = 8
         sc["has_narration"] = bool(sc.get("has_narration", True))
 
+        # Extract inline validation_rules → per-scene block. Each
+        # rule list is filtered to non-empty strings.
+        rules_inline = sc.pop("validation_rules", None) or {}
+        cleaned = {
+            "must_contain": [
+                str(r).strip()
+                for r in (rules_inline.get("must_contain") or [])
+                if r and str(r).strip()
+            ],
+            "must_not_contain": [
+                str(r).strip()
+                for r in (rules_inline.get("must_not_contain") or [])
+                if r and str(r).strip()
+            ],
+            "composition": [
+                str(r).strip()
+                for r in (rules_inline.get("composition") or [])
+                if r and str(r).strip()
+            ],
+        }
+        if any(cleaned.values()):
+            per_scene_rules[sid] = cleaned
+
+    if per_scene_rules:
+        validation_block["per_scene"] = per_scene_rules
+        draft_with_beats["validation"] = validation_block
+
     draft_with_beats["scenes"] = scenes
-    # Stamp craft timestamp into global_config for audit. Beats stay
-    # in the YAML so a future "re-craft" pass can reuse them.
+    n_rules = sum(
+        len(r.get("must_contain", []))
+        + len(r.get("must_not_contain", []))
+        + len(r.get("composition", []))
+        for r in per_scene_rules.values()
+    )
     logger.info(
-        "[stage 00 v2 pass 2] done: %d scenes produced",
-        len(scenes),
+        "[stage 00 v2 pass 2] done: %d scenes, %d validation rule(s) "
+        "across %d scene(s)",
+        len(scenes), n_rules, len(per_scene_rules),
     )
     return draft_with_beats

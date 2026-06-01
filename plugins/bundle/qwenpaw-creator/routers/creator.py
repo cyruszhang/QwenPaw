@@ -265,6 +265,20 @@ class CraftRequest(BaseModel):
     model: str = "qwen-max-latest"
 
 
+class AutoFixRequest(BaseModel):
+    """Body for POST /projects/{pid}/autofix.
+
+    Validates all scenes, appends VLM failure reasons to each failing
+    scene's regen_notes, re-runs Stage 2 for the failures, re-validates.
+    Caps at ``max_iters`` (default 2 — each iter is one Stage 2 regen
+    per failing scene, ~$0.20-0.30 per regen on gpt-image-2).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    max_iters: int = Field(default=2, ge=1, le=5)
+    only_scene: Optional[str] = None
+
+
 class StageRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # One of: "0a" | "0b" | "0c" | "0" (all of 0) | "1" | "2" | "3" | "4"
@@ -974,6 +988,152 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
     # ─── anchor CRUD (add/edit/delete characters + scene_refs) ──────
 
+    @router.post("/projects/{pid}/autofix")
+    async def autofix(pid: str, body: AutoFixRequest) -> dict:
+        """Auto-fix loop: validate → regen failing scenes with the VLM
+        failure reasons appended to regen_notes → re-validate. Up to
+        ``max_iters`` iterations.
+
+        Per-iteration:
+          1. Run Stage 2.5 on the current set of (possibly filtered)
+             scenes.
+          2. Collect failing scene ids. If none, exit early.
+          3. For each failing scene: append the failure reasons to
+             ``regen_notes`` (deduped against the existing text).
+          4. Persist the draft, then re-run Stage 2 with
+             ``overwrite=True`` for each failing scene.
+          5. Loop.
+
+        Returns a structured report with per-iteration validation
+        snapshots so the UI can render a "fixed N/M scenes" summary.
+        """
+        ds = _resolve_dashscope_key()
+        if not ds:
+            raise HTTPException(
+                400,
+                "DASHSCOPE_API_KEY missing — Qwen-VL validation needs it",
+            )
+
+        proj = project_dir(pid, create=False)
+        proj_yml = proj / "project.yml"
+        if not proj_yml.is_file():
+            raise HTTPException(
+                404, "project.yml missing — decompose+craft first",
+            )
+
+        from pipeline.stage_02_5_validate import run_stage_02_5
+        from pipeline.stage_02_v15_compose import run_stage_02_v15
+        from pipeline.stage_00_script import draft_to_yaml
+
+        iterations: list[dict] = []
+        fixed_scenes: set[str] = set()
+        failed_scenes: set[str] = set()
+
+        for i in range(body.max_iters):
+            # Reload the draft each iter (the previous loop may have
+            # edited regen_notes and committed Stage 2 outputs).
+            draft = _read_project(pid)
+            spec = _draft_to_projectspec(draft)
+            _hydrate_refs(spec, proj)
+
+            report = await run_stage_02_5(
+                spec, proj,
+                api_key=ds, only_scene=body.only_scene,
+            )
+            failing = [
+                (sid, info) for sid, info in report.items()
+                if sid != "_summary"
+                and not info.get("passed", True)
+                and info.get("rule_count", 0) > 0
+            ]
+            iterations.append({
+                "iter": i,
+                "scenes_checked": report.get("_summary", {}).get(
+                    "scenes_checked", 0,
+                ),
+                "scenes_passed": report.get("_summary", {}).get(
+                    "scenes_passed", 0,
+                ),
+                "scenes_failed": len(failing),
+                "failing_scene_ids": [sid for sid, _ in failing],
+            })
+
+            if not failing:
+                # Exit early — everything passes.
+                fixed_scenes.update(
+                    s.get("id") for s in (draft.get("scenes") or [])
+                )
+                break
+
+            # Append VLM failure reasons to each failing scene's
+            # regen_notes (additive, deduped — don't lose prior user
+            # notes).
+            for sid, info in failing:
+                fail_lines = []
+                for chk in info.get("failures", [])[:5]:
+                    rule = chk.get("rule", "")
+                    ans = chk.get("vlm_answer", "")
+                    kind = chk.get("kind", "")
+                    if kind == "must_contain":
+                        fail_lines.append(
+                            f"Must include: {rule} (VLM said: {ans[:60]})",
+                        )
+                    elif kind == "must_not_contain":
+                        fail_lines.append(
+                            f"Must NOT include: {rule}",
+                        )
+                    else:
+                        fail_lines.append(f"Should be true: {rule}")
+                fail_block = (
+                    f"[auto-fix iter {i}] " + "; ".join(fail_lines)
+                )
+                for sc in draft.get("scenes") or []:
+                    if str(sc.get("id")) == sid:
+                        existing = (sc.get("regen_notes") or "").strip()
+                        if fail_block in existing:
+                            continue  # already there from a prior iter
+                        sc["regen_notes"] = (
+                            (existing + "\n" + fail_block).strip()
+                            if existing else fail_block
+                        )
+                        break
+            proj_yml.write_text(
+                draft_to_yaml(draft), encoding="utf-8",
+            )
+
+            # Re-run Stage 2 for the failing scenes only. Use the same
+            # provider/key resolution as the regular /stage handler.
+            spec = _draft_to_projectspec(_read_project(pid))
+            _hydrate_refs(spec, proj)
+            oa = _resolve_openai_key()
+            keys = {"openai": oa or "", "dashscope": ds}
+            for sid, _ in failing:
+                try:
+                    await run_stage_02_v15(
+                        spec, proj,
+                        keys=keys,
+                        only_scene=sid,
+                        overwrite=True,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception(
+                        "[autofix] scene %s regen failed at iter %d",
+                        sid, i,
+                    )
+                    failed_scenes.add(sid)
+                    iterations[-1].setdefault("regen_errors", []).append({
+                        "scene_id": sid, "error": str(exc),
+                    })
+
+        return {
+            "ok": True,
+            "project_id": pid,
+            "max_iters": body.max_iters,
+            "iterations": iterations,
+            "fixed_scenes": sorted(fixed_scenes),
+            "errored_scenes": sorted(failed_scenes),
+        }
+
     @router.patch("/projects/{pid}/anchors")
     def edit_anchor(pid: str, body: AnchorEditRequest) -> dict:
         """Add, update, or delete a character or scene_ref in the draft.
@@ -1199,13 +1359,30 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         out["stages"]["2"] = {"frames": frames}
         out["stages"]["3"] = {"shots": shots}
         out["stages"]["4"] = {"final": final}
+
+        # Stage 2.5 validation report (if it exists). Shape:
+        #   {<scene_id>: {passed, rule_count, failures, ...}, _summary: {...}}
+        # The UI uses the per-scene `passed` field + failures count to
+        # render a badge on each FrameGallery card.
+        validation_report: dict = {}
+        report_path = proj / "_validation_report.json"
+        if report_path.is_file():
+            try:
+                validation_report = json.loads(
+                    report_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                validation_report = {}
+        out["stages"]["2.5"] = {"report": validation_report}
         return out
 
     # ─── stage runner ────────────────────────────────────────────────
 
     @router.post("/projects/{pid}/stage")
     async def run_stage(pid: str, body: StageRunRequest) -> dict:
-        if body.stage not in ("0", "0a", "0b", "0c", "1", "2", "3", "4"):
+        if body.stage not in (
+            "0", "0a", "0b", "0c", "1", "2", "2.5", "3", "4",
+        ):
             raise HTTPException(400, f"unknown stage: {body.stage}")
         proj = project_dir(pid, create=False)
         if not (proj / "project.yml").is_file():
@@ -1333,6 +1510,20 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 overwrite=body.overwrite,
             )
 
+        async def _run_2_5():
+            from pipeline.stage_02_5_validate import run_stage_02_5
+            ds = _resolve_dashscope_key()
+            if not ds:
+                raise HTTPException(
+                    400,
+                    "DASHSCOPE_API_KEY missing — Stage 2.5 uses Qwen-VL "
+                    "to validate frames",
+                )
+            return await run_stage_02_5(
+                spec, output_dir,
+                api_key=ds, only_scene=body.only_scene,
+            )
+
         async def _run_3():
             from pipeline.stage_03_shots import run_stage_03
             ds = _resolve_dashscope_key()
@@ -1391,6 +1582,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 report["results"]["1"] = await _run_1()
             elif body.stage == "2":
                 report["results"]["2"] = await _run_2()
+            elif body.stage == "2.5":
+                report["results"]["2.5"] = await _run_2_5()
             elif body.stage == "3":
                 report["results"]["3"] = await _run_3()
             elif body.stage == "4":
