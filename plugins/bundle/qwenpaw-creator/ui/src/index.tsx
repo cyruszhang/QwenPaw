@@ -2688,9 +2688,18 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
                   placeholder: chars.length
                     ? "select characters"
                     : "(no characters defined)",
-                  value: b.chars_used || [],
+                  // Defensive: a string value would split into
+                  // letter-tags under mode=multiple; always coerce to
+                  // an array. (Belt-and-suspenders vs the data fix.)
+                  value: Array.isArray(b.chars_used)
+                    ? b.chars_used
+                    : (b.chars_used ? [b.chars_used] : []),
                   onChange: (v: any) => updateBeat(idx, { chars_used: v }),
-                  options: chars.map((c: any) => ({ value: c.id, label: c.id })),
+                  options: chars.map((c: any) => ({
+                    value: c.id,
+                    label: c.id,
+                    title: c.description || c.id,
+                  })),
                   style: { width: "100%" },
                   disabled: !chars.length,
                 }),
@@ -2707,7 +2716,11 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
                     : "(no settings defined)",
                   value: b.setting_used || undefined,
                   onChange: (v: any) => updateBeat(idx, { setting_used: v || null }),
-                  options: scene_refs.map((r: any) => ({ value: r.id, label: r.id })),
+                  options: scene_refs.map((r: any) => ({
+                    value: r.id,
+                    label: r.id,
+                    title: r.description || r.id,
+                  })),
                   style: { width: "100%" },
                   disabled: !scene_refs.length,
                 }),

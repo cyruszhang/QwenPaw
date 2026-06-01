@@ -465,8 +465,22 @@ async def extract_beats(
         except (TypeError, ValueError):
             b["est_seconds"] = 8
         b["has_narration"] = bool(b.get("has_narration", True))
-        b["chars_used"] = list(b.get("chars_used") or [])
-        b["setting_used"] = b.get("setting_used") or None
+        # chars_used must be a list of ids. The LLM sometimes returns a
+        # bare string ("ona") instead of ["ona"] — `list("ona")` would
+        # explode into ['o','n','a'], so wrap a string into a single-
+        # element list rather than iterating its characters.
+        cu = b.get("chars_used")
+        if isinstance(cu, str):
+            cu = [cu] if cu.strip() else []
+        elif isinstance(cu, list):
+            cu = [str(c).strip() for c in cu if str(c).strip()]
+        else:
+            cu = []
+        b["chars_used"] = cu
+        su = b.get("setting_used")
+        b["setting_used"] = (
+            su.strip() if isinstance(su, str) and su.strip() else None
+        )
     draft["beats"] = beats
 
     # Merge story constraints: user-provided values override the LLM's

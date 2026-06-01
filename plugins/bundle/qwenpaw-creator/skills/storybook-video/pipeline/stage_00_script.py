@@ -416,14 +416,36 @@ def _normalize_ids(draft: dict) -> None:
         return s or "x"
 
     def _coerce_anchor(entry, fallback_id: str):
-        """Return a {id, description} dict regardless of input shape."""
+        """Return a {id, description} dict regardless of input shape.
+
+        Handles three cases:
+          1. Proper dict → normalize id, keep.
+          2. JSON-string double-encoding (qwen-max quirk: it sometimes
+             emits ``characters: ['{"id": "ona", "description": ...}']``
+             — a list of JSON *strings*). Parse the string back into a
+             dict and use its real id/description.
+          3. Plain descriptive string → derive an id from it.
+        """
         if isinstance(entry, dict):
             entry["id"] = snake(entry.get("id", "") or fallback_id)
             return entry
-        # LLM returned a bare string; treat as description, derive id.
         s = str(entry or "").strip()
         if not s:
             return None
+        # Case 2: the string is itself a JSON object — unwrap it.
+        if s.startswith("{") and s.endswith("}"):
+            try:
+                inner = json.loads(s)
+            except (json.JSONDecodeError, ValueError):
+                inner = None
+            if isinstance(inner, dict):
+                inner["id"] = snake(inner.get("id", "") or fallback_id)
+                logger.warning(
+                    "[stage 00] unwrapped JSON-string anchor → id=%r",
+                    inner["id"],
+                )
+                return inner
+        # Case 3: plain descriptive string; derive id from first words.
         derived_id = snake(s[:32]) or fallback_id
         logger.warning(
             "[stage 00] coerced malformed anchor (string → dict): "
