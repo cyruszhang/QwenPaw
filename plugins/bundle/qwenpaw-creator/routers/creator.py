@@ -233,7 +233,7 @@ class DecomposeRequest(BaseModel):
     style_hint: Optional[str] = None
     audience: Optional[str] = None
     voice: str = "longshu_v2"
-    model: str = "qwen-max-latest"
+    model: str = "qwen-max"
     # Optional story-level constraints — passed into Stage 00's prompt
     # AND persisted into global_config so Stage 2's compose prompt can
     # reuse them.
@@ -262,7 +262,7 @@ class CraftRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     beats: Optional[list[dict]] = None
-    model: str = "qwen-max-latest"
+    model: str = "qwen-max"
 
 
 class AutoFixRequest(BaseModel):

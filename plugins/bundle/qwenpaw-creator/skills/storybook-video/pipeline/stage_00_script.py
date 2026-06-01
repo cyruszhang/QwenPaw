@@ -118,7 +118,7 @@ def _load_style_catalog_names() -> list[dict]:
 _DASHSCOPE_OPENAI_BASE = (
     "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
-_DEFAULT_MODEL = "qwen-max-latest"
+_DEFAULT_MODEL = "qwen-max"
 
 
 def _build_decompose_prompt(
