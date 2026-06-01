@@ -403,21 +403,63 @@ def _ensure_style_catalog_block(draft: dict, catalog: list[dict]) -> None:
 def _normalize_ids(draft: dict) -> None:
     """Lowercase + snake_case all ids; renumber scene ids to "00", "01"...
     so downstream filename templates stay clean.
+
+    Defensive against malformed LLM output: a character/scene_ref entry
+    that came back as a bare string instead of a ``{id, description}``
+    dict is coerced into the dict shape (string becomes the
+    description; id is derived). Without this guard the old code
+    crashed with ``AttributeError: 'str' object has no attribute 'get'``.
     """
 
     def snake(s: str) -> str:
         s = re.sub(r"[^a-zA-Z0-9]+", "_", (s or "").strip()).strip("_").lower()
         return s or "x"
 
+    def _coerce_anchor(entry, fallback_id: str):
+        """Return a {id, description} dict regardless of input shape."""
+        if isinstance(entry, dict):
+            entry["id"] = snake(entry.get("id", "") or fallback_id)
+            return entry
+        # LLM returned a bare string; treat as description, derive id.
+        s = str(entry or "").strip()
+        if not s:
+            return None
+        derived_id = snake(s[:32]) or fallback_id
+        logger.warning(
+            "[stage 00] coerced malformed anchor (string → dict): "
+            "id=%r desc=%r",
+            derived_id, s[:80],
+        )
+        return {"id": derived_id, "description": s}
+
     pid = draft.get("project_id") or "storybook"
     draft["project_id"] = snake(pid)
 
-    for ch in draft.get("assets", {}).get("characters", []) or []:
-        ch["id"] = snake(ch.get("id", ""))
-    for sr in draft.get("assets", {}).get("scene_refs", []) or []:
-        sr["id"] = snake(sr.get("id", ""))
+    assets = draft.setdefault("assets", {})
+    chars_in = assets.get("characters") or []
+    refs_in = assets.get("scene_refs") or []
+    assets["characters"] = [
+        c for c in (
+            _coerce_anchor(ch, fallback_id=f"char_{i}")
+            for i, ch in enumerate(chars_in)
+        ) if c is not None
+    ]
+    assets["scene_refs"] = [
+        r for r in (
+            _coerce_anchor(sr, fallback_id=f"setting_{i}")
+            for i, sr in enumerate(refs_in)
+        ) if r is not None
+    ]
 
     for idx, sc in enumerate(draft.get("scenes", []) or []):
+        if not isinstance(sc, dict):
+            # Should never happen for scenes, but the same defensive
+            # principle applies — skip non-dict entries.
+            logger.warning(
+                "[stage 00] scene at index %d is not a dict: %r",
+                idx, sc,
+            )
+            continue
         sc["id"] = f"{idx:02d}"
         sc["name"] = snake(sc.get("name", f"scene_{idx}"))
 
