@@ -93,6 +93,7 @@ class SceneSpec:
     # ProjectSpec.assets, and passes the resolved images to
     # gpt-image-2's /v1/images/edits as composition references.
     uses_characters: list[str] = field(default_factory=list)
+    uses_props: list[str] = field(default_factory=list)
     uses_scene_ref: str | None = None
     uses_style: bool = True   # whether to also pass style.reference_image
 
@@ -174,6 +175,22 @@ class CharacterRef:
 
 
 @dataclass
+class PropRef:
+    """A locked key prop — generated once in Stage 0a and reused across
+    scenes/settings.
+
+    Props are portable visual anchors: sword, boat, book, scale,
+    heirloom, map, etc. They should remain recognizably identical even
+    when held, placed in different settings, or seen from different
+    angles.
+    """
+
+    id: str
+    description: str
+    reference_image: Path | None = None     # populated by Stage 0a
+
+
+@dataclass
 class SceneRefAsset:
     """A locked scene/environment — generated once in Stage 0b.
 
@@ -217,6 +234,7 @@ class AssetSet:
     """
 
     characters: dict[str, CharacterRef] = field(default_factory=dict)
+    props: dict[str, PropRef] = field(default_factory=dict)
     scene_refs: dict[str, SceneRefAsset] = field(default_factory=dict)
     style: StyleAsset | None = None
 

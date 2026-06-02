@@ -35,7 +35,7 @@ _TOOLS_DIR = _REPO_ROOT / "plugins" / "tool"
 sys.path.insert(0, str(_SKILL_DIR))
 sys.path.insert(0, str(_REPO_SRC))
 
-from spec import CharacterRef, ProjectSpec  # noqa: E402
+from spec import CharacterRef, ProjectSpec, PropRef  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +164,30 @@ def _ref_prompt(character: CharacterRef, style_template: str) -> str:
     background, suitable for reuse as a visual anchor in scenes.
     """
     style_filled = style_template.replace("{prompt}", character.description)
-    return f"{style_filled}\n\nCharacter reference sheet for re-use across multiple scenes. Plain pale neutral background, no other elements, no text."
+    return (
+        f"{style_filled}\n\n"
+        "Character turnaround reference sheet for re-use across multiple "
+        "scenes. Show the same character from multiple angles in one image: "
+        "front view, side view, back view, and three-quarter view. Keep the "
+        "same proportions, face, clothing, accessories, colors, and distinctive "
+        "marks in every view. Plain pale neutral background, no scene, no "
+        "props unless worn by the character, no extra characters, no text."
+    )
+
+
+def _prop_prompt(prop: PropRef, style_template: str) -> str:
+    """Compose a reference-sheet prompt for one portable key prop."""
+    style_filled = style_template.replace("{prompt}", prop.description)
+    return (
+        f"{style_filled}\n\n"
+        "Key prop turnaround reference sheet for re-use across multiple "
+        "scenes and settings. Show the exact same object from multiple angles "
+        "in one image: front view, side view, back view, and three-quarter "
+        "view, plus a small detail close-up if useful. Preserve silhouette, "
+        "materials, color, markings, wear, scale, and all distinctive details "
+        "in every view. Plain pale neutral background, object only, no hands, "
+        "no holder, no characters, no scene, no text."
+    )
 
 
 async def run_stage_00a(
@@ -173,6 +196,7 @@ async def run_stage_00a(
     *,
     keys: dict[str, str],
     only_character: Optional[str] = None,
+    only_prop: Optional[str] = None,
     overwrite: bool = False,
     size: str = "1024x1024",
     quality: str = "high",
@@ -186,9 +210,9 @@ async def run_stage_00a(
     (default ``gpt-image-2``). ``keys`` must contain whichever key
     that provider needs — caller is responsible for that check.
     """
-    if not project_spec.assets.characters:
-        logger.info("[stage 0a] no characters in project — skipping")
-        return {"characters": []}
+    if not project_spec.assets.characters and not project_spec.assets.props:
+        logger.info("[stage 0a] no characters or props in project — skipping")
+        return {"characters": [], "props": []}
 
     style_template = ""
     if project_spec.assets.style and project_spec.assets.style.positive_template:
@@ -198,7 +222,9 @@ async def run_stage_00a(
     refs_dir.mkdir(parents=True, exist_ok=True)
 
     provider = _resolve_frame_provider(project_spec)
-    report: dict = {"characters": [], "stage": "0a", "provider": provider}
+    report: dict = {
+        "characters": [], "props": [], "stage": "0a", "provider": provider,
+    }
 
     # Walk characters once: drain cached/excluded into the report
     # directly, queue the rest for parallel generation. Concurrency
@@ -208,6 +234,8 @@ async def run_stage_00a(
 
     to_gen: list[tuple[str, CharacterRef]] = []
     for cid, character in project_spec.assets.characters.items():
+        if only_prop:
+            continue
         if only_character and cid != only_character:
             continue
         target = refs_dir / f"{cid}_ref.png"
@@ -217,6 +245,20 @@ async def run_stage_00a(
             report["characters"].append({"id": cid, "skipped": True, "path": str(target)})
             continue
         to_gen.append((cid, character))
+
+    to_gen_props: list[tuple[str, PropRef]] = []
+    for pid, prop in getattr(project_spec.assets, "props", {}).items():
+        if only_character:
+            continue
+        if only_prop and pid != only_prop:
+            continue
+        target = refs_dir / f"prop_{pid}_ref.png"
+        if target.exists() and target.stat().st_size > 0 and not overwrite:
+            logger.info(f"[stage 0a skip] {target.name} exists")
+            prop.reference_image = target
+            report["props"].append({"id": pid, "skipped": True, "path": str(target)})
+            continue
+        to_gen_props.append((pid, prop))
 
     sem = asyncio.Semaphore(concurrency)
 
@@ -267,15 +309,71 @@ async def run_stage_00a(
                 "elapsed_s": round(elapsed, 1),
             }
 
+    async def _gen_prop(pid: str, prop: PropRef) -> dict:
+        async with sem:
+            target = refs_dir / f"prop_{pid}_ref.png"
+            prompt = _prop_prompt(prop, style_template)
+            logger.info(
+                f"[stage 0a gen] prop={pid}  provider={provider}  "
+                f"prompt={len(prompt)} chars",
+            )
+            t0 = time.time()
+            try:
+                resp = await _call_provider_gen(
+                    provider,
+                    prompt=prompt,
+                    size=size,
+                    quality=quality,
+                    keys=keys,
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"  ✗ prop {pid} failed: {e}")
+                return {"id": pid, "error": str(e)}
+
+            summary = _block_text(resp.content[-1]) if resp.content else ""
+            if summary.startswith("Error:"):
+                logger.error(f"  ✗ prop {pid}: {summary}")
+                return {"id": pid, "error": summary}
+
+            saved = _parse_saved_path(resp)
+            if saved is None or not saved.exists():
+                logger.error(
+                    f"  ✗ prop {pid}: could not parse 'Saved to:' from response",
+                )
+                return {"id": pid, "error": "missing saved path"}
+
+            shutil.copy2(saved, target)
+            prop.reference_image = target
+            elapsed = time.time() - t0
+            logger.info(
+                f"  ✓ prop {pid}: {target.stat().st_size / 1e6:.1f} MB in "
+                f"{elapsed:.0f}s → {target.name}",
+            )
+            return {
+                "id": pid,
+                "path": str(target),
+                "bytes": target.stat().st_size,
+                "elapsed_s": round(elapsed, 1),
+            }
+
     if to_gen:
         results = await asyncio.gather(*(_gen_one(c, ch) for c, ch in to_gen))
         report["characters"].extend(results)
+    if to_gen_props:
+        prop_results = await asyncio.gather(*(
+            _gen_prop(pid, prop) for pid, prop in to_gen_props
+        ))
+        report["props"].extend(prop_results)
 
     n_ok = sum(1 for c in report["characters"] if "path" in c and not c.get("skipped"))
     n_skip = sum(1 for c in report["characters"] if c.get("skipped"))
     n_err = sum(1 for c in report["characters"] if "error" in c)
+    p_ok = sum(1 for p in report["props"] if "path" in p and not p.get("skipped"))
+    p_skip = sum(1 for p in report["props"] if p.get("skipped"))
+    p_err = sum(1 for p in report["props"] if "error" in p)
     logger.info(
-        f"[stage 0a] done via {provider} — generated {n_ok}, "
-        f"skipped {n_skip}, failed {n_err} (concurrency={concurrency})",
+        f"[stage 0a] done via {provider} — characters generated {n_ok}, "
+        f"skipped {n_skip}, failed {n_err}; props generated {p_ok}, "
+        f"skipped {p_skip}, failed {p_err} (concurrency={concurrency})",
     )
     return report

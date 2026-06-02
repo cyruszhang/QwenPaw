@@ -371,6 +371,10 @@ def _hydrate_refs(spec: Any, proj_dir: Path) -> None:
         p = refs_dir / f"{cid}_ref.png"
         if p.exists() and p.stat().st_size > 0:
             ch.reference_image = p
+    for prop_id, prop in getattr(spec.assets, "props", {}).items():
+        p = refs_dir / f"prop_{prop_id}_ref.png"
+        if p.exists() and p.stat().st_size > 0:
+            prop.reference_image = p
     for sid, sr in getattr(spec.assets, "scene_refs", {}).items():
         p = refs_dir / f"scene_{sid}_ref.png"
         if p.exists() and p.stat().st_size > 0:
@@ -461,6 +465,7 @@ class StageRunRequest(BaseModel):
     stage: str
     overwrite: bool = False
     only_character: Optional[str] = None
+    only_prop: Optional[str] = None
     only_scene_ref: Optional[str] = None
     only_scene: Optional[str] = None
     final_name: Optional[str] = None  # for stage 4
@@ -478,7 +483,7 @@ class AnchorEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # One of: "add", "update", "delete"
     op: str
-    # One of: "character", "scene_ref"
+    # One of: "character", "prop", "scene_ref"
     kind: str
     id: str
     description: Optional[str] = None  # required for add/update
@@ -528,6 +533,7 @@ class SceneEditRequest(BaseModel):
     scene_description: Optional[str] = None
     motion_prompt: Optional[str] = None
     uses_characters: Optional[list[str]] = None
+    uses_props: Optional[list[str]] = None
     uses_scene_ref: Optional[str] = None
     uses_style: Optional[bool] = None
     n_candidates: Optional[int] = None
@@ -878,7 +884,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         """
         out: list[dict] = []
 
-        for kind in ("characters", "scene_refs"):
+        for kind in ("characters", "props", "scene_refs"):
             old_list = (old.get("assets", {}) or {}).get(kind) or []
             new_list = (new.get("assets", {}) or {}).get(kind) or []
             if len(old_list) != len(new_list):
@@ -888,10 +894,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 if o_id and n_id and o_id != n_id:
                     if kind == "characters":
                         files = [f"refs/{o_id}_ref.png"]
+                    elif kind == "props":
+                        files = [f"refs/prop_{o_id}_ref.png"]
                     else:
                         files = [f"refs/scene_{o_id}_ref.png"]
+                    label = (
+                        "character" if kind == "characters"
+                        else "prop" if kind == "props"
+                        else "scene_ref"
+                    )
                     out.append({
-                        "kind": kind[:-1],   # "character" / "scene_ref"
+                        "kind": label,
                         "from": o_id,
                         "to": n_id,
                         "orphan_files": files,
@@ -1190,7 +1203,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         return {"ok": True, "project_id": pid, "draft": draft}
 
-    # ─── anchor CRUD (add/edit/delete characters + scene_refs) ──────
+    # ─── anchor CRUD (add/edit/delete characters + props + scene_refs) ─
 
     @router.post("/projects/{pid}/autofix")
     async def autofix(pid: str, body: AutoFixRequest) -> dict:
@@ -1256,11 +1269,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
     @router.patch("/projects/{pid}/anchors")
     def edit_anchor(pid: str, body: AnchorEditRequest) -> dict:
-        """Add, update, or delete a character or scene_ref in the draft.
+        """Add, update, or delete a character, prop, or scene_ref.
 
         Body:
           - op:   "add" | "update" | "delete"
-          - kind: "character" | "scene_ref"
+          - kind: "character" | "prop" | "scene_ref"
           - id:   the anchor id (snake_case, e.g. "marlin")
           - description: required for add/update; ignored for delete
 
@@ -1268,7 +1281,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         """
         if body.op not in ("add", "update", "delete"):
             raise HTTPException(400, f"unknown op {body.op!r}")
-        if body.kind not in ("character", "scene_ref"):
+        if body.kind not in ("character", "prop", "scene_ref"):
             raise HTTPException(400, f"unknown kind {body.kind!r}")
         if body.op in ("add", "update") and not (body.description or "").strip():
             raise HTTPException(400, "description required for add/update")
@@ -1280,7 +1293,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         draft = _read_project(pid)
         assets = draft.setdefault("assets", {})
-        key = "characters" if body.kind == "character" else "scene_refs"
+        key = (
+            "characters" if body.kind == "character"
+            else "props" if body.kind == "prop"
+            else "scene_refs"
+        )
         bucket = assets.setdefault(key, []) or []
         # Find existing entry by id.
         idx = next(
@@ -1309,14 +1326,19 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     404, f"{body.kind} {anchor_id!r} not found",
                 )
             bucket.pop(idx)
-            # If a character is deleted, also strip it from every scene's
-            # uses_characters list (otherwise Stage 02 will fail with a
-            # missing-asset error). Same for scene_refs.
+            # If an anchor is deleted, also strip it from every scene
+            # so Stage 02 does not reference a missing asset.
             if body.kind == "character":
                 for s in draft.get("scenes", []) or []:
                     uses = s.get("uses_characters") or []
                     s["uses_characters"] = [
                         c for c in uses if c != anchor_id
+                    ]
+            elif body.kind == "prop":
+                for s in draft.get("scenes", []) or []:
+                    uses = s.get("uses_props") or []
+                    s["uses_props"] = [
+                        p for p in uses if p != anchor_id
                     ]
             else:
                 for s in draft.get("scenes", []) or []:
@@ -1348,10 +1370,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise HTTPException(404, f"scene {scene_id!r} not found")
         scene = scenes[idx]
 
-        # Validate uses_characters / uses_scene_ref point to anchors
+        # Validate uses_characters / uses_props / uses_scene_ref point to anchors
         # that actually exist in this draft (typo guard).
         assets = draft.get("assets", {}) or {}
         char_ids = {c.get("id") for c in (assets.get("characters") or [])}
+        prop_ids = {p.get("id") for p in (assets.get("props") or [])}
         ref_ids = {r.get("id") for r in (assets.get("scene_refs") or [])}
         if body.uses_characters is not None:
             unknown = [c for c in body.uses_characters if c not in char_ids]
@@ -1359,6 +1382,14 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 raise HTTPException(
                     400,
                     f"uses_characters references unknown ids: {unknown}. "
+                    f"Add them under Anchors first.",
+                )
+        if body.uses_props is not None:
+            unknown = [p for p in body.uses_props if p not in prop_ids]
+            if unknown:
+                raise HTTPException(
+                    400,
+                    f"uses_props references unknown ids: {unknown}. "
                     f"Add them under Anchors first.",
                 )
         if body.uses_scene_ref is not None and body.uses_scene_ref:
@@ -1616,6 +1647,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 spec, output_dir,
                 keys=_stage0_keys_and_validate(),
                 only_character=body.only_character,
+                only_prop=body.only_prop,
                 overwrite=body.overwrite,
             )
 
@@ -1847,14 +1879,18 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         proj_yml = proj / "project.yml"
         if not proj_yml.is_file():
             return {"stage_0_usd": 0, "stage_2_usd": 0, "total_usd": 0,
-                    "breakdown": {"characters": 0, "scene_refs": 0, "scenes": 0}}
+                    "breakdown": {
+                        "characters": 0, "props": 0,
+                        "scene_refs": 0, "scenes": 0,
+                    }}
         draft = _yaml_loads(proj_yml.read_text(encoding="utf-8"))
         n_char = len(draft.get("assets", {}).get("characters", []) or [])
+        n_prop = len(draft.get("assets", {}).get("props", []) or [])
         n_ref = len(draft.get("assets", {}).get("scene_refs", []) or [])
         n_scene = len(draft.get("scenes", []) or [])
         # gpt-image-2 generate ~$0.15 / image; edit ~$0.25 / frame.
         # Wan 2.7 I2V ~$0.50 / 10s 1080p clip. Stage 4 = free (ffmpeg).
-        s0 = round((n_char + n_ref + 1) * 0.15, 2)  # +1 for style
+        s0 = round((n_char + n_prop + n_ref + 1) * 0.15, 2)  # +1 for style
         s2 = round(n_scene * 0.25, 2)
         s3 = round(n_scene * 0.50, 2)
         return {
@@ -1865,6 +1901,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             "total_usd": round(s0 + s2 + s3, 2),
             "breakdown": {
                 "characters": n_char,
+                "props": n_prop,
                 "scene_refs": n_ref,
                 "scenes": n_scene,
             },

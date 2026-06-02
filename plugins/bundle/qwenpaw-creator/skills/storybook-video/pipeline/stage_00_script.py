@@ -224,14 +224,25 @@ def _build_decompose_prompt(
         '    "characters": [\n'
         '      {"id": "<short_snake_case>",\n'
         '       "description": "<verbatim physical description "\n'
-        '          "ending with the words \\"reference sheet, not a "\n'
-        '          "scene\\". Neutral pose, empty background. 60-150 "\n'
+        '          "ending with the words \\"multi-angle reference "\n'
+        '          "sheet, not a scene\\". Neutral pose, empty "\n'
+        '          "background. 60-150 "\n'
         '          "words. Include every load-bearing visual detail "\n'
         '          "exactly as it should appear in every scene — "\n'
         '          "hair color, age, clothes (including hats, shoes), "\n'
         '          "build, distinguishing marks.">"\n'
         "      },\n"
         "      ...\n"
+        "    ],\n"
+        '    "props": [\n'
+        '      {"id": "<short_snake_case>",\n'
+        '       "description": "<portable key object / 道具 that must "\n'
+        '          "remain visually identical across scenes/settings: "\n'
+        '          "sword, boat, book, scale, map, locket, etc. 40-120 "\n'
+        '          "words. Include material, color, silhouette, scale, "\n'
+        '          "markings, wear, and distinctive details. End with "\n'
+        '          "the words \\"multi-angle prop reference sheet, not "\n'
+        '          "a scene\\".>"}\n'
         "    ],\n"
         '    "scene_refs": [\n'
         '      {"id": "<short_snake_case>",\n'
@@ -246,7 +257,8 @@ def _build_decompose_prompt(
         '    {"id": "00", "name": "<short_snake>",\n'
         '     "duration": 6, "has_narration": false,\n'
         '     "standalone": true,\n'
-        '     "uses_characters": [], "uses_scene_ref": "<id or null>",\n'
+        '     "uses_characters": [], "uses_props": [],\n'
+        '     "uses_scene_ref": "<id or null>",\n'
         '     "uses_style": true,\n'
         '     "scene_description": "<ACTIONS AND CHARACTER POSITIONS '
         'ONLY — what each character does, where they stand/sit, what '
@@ -282,25 +294,29 @@ def _build_decompose_prompt(
         "1. Every character that appears in ≥1 scene must have an "
         "entry under assets.characters. Even one-off characters get "
         "an entry — single anchor reuse is fine.\n"
-        "2. Every recurring location must have an entry under "
+        "2. Every key prop / 道具 that carries story meaning or appears "
+        "across scenes/settings must have an entry under assets.props "
+        "(boat, sword, book, scale, letter, map, heirloom, tool, etc.). "
+        "Props are portable objects, not settings and not characters.\n"
+        "3. Every recurring location must have an entry under "
         "assets.scene_refs. Don't include locations that appear in "
         "only one scene unless they're large/visually distinctive.\n"
-        "3. In each scene_description, refer to characters as '<the "
-        "old man from the reference>' or 'the same boat as in the "
-        "boat reference'. The image-edit model will receive both the "
-        "ref images and this text, so explicit reference language "
-        "anchors the identity.\n"
-        "4. motion_prompt drives the I2V model — it must describe "
+        "4. In each scene_description, refer to characters/props as "
+        "'<the old man from the reference>' or 'the same sword as in "
+        "the prop reference'. The image-edit model will receive both "
+        "the ref images and this text, so explicit reference language "
+        "anchors identity.\n"
+        "5. motion_prompt drives the I2V model — it must describe "
         "MOTION (camera moves, character actions, environmental "
         "movement). It must NOT include character ids; treat it as a "
         "second prompt that sees the composed frame.\n"
-        "5. First scene is the title card: standalone=true, "
+        "6. First scene is the title card: standalone=true, "
         "has_narration=false, overlays carry the title.\n"
-        "6. Last scene is the credits card: standalone=true, "
+        "7. Last scene is the credits card: standalone=true, "
         "has_narration=false, overlays carry the credits.\n"
-        "7. Inner scenes carry has_narration=true with narration text "
+        "8. Inner scenes carry has_narration=true with narration text "
         "≤ duration * 18 characters (rough TTS budget at 1.0x rate).\n"
-        "8. Pick the style catalog id whose visual language best fits "
+        "9. Pick the style catalog id whose visual language best fits "
         "the source (children's story → ghibli_watercolor / "
         "pastel_storybook; thriller → photoreal_cinema; etc.).\n\n"
         "Return ONLY the JSON object, no preamble.\n"
@@ -459,12 +475,19 @@ def _normalize_ids(draft: dict) -> None:
 
     assets = draft.setdefault("assets", {})
     chars_in = assets.get("characters") or []
+    props_in = assets.get("props") or []
     refs_in = assets.get("scene_refs") or []
     assets["characters"] = [
         c for c in (
             _coerce_anchor(ch, fallback_id=f"char_{i}")
             for i, ch in enumerate(chars_in)
         ) if c is not None
+    ]
+    assets["props"] = [
+        p for p in (
+            _coerce_anchor(prop, fallback_id=f"prop_{i}")
+            for i, prop in enumerate(props_in)
+        ) if p is not None
     ]
     assets["scene_refs"] = [
         r for r in (
@@ -484,6 +507,7 @@ def _normalize_ids(draft: dict) -> None:
             continue
         sc["id"] = f"{idx:02d}"
         sc["name"] = snake(sc.get("name", f"scene_{idx}"))
+        sc.setdefault("uses_props", [])
 
 
 _GLOBAL_CONFIG_DEFAULTS: dict = {
@@ -519,6 +543,7 @@ def _add_anchor_fallback(draft: dict) -> None:
     """
     assets = draft.get("assets", {})
     chars = assets.get("characters") or []
+    props = assets.get("props") or []
     refs = assets.get("scene_refs") or []
     style = (assets.get("style") or {}).get("description", "")
     if "anchors" not in draft:
@@ -528,11 +553,15 @@ def _add_anchor_fallback(draft: dict) -> None:
         anc["style_bookend"] = (style or "").strip() or (
             "Soft hand-painted storybook style. No text or letters."
         )
-    if "character_prefix" not in anc and chars:
-        names = ", ".join(c.get("id", "") for c in chars[:3])
-        anc["character_prefix"] = (
-            f"Characters from the references ({names})."
-        )
+    if "character_prefix" not in anc and (chars or props):
+        bits: list[str] = []
+        if chars:
+            names = ", ".join(c.get("id", "") for c in chars[:3])
+            bits.append(f"characters from the references ({names})")
+        if props:
+            names = ", ".join(p.get("id", "") for p in props[:3])
+            bits.append(f"props from the references ({names})")
+        anc["character_prefix"] = "Use " + "; ".join(bits) + "."
     if "spatial_prefix" not in anc and refs:
         rnames = ", ".join(r.get("id", "") for r in refs[:2])
         anc["spatial_prefix"] = f"Settings from the references ({rnames})."
@@ -633,11 +662,13 @@ async def decompose_script(
             scene["frame_provider"] = fp_apply
         if vp_apply:
             scene["video_provider"] = vp_apply
+        scene.setdefault("uses_props", [])
     logger.info(
-        "[stage 00] draft built: %d scenes, %d characters, %d scene_refs, "
-        "style=%s",
+        "[stage 00] draft built: %d scenes, %d characters, %d props, "
+        "%d scene_refs, style=%s",
         len(draft.get("scenes", [])),
         len(draft.get("assets", {}).get("characters", []) or []),
+        len(draft.get("assets", {}).get("props", []) or []),
         len(draft.get("assets", {}).get("scene_refs", []) or []),
         (draft.get("assets", {}).get("style") or {}).get("catalog_id"),
     )

@@ -19,6 +19,7 @@ from spec import (  # type: ignore  # noqa: E402
     CharacterRef,
     OverlaySpec,
     ProjectSpec,
+    PropRef,
     SceneRefAsset,
     SceneSpec,
     SceneValidationRules,
@@ -50,6 +51,11 @@ def _load_assets(raw: dict) -> AssetSet:
         characters[c["id"]] = CharacterRef(
             id=c["id"], description=_flatten_prose(c["description"]),
         )
+    props: dict[str, PropRef] = {}
+    for p in raw.get("props", []) or []:
+        props[p["id"]] = PropRef(
+            id=p["id"], description=_flatten_prose(p["description"]),
+        )
     scene_refs: dict[str, SceneRefAsset] = {}
     for sr in raw.get("scene_refs", []) or []:
         scene_refs[sr["id"]] = SceneRefAsset(
@@ -74,7 +80,8 @@ def _load_assets(raw: dict) -> AssetSet:
             description=_flatten_prose(entry.get("description", "")),
         )
     return AssetSet(
-        characters=characters, scene_refs=scene_refs, style=style,
+        characters=characters, props=props, scene_refs=scene_refs,
+        style=style,
     )
 
 
@@ -129,6 +136,7 @@ def load_project_spec_from_dict(raw: dict) -> ProjectSpec:
             overlay=[OverlaySpec(**o) for o in s.get("overlays", []) or []],
             n_candidates=max(1, n_cand),
             uses_characters=list(s.get("uses_characters", []) or []),
+            uses_props=list(s.get("uses_props", []) or []),
             uses_scene_ref=s.get("uses_scene_ref") or None,
             uses_style=bool(s.get("uses_style", True)),
             regen_notes=_flatten_prose(s.get("regen_notes", "")),

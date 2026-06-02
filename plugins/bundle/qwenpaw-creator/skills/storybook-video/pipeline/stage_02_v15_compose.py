@@ -78,7 +78,7 @@ _QWEN_EDIT_MODEL = "qwen-image-edit-plus"
 # edit-plus, edit) currently enforce a hard 3-reference cap at the
 # API layer ("For image editing, the message must contain 1~3 image
 # content items"). Even edit-plus, despite the "fusion" framing,
-# rejects 4+ refs. Truncate to 3 with character-first prioritization.
+# rejects 4+ refs. Truncate to 3 with character/prop-first prioritization.
 _QWEN_MAX_REFS = 3
 
 
@@ -96,8 +96,8 @@ async def _call_provider_edit(
 
     Picks ref ordering per provider so the most important anchors
     survive any model-side truncation:
-      - gpt-image-2 (16-ref cap): [style, scene_ref, *chars]
-      - qwen-image (3-ref cap): [*chars, scene_ref, style], truncated
+      - gpt-image-2 (16-ref cap): [style, scene_ref, *chars, *props]
+      - qwen-image (3-ref cap): [*chars, *props, scene_ref, style], truncated
     """
     mod = _provider_module(provider)
     if provider == "gpt-image-2":
@@ -134,7 +134,7 @@ async def _call_provider_edit(
             logger.warning(
                 f"[scene {scene_id}] qwen-image: {len(ordered)} refs > "
                 f"{_QWEN_MAX_REFS} cap; keeping the first "
-                f"{_QWEN_MAX_REFS} (characters-first); dropping: "
+                f"{_QWEN_MAX_REFS} (characters/props first); dropping: "
                 f"{[Path(p).name for p in dropped]}",
             )
             ordered = ordered[:_QWEN_MAX_REFS]
@@ -152,7 +152,7 @@ class _SceneRefs:
     """Reference-image paths for one scene, grouped by anchor kind.
 
     The dispatcher reorders/truncates per provider:
-      - gpt-image-2 (16-ref cap): pass all in [style, scene_ref, *chars]
+      - gpt-image-2 (16-ref cap): pass all in [style, scene_ref, *chars, *props]
         order — style first sets aesthetic strongest.
       - qwen-image (3-ref cap): pass [*chars, scene_ref, style] order,
         truncated to 3 — character identity is the hardest thing to
@@ -162,15 +162,19 @@ class _SceneRefs:
     style: list[str]      # 0 or 1 path
     scene_ref: list[str]  # 0 or 1 path
     characters: list[str] # 0..N paths
+    props: list[str]      # 0..N paths
 
     def gpt_order(self) -> list[str]:
-        return [*self.style, *self.scene_ref, *self.characters]
+        return [*self.style, *self.scene_ref, *self.characters, *self.props]
 
     def qwen_order(self) -> list[str]:
-        return [*self.characters, *self.scene_ref, *self.style]
+        return [*self.characters, *self.props, *self.scene_ref, *self.style]
 
     def total(self) -> int:
-        return len(self.style) + len(self.scene_ref) + len(self.characters)
+        return (
+            len(self.style) + len(self.scene_ref)
+            + len(self.characters) + len(self.props)
+        )
 
 
 def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> _SceneRefs:
@@ -183,6 +187,7 @@ def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> _SceneRefs:
     style: list[str] = []
     scene_ref: list[str] = []
     chars: list[str] = []
+    props: list[str] = []
     assets = project_spec.assets
 
     if scene.uses_style and assets.style and assets.style.reference_image:
@@ -211,7 +216,18 @@ def _resolve_refs_for_scene(project_spec: ProjectSpec, scene) -> _SceneRefs:
                 f"[scene {scene.scene_id}] uses_character={cid!r} but no "
                 f"reference_image",
             )
-    return _SceneRefs(style=style, scene_ref=scene_ref, characters=chars)
+    for pid in getattr(scene, "uses_props", []) or []:
+        prop = getattr(assets, "props", {}).get(pid)
+        if prop and prop.reference_image:
+            props.append(str(prop.reference_image))
+        else:
+            logger.warning(
+                f"[scene {scene.scene_id}] uses_prop={pid!r} but no "
+                f"reference_image",
+            )
+    return _SceneRefs(
+        style=style, scene_ref=scene_ref, characters=chars, props=props,
+    )
 
 
 def _compose_prompt(project_spec: ProjectSpec, scene) -> str:
@@ -288,6 +304,7 @@ def _compose_prompt(project_spec: ProjectSpec, scene) -> str:
     # anchors per (entity, state-set) combo.
     state_lines: list[str] = []
     entities_referenced = list(getattr(scene, "uses_characters", []) or [])
+    entities_referenced.extend(getattr(scene, "uses_props", []) or [])
     sref = getattr(scene, "uses_scene_ref", None)
     if sref:
         entities_referenced.append(sref)
@@ -329,6 +346,12 @@ def _compose_prompt(project_spec: ProjectSpec, scene) -> str:
         "identity of that character. They must appear recognizably "
         "the same individual — same body proportions, same clothes, "
         "same distinguishing details. Only pose and expression vary.",
+        " - PROP IDENTITY: each prop reference fixes the identity of "
+        "that object. Any referenced sword, boat, book, tool, scale, "
+        "map, or other key prop must remain the same object across "
+        "settings — same silhouette, material, color, markings, wear, "
+        "scale, and distinctive details. Only position, angle, and "
+        "interaction vary.",
         "",
         style_block,
         "",
@@ -419,7 +442,8 @@ async def run_stage_02_v15(
             f"[stage 02 compose] scene={scene.scene_id}_{scene.name}  "
             f"provider={provider}  refs={refs.total()} "
             f"(style={len(refs.style)} scene_ref={len(refs.scene_ref)} "
-            f"chars={len(refs.characters)})  prompt={len(prompt)} chars",
+            f"chars={len(refs.characters)} props={len(refs.props)})  "
+            f"prompt={len(prompt)} chars",
         )
 
         t0 = time.time()

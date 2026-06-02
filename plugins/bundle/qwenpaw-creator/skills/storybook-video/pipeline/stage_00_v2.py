@@ -136,14 +136,17 @@ def _build_pass1_prompt(
         "Your jobs:\n"
         "  1. Identify recurring characters (brief, concrete physical "
         "     descriptions — they'll be rendered as reference images).\n"
-        "  2. Identify recurring settings (locations the camera "
+        "  2. Identify key props / 道具: portable objects with story "
+        "     importance or continuity across settings (sword, boat, "
+        "     book, scale, map, letter, tool, heirloom, etc.).\n"
+        "  3. Identify recurring settings (locations the camera "
         "     returns to — also rendered as reference images).\n"
-        "  3. Pick exactly ONE style preset id from the catalog.\n"
-        "  4. Slice the source into a beat sheet — an ordered list of "
+        "  4. Pick exactly ONE style preset id from the catalog.\n"
+        "  5. Slice the source into a beat sheet — an ordered list of "
         "     story moments. Each beat is 1-3 sentences SUMMARIZING "
         "     what happens; do NOT write full visual descriptions or "
         "     narration text (that's the next pass's job).\n"
-        "  5. INFER the story constraints (era, country, genre, tone, "
+        "  6. INFER the story constraints (era, country, genre, tone, "
         "     story_anchor, world_bible, style_directives) FROM the "
         "     source. For each, also provide a short evidence quote "
         "     from the source that justifies your inference, so the "
@@ -175,6 +178,11 @@ def _build_pass1_prompt(
         '      {"id": "<snake_case>", "description": "<concrete physical '
         'description, ~150 chars: age, build, clothing, distinguishing '
         'features. No personality, no backstory.>"}\n'
+        '    ],\n'
+        '    "props": [\n'
+        '      {"id": "<snake_case>", "description": "<portable key object '
+        '/ 道具, ~150 chars: material, color, silhouette, scale, markings, '
+        'wear, and distinctive details. Not a location, not a character.>"}\n'
         '    ],\n'
         '    "scene_refs": [\n'
         '      {"id": "<snake_case>", "description": "<location/setting '
@@ -211,6 +219,7 @@ def _build_pass1_prompt(
         '      "name": "<short_snake_case_label, e.g. solitary_sailor>",\n'
         '      "summary": "<1-3 sentences: what happens in this beat>",\n'
         '      "chars_used": ["<char_id>", ...],\n'
+        '      "props_used": ["<prop_id>", ...],\n'
         '      "setting_used": "<scene_ref_id or null if no recurring '
         'setting (e.g. title card)>",\n'
         '      "est_seconds": <int 4-15>,\n'
@@ -222,7 +231,7 @@ def _build_pass1_prompt(
         "Beat-sheet rules:\n"
         "1. Don't drop content. Long source → more beats.\n"
         "2. has_narration=false ONLY for title/credit cards.\n"
-        "3. chars_used / setting_used must reference ids defined in "
+        "3. chars_used / props_used / setting_used must reference ids defined in "
         "assets — typos break the downstream pipeline.\n"
         "4. est_seconds: 4-6 for title/credit beats; 8-12 for story "
         "beats; up to 15 for climactic moments.\n"
@@ -243,6 +252,7 @@ def _pass2_anchor_context(draft_with_beats: dict) -> str:
     assets = draft_with_beats.get("assets") or {}
     gc = draft_with_beats.get("global_config") or {}
     chars = assets.get("characters") or []
+    props = assets.get("props") or []
     scene_refs = assets.get("scene_refs") or []
     style = assets.get("style") or {}
 
@@ -254,12 +264,17 @@ def _pass2_anchor_context(draft_with_beats: dict) -> str:
         f"  - {s.get('id')}: {s.get('description', '')[:200]}"
         for s in scene_refs
     ) or "  (none)"
+    props_summary = "\n".join(
+        f"  - {p.get('id')}: {p.get('description', '')[:200]}"
+        for p in props
+    ) or "  (none)"
     style_id = style.get("catalog_id") or "?"
     style_template = style.get("positive_template") or ""
 
     blocks = [
         "# Locked anchors\n",
         f"Characters:\n{chars_summary}\n",
+        f"Props:\n{props_summary}\n",
         f"Settings:\n{settings_summary}\n",
         f"Style: {style_id}\n  template: {style_template[:300]}\n",
     ]
@@ -305,6 +320,7 @@ def _build_pass2_beat_prompt(
     )
 
     chars_used = beat.get("chars_used") or []
+    props_used = beat.get("props_used") or []
     setting_used = beat.get("setting_used")
     user = (
         anchor_context
@@ -313,6 +329,8 @@ def _build_pass2_beat_prompt(
         f"summary: {beat.get('summary', '')}\n"
         f"characters present (use these ids verbatim): "
         f"{chars_used or 'none'}\n"
+        f"key props present (use these ids verbatim): "
+        f"{props_used or 'none'}\n"
         f"setting (use this id verbatim): {setting_used or 'none'}\n"
         f"target duration: {beat.get('est_seconds', 8)}s\n"
         f"has_narration: {beat.get('has_narration', True)}\n\n"
@@ -331,6 +349,7 @@ def _build_pass2_beat_prompt(
         '  "has_narration": <copy from the beat>,\n'
         '  "standalone": <true only for title/credit scenes>,\n'
         '  "uses_characters": <list, copy the beat characters>,\n'
+        '  "uses_props": <list, copy the beat key props>,\n'
         '  "uses_scene_ref": <string or null, copy the beat setting>,\n'
         '  "uses_style": true,\n'
         '  "n_candidates": 1,\n'
@@ -352,8 +371,8 @@ def _build_pass2_beat_prompt(
         "string when has_narration is false.\n"
         "4. standalone:true → uses_characters=[] and "
         "uses_scene_ref=null.\n"
-        "5. uses_characters / uses_scene_ref must EXACTLY match the "
-        "beat's character/setting ids above.\n"
+        "5. uses_characters / uses_props / uses_scene_ref must EXACTLY "
+        "match the beat's character/prop/setting ids above.\n"
         "6. validation_rules.must_contain: 3-6 atomic + observable "
         "claims; skip what the anchors already guarantee. Empty "
         "arrays are fine for must_not_contain / composition.\n"
@@ -506,10 +525,11 @@ async def extract_beats(
         gc["video_provider"] = video_provider
 
     logger.info(
-        "[stage 00 v2 pass 1] done: %d beats, %d characters, "
+        "[stage 00 v2 pass 1] done: %d beats, %d characters, %d props, "
         "%d scene_refs, style=%s",
         len(beats),
         len(draft.get("assets", {}).get("characters", [])),
+        len(draft.get("assets", {}).get("props", [])),
         len(draft.get("assets", {}).get("scene_refs", [])),
         (draft.get("assets", {}).get("style") or {}).get("catalog_id"),
     )
@@ -598,11 +618,14 @@ async def craft_scenes(
                 "duration": beat.get("est_seconds", 8),
                 "has_narration": beat.get("has_narration", True),
                 "uses_characters": beat.get("chars_used") or [],
+                "uses_props": beat.get("props_used") or [],
                 "uses_scene_ref": beat.get("setting_used"),
             }
         # Carry the beat's anchor refs through if the LLM dropped them.
         if not sc.get("uses_characters"):
             sc["uses_characters"] = beat.get("chars_used") or []
+        if not sc.get("uses_props"):
+            sc["uses_props"] = beat.get("props_used") or []
         if not sc.get("uses_scene_ref"):
             sc["uses_scene_ref"] = beat.get("setting_used")
         return sc
@@ -637,6 +660,7 @@ async def craft_scenes(
         sc.setdefault("overlay", [])
         # Defensive defaults for fields the LLM might omit:
         sc.setdefault("uses_characters", [])
+        sc.setdefault("uses_props", [])
         sc.setdefault("uses_scene_ref", None)
         sc.setdefault("uses_style", True)
         sc.setdefault("standalone", False)

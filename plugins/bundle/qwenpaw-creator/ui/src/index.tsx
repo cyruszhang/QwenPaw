@@ -149,6 +149,44 @@ async function apiUpload(
   return data;
 }
 
+function parseMaybeJson(raw: string): any | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function compactApiError(error: any): string {
+  const raw = String(error?.message ?? error ?? "Unknown error").trim();
+  const detail = raw
+    .replace(/^Error:\s*/i, "")
+    .replace(/^stage\s+([.\d]+)\s+failed:\s*/i, "Stage $1 failed: ");
+
+  const taskMatch = detail.match(/task failed:\s*(\{.*\})\s*$/s);
+  if (taskMatch) {
+    const outer = parseMaybeJson(taskMatch[1]);
+    const nested = typeof outer?.message === "string"
+      ? parseMaybeJson(outer.message)
+      : null;
+    const provider = nested?.error;
+    if (provider?.message) {
+      const code = provider.code || outer?.code;
+      return `${code ? `${code}: ` : ""}${provider.message}`;
+    }
+    if (outer?.message) return String(outer.message);
+  }
+
+  const json = parseMaybeJson(detail);
+  if (typeof json?.detail === "string") return json.detail;
+  if (Array.isArray(json?.detail)) {
+    return json.detail
+      .map((item: any) => item?.msg || item?.message || JSON.stringify(item))
+      .join("; ");
+  }
+  return detail || "Unknown error";
+}
+
 // ── error boundary (surfaces the actual error inline) ──────────────
 
 class CreatorErrorBoundary extends (React.Component as any) {
@@ -296,13 +334,20 @@ interface StyleEntry {
   sample_ref?: string;
 }
 
+type AnchorKind = "character" | "prop" | "scene_ref";
+
 interface CostForecast {
   stage_0_usd: number;
   stage_2_usd: number;
   stage_3_usd: number;
   stage_4_usd: number;
   total_usd: number;
-  breakdown: { characters: number; scene_refs: number; scenes: number };
+  breakdown: {
+    characters: number;
+    props?: number;
+    scene_refs: number;
+    scenes: number;
+  };
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
@@ -519,7 +564,7 @@ function HeaderBar({ status, onRefresh }: any) {
     React.createElement(
       Tag,
       { color: ok ? "green" : "red", style: { marginLeft: 8 } },
-      `${label}: ${ok ? "ok" : "missing"}`,
+      `${label} Key: ${ok ? "OK" : "missing"}`,
     );
   return React.createElement(
     "div",
@@ -957,10 +1002,14 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     stage: string;
     sceneId?: string;
   } | null>(null);
+  const [runError, setRunError] = React.useState<{
+    title: string;
+    message: string;
+  } | null>(null);
   const [anchorEditor, setAnchorEditor] = React.useState<{
     open: boolean;
     mode: "add" | "update";
-    kind: "character" | "scene_ref";
+    kind: AnchorKind;
     id: string;
     description: string;
   } | null>(null);
@@ -1090,6 +1139,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage("decompose");
+    setRunError(null);
     setTabBadge(1, 0);
     try {
       const r = await apiJson("POST", `/creator/projects/${pid}/decompose`, {
@@ -1123,9 +1173,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       );
       setTabBadge(0, 1);
     } catch (e: any) {
+      const msg = compactApiError(e);
+      setRunError({ title: "Decompose failed", message: msg });
       notify(
         "Decompose failed",
-        String(e?.message ?? e).slice(0, 200),
+        msg.slice(0, 200),
         { tag: "decompose-err", level: "error" },
       );
       setTabBadge(0, 0);
@@ -1144,6 +1196,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage("craft");
+    setRunError(null);
     setTabBadge(1, 0);
     try {
       const r = await apiJson("POST", `/creator/projects/${pid}/craft`, {
@@ -1159,9 +1212,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       );
       setTabBadge(0, 1);
     } catch (e: any) {
+      const msg = compactApiError(e);
+      setRunError({ title: "Craft failed", message: msg });
       notify(
         "Craft failed",
-        String(e?.message ?? e).slice(0, 200),
+        msg.slice(0, 200),
         { tag: "craft-err", level: "error" },
       );
       setTabBadge(0, 0);
@@ -1181,6 +1236,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage("autofix");
+    setRunError(null);
     setTabBadge(1, 0);
     try {
       const r = await apiJson(
@@ -1204,9 +1260,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       );
       setTabBadge(0, 1);
     } catch (e: any) {
+      const msg = compactApiError(e);
+      setRunError({ title: "Auto-fix failed", message: msg });
       notify(
         "Auto-fix failed",
-        String(e?.message ?? e).slice(0, 200),
+        msg.slice(0, 200),
         { tag: "autofix-err", level: "error" },
       );
       setTabBadge(0, 0);
@@ -1236,8 +1294,10 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage(stage);
+    setRunError(null);
     setTabBadge(scenes.length, 0);
     let done = 0, failed = 0;
+    const failureMessages: string[] = [];
     try {
       for (let i = 0; i < scenes.length; i += conc) {
         const batch = scenes.slice(i, i + conc);
@@ -1250,8 +1310,24 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
             }),
           ),
         );
-        results.forEach((r: any) => r.status === "fulfilled" ? done++ : failed++);
+        results.forEach((r: any, idx: number) => {
+          if (r.status === "fulfilled") {
+            done++;
+          } else {
+            failed++;
+            failureMessages.push(
+              `Scene ${batch[idx]}: ${compactApiError(r.reason)}`,
+            );
+          }
+        });
         await reload();
+      }
+      if (failed > 0) {
+        const unique = Array.from(new Set(failureMessages)).slice(0, 8);
+        setRunError({
+          title: `Stage ${stage} completed with ${failed} failure${failed === 1 ? "" : "s"}`,
+          message: unique.join("\n\n"),
+        });
       }
       notify(
         `Stage ${stage} done`,
@@ -1260,7 +1336,9 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       );
       setTabBadge(0, done);
     } catch (e: any) {
-      notify(`Stage ${stage} crashed`, String(e?.message ?? e).slice(0, 200),
+      const msg = compactApiError(e);
+      setRunError({ title: `Stage ${stage} crashed`, message: msg });
+      notify(`Stage ${stage} crashed`, msg.slice(0, 200),
         { tag: `stage-${stage}-err`, level: "error" });
       setTabBadge(0, 0);
     } finally {
@@ -1273,6 +1351,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage(stage);
+    setRunError(null);
     setPendingSceneRun(
       extra?.only_scene ? { stage, sceneId: String(extra.only_scene) } : null,
     );
@@ -1304,9 +1383,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       );
       setTabBadge(0, 1);
     } catch (e: any) {
+      const msg = compactApiError(e);
+      setRunError({ title: `${label} failed`, message: msg });
       notify(
         `${label} failed`,
-        String(e?.message ?? e).slice(0, 200),
+        msg.slice(0, 200),
         { tag: `stage-${stage}-err`, level: "error" },
       );
       setTabBadge(0, 0);
@@ -1333,7 +1414,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
 
   const onPatchAnchor = async (
     op: "add" | "update" | "delete",
-    kind: "character" | "scene_ref",
+    kind: AnchorKind,
     id: string,
     description?: string,
   ) => {
@@ -1353,7 +1434,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     }
   };
 
-  const onDeleteAnchor = (kind: "character" | "scene_ref", id: string) => {
+  const onDeleteAnchor = (kind: AnchorKind, id: string) => {
     Modal.confirm({
       title: `Delete ${kind} "${id}"?`,
       content: `Removes it from the draft and strips references from every scene that used it. If a ref image was already generated, the PNG stays on disk.`,
@@ -1365,7 +1446,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   const onPatchScene = async (
     sceneId: string,
     patch: any,
-    opts: { quiet?: boolean; reload?: boolean } = {},
+    opts: { quiet?: boolean; reload?: boolean; updateProject?: boolean } = {},
   ) => {
     const applyPatch = async (payload: any) =>
       apiJson(
@@ -1379,22 +1460,38 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
         r = await applyPatch(patch);
       } catch (e: any) {
         const msg = String(e?.message ?? e);
-        const canRetryWithoutVideoNotes =
-          Object.prototype.hasOwnProperty.call(patch, "video_regen_notes")
+        const extraForbidden = msg.includes("extra_forbidden");
+        const legacyPatch = { ...patch };
+        let removedLegacyField = false;
+        if (
+          extraForbidden
+          && Object.prototype.hasOwnProperty.call(legacyPatch, "video_regen_notes")
           && msg.includes("video_regen_notes")
-          && msg.includes("extra_forbidden");
-        if (!canRetryWithoutVideoNotes) throw e;
-        const { video_regen_notes: _ignored, ...legacyPatch } = patch;
+        ) {
+          delete legacyPatch.video_regen_notes;
+          removedLegacyField = true;
+        }
+        if (
+          extraForbidden
+          && Object.prototype.hasOwnProperty.call(legacyPatch, "uses_props")
+          && msg.includes("uses_props")
+        ) {
+          delete legacyPatch.uses_props;
+          removedLegacyField = true;
+        }
+        if (!removedLegacyField) throw e;
         r = await applyPatch(legacyPatch);
         if (!opts.quiet) {
           antMessage.warning(
-            "Scene saved. Restart QwenPaw to enable video regen notes.",
+            "Scene saved. Restart QwenPaw to enable the newest scene fields.",
           );
         }
       }
       if (!opts.quiet) antMessage.success(`Saved scene ${sceneId}`);
-      setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
-      onChange?.();
+      if (opts.updateProject !== false) {
+        setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
+        onChange?.();
+      }
       if (opts.reload !== false) await reload();
     } catch (e: any) {
       antMessage.error(`Save failed: ${e.message ?? e}`);
@@ -1457,6 +1554,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     projStatus?.stages?.["0"]?.refs?.length &&
     projStatus.stages["0"].refs.length >=
       (draft.assets?.characters?.length ?? 0) +
+        (draft.assets?.props?.length ?? 0) +
         (draft.assets?.scene_refs?.length ?? 0)
   ) {
     currentStep = 3;
@@ -1481,7 +1579,7 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           ? React.createElement(
               Tooltip,
               {
-                title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${forecast.breakdown.characters} chars + ${forecast.breakdown.scene_refs} scenes + style). Stage 2 frames ≈ $${forecast.stage_2_usd} (${forecast.breakdown.scenes} scenes). Stage 3 Wan I2V ≈ $${forecast.stage_3_usd} (${forecast.breakdown.scenes} clips).`,
+                title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${forecast.breakdown.characters} chars + ${forecast.breakdown.props ?? 0} props + ${forecast.breakdown.scene_refs} settings + style). Stage 2 frames ≈ $${forecast.stage_2_usd} (${forecast.breakdown.scenes} scenes). Stage 3 I2V ≈ $${forecast.stage_3_usd} (${forecast.breakdown.scenes} clips).`,
               },
               React.createElement(Tag, { color: "gold" }, `≈ $${forecast.total_usd}`),
             )
@@ -1513,6 +1611,29 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       React.createElement(Step, { title: "Anchors", icon: React.createElement(PictureOutlined) }),
       React.createElement(Step, { title: "Frames", icon: React.createElement(PlayCircleOutlined) }),
     ),
+
+    runError
+      ? React.createElement(Alert, {
+          type: "error",
+          showIcon: true,
+          closable: true,
+          onClose: () => setRunError(null),
+          message: runError.title,
+          description: React.createElement(
+            "pre",
+            {
+              style: {
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                fontFamily: "inherit",
+                lineHeight: 1.45,
+              },
+            },
+            runError.message,
+          ),
+          style: { margin: "0 0 16px" },
+        })
+      : null,
 
     // Step 1: Decompose form (only if no draft yet)
     !hasDraft
@@ -1568,11 +1689,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
           onPatchScene,
           onSelectTake,
           onReload: reload,
-          onAddAnchor: (kind: "character" | "scene_ref") =>
+          onAddAnchor: (kind: AnchorKind) =>
             setAnchorEditor({
               open: true, mode: "add", kind, id: "", description: "",
             }),
-          onEditAnchor: (kind: "character" | "scene_ref", a: any) =>
+          onEditAnchor: (kind: AnchorKind, a: any) =>
             setAnchorEditor({
               open: true, mode: "update", kind,
               id: a.id, description: a.description || "",
@@ -1639,6 +1760,9 @@ function SceneEditModal({
   const [usesCharacters, setUsesCharacters] = React.useState<string[]>(
     Array.isArray(scene.uses_characters) ? scene.uses_characters : [],
   );
+  const [usesProps, setUsesProps] = React.useState<string[]>(
+    Array.isArray(scene.uses_props) ? scene.uses_props : [],
+  );
   const [usesSceneRef, setUsesSceneRef] = React.useState<string | undefined>(
     scene.uses_scene_ref || undefined,
   );
@@ -1669,6 +1793,9 @@ function SceneEditModal({
   const charOptions = (draft.assets?.characters ?? []).map((c: any) => ({
     value: c.id, label: c.id,
   }));
+  const propOptions = (draft.assets?.props ?? []).map((p: any) => ({
+    value: p.id, label: p.id,
+  }));
   const refOptions = (draft.assets?.scene_refs ?? []).map((r: any) => ({
     value: r.id, label: r.id,
   }));
@@ -1686,6 +1813,7 @@ function SceneEditModal({
       standalone,
       uses_style: usesStyle,
       uses_characters: usesCharacters,
+      uses_props: usesProps,
       uses_scene_ref: usesSceneRef || null,
       scene_description: sceneDescription.trim(),
       motion_prompt: motionPrompt.trim(),
@@ -1701,6 +1829,7 @@ function SceneEditModal({
     return patch;
   }, [
     name, duration, hasNarration, standalone, usesStyle, usesCharacters,
+    usesProps,
     usesSceneRef, sceneDescription, motionPrompt, narration, nCandidates,
     regenNotes, videoRegenNotes, videoProvider, frameProvider,
     scene.video_regen_notes,
@@ -1838,7 +1967,7 @@ function SceneEditModal({
       ),
 
       React.createElement(Row, { gutter: [16, 4] },
-        React.createElement(Col, { span: 14 },
+        React.createElement(Col, { span: 8 },
           React.createElement(Form.Item, {
             label: `Characters (${charOptions.length} available)`,
             style: itemStyle,
@@ -1856,7 +1985,25 @@ function SceneEditModal({
             }),
           ),
         ),
-        React.createElement(Col, { span: 10 },
+        React.createElement(Col, { span: 8 },
+          React.createElement(Form.Item, {
+            label: `Props (${propOptions.length} available)`,
+            style: itemStyle,
+          },
+            React.createElement(Select, {
+              mode: "multiple",
+              value: usesProps,
+              onChange: setUsesProps,
+              options: propOptions,
+              placeholder: propOptions.length
+                ? "Pick key props in this scene"
+                : "No props in draft — add some under Anchors",
+              style: { width: "100%" },
+              allowClear: true,
+            }),
+          ),
+        ),
+        React.createElement(Col, { span: 8 },
           React.createElement(Form.Item, {
             label: `Setting (1 of ${refOptions.length})`,
             style: itemStyle,
@@ -1980,7 +2127,9 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
   const [description, setDescription] = React.useState(editor.description);
   const [submitting, setSubmitting] = React.useState(false);
   const isEdit = editor.mode === "update";
-  const kindLabel = editor.kind === "character" ? "character" : "setting";
+  const kindLabel = editor.kind === "character"
+    ? "character"
+    : editor.kind === "prop" ? "prop" : "setting";
   return React.createElement(
     Modal,
     {
@@ -2013,20 +2162,26 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
         label: "ID",
         extra: editor.kind === "character"
           ? `short snake_case, e.g. "marlin", "old_man"`
-          : `short snake_case, e.g. "high_sea", "dock"`,
+          : editor.kind === "prop"
+            ? `short snake_case, e.g. "brass_scale", "red_book"`
+            : `short snake_case, e.g. "high_sea", "dock"`,
       },
         React.createElement(Input, {
           value: id,
           disabled: isEdit,
           onChange: (e: any) => setId(e.target.value),
-          placeholder: editor.kind === "character" ? "marlin" : "high_sea",
+          placeholder: editor.kind === "character"
+            ? "marlin"
+            : editor.kind === "prop" ? "brass_scale" : "high_sea",
         }),
       ),
       React.createElement(Form.Item, {
         label: "Description",
         extra: editor.kind === "character"
-          ? "Verbatim physical description. End with 'reference sheet, not a scene.' Include every load-bearing detail (clothes, build, color)."
-          : "Environmental setting only — no characters, no objects beyond the setting.",
+          ? "Verbatim physical description. Include every load-bearing detail; Stage 0 renders a multi-angle reference sheet."
+          : editor.kind === "prop"
+            ? "Portable key object / 道具. Include material, color, scale, markings, wear, and distinctive details."
+            : "Environmental setting only — no characters, no key props beyond the setting.",
       },
         React.createElement(TextArea, {
           rows: 8,
@@ -2034,7 +2189,9 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
           onChange: (e: any) => setDescription(e.target.value),
           placeholder: editor.kind === "character"
             ? "A great Atlantic marlin fish, roughly 4 metres long, iridescent blue-purple along its upper body shading to silver belly, a long pointed spear-like bill, a tall sail-like dorsal fin running along its back, a sharp crescent-shaped tail fin. Reference sheet on empty pale background, soft watercolor natural-history study, not a scene."
-            : "A small Cuban fishing village dock at sunset, weathered wooden planks of the pier, shoreline with low scrubby vegetation, distant village lights starting to glow, warm amber-rose sky. Wide cinematic landscape view, soft watercolor landscape painting, no characters, no boats.",
+            : editor.kind === "prop"
+              ? "An old brass balance scale with two shallow round pans hanging from dark cords, a scratched central beam, tarnished gold metal, tiny dents along the pan rims, compact enough for a small bird to use. Multi-angle prop reference sheet, not a scene."
+              : "A small Cuban fishing village dock at sunset, weathered wooden planks of the pier, shoreline with low scrubby vegetation, distant village lights starting to glow, warm amber-rose sky. Wide cinematic landscape view, soft watercolor landscape painting, no characters, no key props.",
         }),
       ),
     ),
@@ -2654,10 +2811,12 @@ function activeStatesForChange(
 function StateTimelineCard({ draft, onSaveDraft }: any) {
   const ledger: any[] = draft.state_changes || [];
   const chars: any[] = draft.assets?.characters ?? [];
+  const props: any[] = draft.assets?.props ?? [];
   const refs: any[] = draft.assets?.scene_refs ?? [];
   const scenes: any[] = draft.scenes ?? [];
   const entities = [
     ...chars.map((c: any) => ({ id: c.id, kind: "character" })),
+    ...props.map((p: any) => ({ id: p.id, kind: "prop" })),
     ...refs.map((r: any) => ({ id: r.id, kind: "scene_ref" })),
   ];
   const [open, setOpen] = React.useState(false);
@@ -2802,7 +2961,11 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
               "div",
               { key: entity.id, style: { marginBottom: 12 } },
               React.createElement(AntText, { strong: true, style: { fontSize: 12 } },
-                `${entity.kind === "character" ? "👤" : "📍"} ${entity.id}`),
+                `${
+                  entity.kind === "character"
+                    ? "character"
+                    : entity.kind === "prop" ? "prop" : "setting"
+                }: ${entity.id}`),
               changes.length === 0
                 ? React.createElement(AntText,
                     { type: "secondary", style: { fontSize: 11, display: "block" } },
@@ -3473,6 +3636,7 @@ function DecomposeForm({
 function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
   const beats: any[] = draft.beats || [];
   const chars: any[] = draft.assets?.characters || [];
+  const props: any[] = draft.assets?.props || [];
   const scene_refs: any[] = draft.assets?.scene_refs || [];
   const styleId = draft.assets?.style?.catalog_id;
   const isCrafting = busy && activeStage === "craft";
@@ -3502,6 +3666,7 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
       name: `new_beat_${prev.length}`,
       summary: "",
       chars_used: [],
+      props_used: [],
       setting_used: null,
       est_seconds: 8,
       has_narration: true,
@@ -3533,7 +3698,7 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
     },
     // Anchor summary — small, since the next pass will show them in detail.
     React.createElement(Paragraph, { type: "secondary", style: { fontSize: 12 } },
-      `Anchors locked: ${chars.length} character(s), ${scene_refs.length} setting(s), style "${styleId || "?"}". `,
+      `Anchors locked: ${chars.length} character(s), ${props.length} prop(s), ${scene_refs.length} setting(s), style "${styleId || "?"}". `,
       `Total estimated runtime: ${totalSeconds}s across ${edited.length} beat(s).`,
     ),
 
@@ -3603,7 +3768,7 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
             }),
             // Anchors + duration in a row beneath the summary.
             React.createElement(Row, { gutter: 8, align: "middle" },
-              React.createElement(Col, { span: 9 },
+              React.createElement(Col, { span: 6 },
                 React.createElement(AntText, {
                   type: "secondary",
                   style: { fontSize: 11, display: "block", marginBottom: 2 },
@@ -3630,7 +3795,31 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
                   disabled: !chars.length,
                 }),
               ),
-              React.createElement(Col, { span: 9 },
+              React.createElement(Col, { span: 6 },
+                React.createElement(AntText, {
+                  type: "secondary",
+                  style: { fontSize: 11, display: "block", marginBottom: 2 },
+                }, "props in this beat"),
+                React.createElement(Select, {
+                  mode: "multiple",
+                  allowClear: true,
+                  placeholder: props.length
+                    ? "select props"
+                    : "(no props defined)",
+                  value: Array.isArray(b.props_used)
+                    ? b.props_used
+                    : (b.props_used ? [b.props_used] : []),
+                  onChange: (v: any) => updateBeat(idx, { props_used: v }),
+                  options: props.map((p: any) => ({
+                    value: p.id,
+                    label: p.id,
+                    title: p.description || p.id,
+                  })),
+                  style: { width: "100%" },
+                  disabled: !props.length,
+                }),
+              ),
+              React.createElement(Col, { span: 6 },
                 React.createElement(AntText, {
                   type: "secondary",
                   style: { fontSize: 11, display: "block", marginBottom: 2 },
@@ -3718,23 +3907,10 @@ function DraftPanel({
   onEditScene,
   liveProgress,
 }: any) {
-  // Accordion: at most one stage section open at a time. ``null`` means
-  // all closed. Auto-pick the first incomplete stage on mount.
+  // Accordion: at most one workspace section open at a time. ``null`` means
+  // all closed. Start with metadata because it frames the project defaults.
   const _defaultOpenStage = React.useMemo<string | null>(() => {
-    const refsDone = (projStatus?.stages?.["0"]?.refs ?? []).length;
-    const refsTotal =
-      (draft.assets?.characters ?? []).length
-      + (draft.assets?.scene_refs ?? []).length
-      + (draft.assets?.style ? 1 : 0);
-    const framesDone = (projStatus?.stages?.["2"]?.frames ?? []).length;
-    const totalScenes = (draft.scenes ?? []).length;
-    const shotsDone = (projStatus?.stages?.["3"]?.shots ?? []).length;
-    const finalDone = (projStatus?.stages?.["4"]?.final ?? []).length;
-    if (refsDone < refsTotal) return "stage-0";
-    if (framesDone < totalScenes) return "stage-2";
-    if (shotsDone < totalScenes) return "stage-3";
-    if (finalDone === 0) return "stage-4";
-    return null;
+    return "stage-meta";
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);   // compute once on mount; user toggles control thereafter
   const [openStage, setOpenStage] = React.useState<string | null>(
@@ -3746,6 +3922,21 @@ function DraftPanel({
   const [yamlText, setYamlText] = React.useState("");
   const [savingYaml, setSavingYaml] = React.useState(false);
   const [loadingYaml, setLoadingYaml] = React.useState(false);
+  const metaStyleId = draft.assets?.style?.catalog_id
+    ? String(draft.assets.style.catalog_id)
+    : "";
+  const metaStyle = (styles ?? []).find((s: StyleEntry) => s.id === metaStyleId);
+  const metaSummary = [
+    `${(draft.scenes ?? []).length} scenes`,
+    `${(draft.assets?.characters ?? []).length} characters`,
+    `${(draft.assets?.props ?? []).length} props`,
+    `${(draft.assets?.scene_refs ?? []).length} settings`,
+    metaStyleId
+      ? String(metaStyle?.display_name || humanizeId(metaStyleId))
+          .replace(/\s*\([^)]*\)\s*/g, " ")
+          .trim()
+      : "no style",
+  ].join(" · ");
 
   // Load the on-disk YAML text (preserves comments + formatting)
   // whenever the user opens the editor.
@@ -3858,112 +4049,105 @@ function DraftPanel({
   return React.createElement(
     "div",
     null,
-    // Overview
-    React.createElement(DraftSummary, {
-      draft,
-      styles,
-      forecast,
-      onSaveDraft,
-    }),
-
-    // Story-level settings (era / country / genre / tone / anchor /
-    // directives) — editable after decompose. Saves into global_config.
-    React.createElement(SettingsCard, {
-      draft,
-      onSaveDraft,
-    }),
-
-    // State timeline — timeline of per-entity state changes
-    // (bandage at T03, scar at T05, etc.) — layered into every
-    // affected scene's Stage 2 compose prompt.
-    React.createElement(StateTimelineCard, {
-      draft,
-      onSaveDraft,
-    }),
-
-    React.createElement(
-      Card,
-      {
-        size: "small",
-        style: {
-          marginTop: 12,
-          borderRadius: 8,
-          overflow: "hidden",
-          borderColor: yamlMode ? "#eadfd4" : "#eeeeee",
-        },
-        headStyle: {
-          minHeight: 46,
-          padding: "0 16px",
-          background: yamlMode ? "#fffaf5" : "#fcfcfd",
-          borderBottom: 0,
-        },
-        bodyStyle: { display: "none", padding: 0 },
-        title: React.createElement(
-          Space,
-          { size: 8 },
-          React.createElement(FileTextOutlined),
-          React.createElement(AntText, { strong: true }, "Project YAML"),
-          React.createElement(
-            AntText,
-            { type: "secondary", style: { fontSize: 12 } },
-            "· raw draft source",
-          ),
-        ),
-        extra: React.createElement(Button, {
+    React.createElement(StageSection, {
+      id: "stage-meta",
+      stageLabel: "Meta settings",
+      summary: metaSummary,
+      open: openStage === "stage-meta",
+      onToggle: toggleStage,
+    },
+      React.createElement(DraftSummary, {
+        draft,
+        styles,
+        onSaveDraft,
+      }),
+      React.createElement(SettingsCard, {
+        draft,
+        onSaveDraft,
+      }),
+      React.createElement(StateTimelineCard, {
+        draft,
+        onSaveDraft,
+      }),
+      React.createElement(
+        Card,
+        {
           size: "small",
-          icon: React.createElement(EditOutlined),
-          onClick: () => setYamlMode((v: boolean) => !v),
-          type: yamlMode ? "primary" : "default",
-          children: yamlMode ? "Hide YAML" : "Edit YAML",
-        }),
-      },
-    ),
-
-    // Raw YAML editor (collapsible)
-    yamlMode
-      ? React.createElement(
-          Card,
-          {
-            size: "small",
-            style: { marginTop: 12 },
-            title: "Edit ProjectSpec (YAML)",
-            extra: React.createElement(
-              Space,
-              null,
-              React.createElement(Button, {
-                size: "small",
-                onClick: () => setYamlMode(false),
-                children: "Cancel",
-              }),
-              React.createElement(Button, {
-                type: "primary",
-                size: "small",
-                loading: savingYaml,
-                disabled: loadingYaml,
-                onClick: onSaveYaml,
-                children: "Save YAML",
-              }),
-            ),
+          style: {
+            marginTop: 12,
+            borderRadius: 8,
+            overflow: "hidden",
+            borderColor: yamlMode ? "#eadfd4" : "#eeeeee",
           },
-          loadingYaml
-            ? React.createElement(Spin)
-            : React.createElement(TextArea, {
-                rows: 28,
-                value: yamlText,
-                onChange: (e: any) => setYamlText(e.target.value),
-                style: { fontFamily: "monospace", fontSize: 12 },
-                spellCheck: false,
-              }),
-          React.createElement(
-            AntText,
-            { type: "secondary", style: { fontSize: 11, display: "block", marginTop: 4 } },
-            "YAML is the source of truth on disk. Property edits (descriptions, prompts, scene fields) propagate to the next regen. Renaming a character / scene id will warn you — use the per-card pencil icons for safe renames.",
+          headStyle: {
+            minHeight: 46,
+            padding: "0 16px",
+            background: yamlMode ? "#fffaf5" : "#fcfcfd",
+            borderBottom: 0,
+          },
+          bodyStyle: { display: "none", padding: 0 },
+          title: React.createElement(
+            Space,
+            { size: 8 },
+            React.createElement(FileTextOutlined),
+            React.createElement(AntText, { strong: true }, "Project YAML"),
+            React.createElement(
+              AntText,
+              { type: "secondary", style: { fontSize: 12 } },
+              "· raw draft source",
+            ),
           ),
-        )
-      : null,
-
-    // Per-stage summary counts — drives the rail + collapsible headers.
-    (() => null)(),  // (no-op so the assignments below stay readable)
+          extra: React.createElement(Button, {
+            size: "small",
+            icon: React.createElement(EditOutlined),
+            onClick: () => setYamlMode((v: boolean) => !v),
+            type: yamlMode ? "primary" : "default",
+            children: yamlMode ? "Hide YAML" : "Edit YAML",
+          }),
+        },
+      ),
+      yamlMode
+        ? React.createElement(
+            Card,
+            {
+              size: "small",
+              style: { marginTop: 12, borderRadius: 8, overflow: "hidden" },
+              title: "Edit ProjectSpec (YAML)",
+              extra: React.createElement(
+                Space,
+                null,
+                React.createElement(Button, {
+                  size: "small",
+                  onClick: () => setYamlMode(false),
+                  children: "Cancel",
+                }),
+                React.createElement(Button, {
+                  type: "primary",
+                  size: "small",
+                  loading: savingYaml,
+                  disabled: loadingYaml,
+                  onClick: onSaveYaml,
+                  children: "Save YAML",
+                }),
+              ),
+            },
+            loadingYaml
+              ? React.createElement(Spin)
+              : React.createElement(TextArea, {
+                  rows: 28,
+                  value: yamlText,
+                  onChange: (e: any) => setYamlText(e.target.value),
+                  style: { fontFamily: "monospace", fontSize: 12 },
+                  spellCheck: false,
+                }),
+            React.createElement(
+              AntText,
+              { type: "secondary", style: { fontSize: 11, display: "block", marginTop: 4 } },
+              "YAML is the source of truth on disk. Property edits (descriptions, prompts, scene fields) propagate to the next regen. Renaming a character / scene id will warn you — use the per-card pencil icons for safe renames.",
+            ),
+          )
+        : null,
+    ),
 
     // Stage 0 runner + ref gallery — collapsible
     React.createElement(StageSection, {
@@ -3971,8 +4155,9 @@ function DraftPanel({
       stageLabel: "Anchors",
       summary: (() => {
         const chars = (draft.assets?.characters ?? []).length;
+        const props = (draft.assets?.props ?? []).length;
         const refs = (draft.assets?.scene_refs ?? []).length;
-        const total = chars + refs + (draft.assets?.style ? 1 : 0);
+        const total = chars + props + refs + (draft.assets?.style ? 1 : 0);
         const done = (projStatus?.stages?.["0"]?.refs ?? []).length;
         return `${done}/${total} ready`;
       })(),
@@ -4039,8 +4224,10 @@ function DraftPanel({
         onRunPiece: (kind: string, id: string) =>
           onRunStage(
             kind === "character" ? "0a" :
+            kind === "prop" ? "0a" :
             kind === "scene_ref" ? "0b" : "0c",
             kind === "character" ? { only_character: id, overwrite: true } :
+            kind === "prop" ? { only_prop: id, overwrite: true } :
             kind === "scene_ref" ? { only_scene_ref: id, overwrite: true } :
             { overwrite: true },
           ),
@@ -4243,38 +4430,46 @@ function DraftPanel({
     React.createElement(StageRail, {
       rows: [
         {
+          id: "stage-meta",
+          label: "Meta",
+          active: false,
+          done: 1,
+          total: 1,
+        },
+        {
           id: "stage-0",
-          label: "Stage 0 refs",
+          label: "Anchors",
           active: activeStage?.startsWith("0"),
           done: (projStatus?.stages?.["0"]?.refs ?? []).length,
           total: (draft.assets?.characters ?? []).length
+                 + (draft.assets?.props ?? []).length
                  + (draft.assets?.scene_refs ?? []).length
                  + (draft.assets?.style ? 1 : 0),
         },
         {
           id: "stage-1",
-          label: "Stage 1 narr.",
+          label: "Narration",
           active: activeStage === "1",
           done: (projStatus?.stages?.["1"]?.audio ?? []).length,
           total: (draft.scenes ?? []).filter((s: any) => s.has_narration).length,
         },
         {
           id: "stage-2",
-          label: "Stage 2 frames",
+          label: "Frames",
           active: activeStage === "2",
           done: (projStatus?.stages?.["2"]?.frames ?? []).length,
           total: (draft.scenes ?? []).length,
         },
         {
           id: "stage-3",
-          label: "Stage 3 anim",
+          label: "Motion",
           active: activeStage === "3",
           done: (projStatus?.stages?.["3"]?.shots ?? []).length,
           total: (draft.scenes ?? []).length,
         },
         {
           id: "stage-4",
-          label: "Stage 4 final",
+          label: "Final",
           active: activeStage === "4",
           done: (projStatus?.stages?.["4"]?.final ?? []).length,
           total: 1,
@@ -4285,11 +4480,9 @@ function DraftPanel({
     React.createElement(
       Paragraph,
       { type: "secondary", style: { fontSize: 12, marginTop: 16 } },
-      "Stage 3 takes 5–15 min per scene — you'll get a browser notification when done. Stage 4 needs ",
+      "Motion is slow; final film needs ",
       React.createElement("code", null, "ffmpeg"),
-      " on PATH (",
-      React.createElement("code", null, "brew install ffmpeg"),
-      " on macOS).",
+      ".",
     ),
   );
 }
@@ -4297,9 +4490,10 @@ function DraftPanel({
 // ── draft summary panel ──────────────────────────────────────────────
 
 function DraftSummary({
-  draft, styles, forecast, onSaveDraft,
+  draft, styles, onSaveDraft,
 }: any) {
   const chars: any[] = draft.assets?.characters ?? [];
+  const props: any[] = draft.assets?.props ?? [];
   const refs: any[] = draft.assets?.scene_refs ?? [];
   const scenes: any[] = draft.scenes ?? [];
   const styleAsset = draft.assets?.style;
@@ -4474,11 +4668,12 @@ function DraftSummary({
         }),
       ),
     ),
-    // Stats row — back to clean 4-up so Style name isn't truncated.
+    // Stats row.
     React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Scenes", value: scenes.length })),
-      React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Characters", value: chars.length })),
-      React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Settings", value: refs.length })),
+      React.createElement(Col, { span: 5 }, React.createElement(Stat, { label: "Scenes", value: scenes.length })),
+      React.createElement(Col, { span: 5 }, React.createElement(Stat, { label: "Characters", value: chars.length })),
+      React.createElement(Col, { span: 4 }, React.createElement(Stat, { label: "Props", value: props.length })),
+      React.createElement(Col, { span: 4 }, React.createElement(Stat, { label: "Settings", value: refs.length })),
       React.createElement(
         Col,
         { span: 6 },
@@ -4495,13 +4690,6 @@ function DraftSummary({
         ),
       ),
     ),
-    forecast
-      ? React.createElement(
-          AntText,
-          { type: "secondary", style: { fontSize: 12, display: "block", marginTop: 8 } },
-          `≈ $${forecast.total_usd} total — Stage 0 $${forecast.stage_0_usd} · Stage 2 $${forecast.stage_2_usd} · Stage 3 $${forecast.stage_3_usd}`,
-        )
-      : null,
   );
 }
 
@@ -4538,6 +4726,7 @@ function RefGallery({
     (projStatus?.stages?.["0"]?.refs ?? []).map((r: any) => [r.name, r]),
   );
   const chars: any[] = draft.assets?.characters ?? [];
+  const props: any[] = draft.assets?.props ?? [];
   const sRefs: any[] = draft.assets?.scene_refs ?? [];
   const style = draft.assets?.style;
   const catalogStyle = (styles ?? []).find(
@@ -4560,6 +4749,7 @@ function RefGallery({
     const exists = refsByName.has(it.refName);
     const busyHere = busy && (
       (it.kind === "character" && activeStage === "0a") ||
+      (it.kind === "prop" && activeStage === "0a") ||
       (it.kind === "scene_ref" && activeStage === "0b") ||
       (it.kind === "style" && activeStage === "0c") ||
       activeStage === "0"
@@ -4654,7 +4844,7 @@ function RefGallery({
     );
   };
 
-  const sectionHeader = (label: string, kind: "character" | "scene_ref" | null) =>
+  const sectionHeader = (label: string, kind: AnchorKind | null) =>
     React.createElement(
       "div",
       {
@@ -4670,7 +4860,9 @@ function RefGallery({
             type: "dashed",
             icon: React.createElement(PlusOutlined),
             onClick: () => onAddAnchor?.(kind),
-            children: kind === "character" ? "Add character" : "Add setting",
+            children: kind === "character"
+              ? "Add character"
+              : kind === "prop" ? "Add prop" : "Add setting",
           })
         : null,
     );
@@ -4704,6 +4896,19 @@ function RefGallery({
           imageStyle: { height: 40 },
         }),
 
+    sectionHeader(`Props (${props.length})`, "prop"),
+    props.length
+      ? React.createElement(Row, { gutter: [12, 12] },
+          ...props.map((p: any) => renderItem({
+            kind: "prop", id: p.id, name: p.id,
+            refName: `prop_${p.id}_ref.png`, description: p.description, raw: p,
+          })),
+        )
+      : React.createElement(Empty, {
+          description: 'No props — click "Add prop" above.',
+          imageStyle: { height: 40 },
+        }),
+
     sectionHeader(`Settings (${sRefs.length})`, "scene_ref"),
     sRefs.length
       ? React.createElement(Row, { gutter: [12, 12] },
@@ -4723,10 +4928,11 @@ function RefGallery({
 
 function AnchorTags({ scene }: any) {
   const chars: string[] = scene.uses_characters ?? [];
+  const props: string[] = scene.uses_props ?? [];
   const ref: string | null = scene.uses_scene_ref || null;
   const usesStyle: boolean =
     scene.uses_style === undefined ? true : !!scene.uses_style;
-  if (scene.standalone && !chars.length && !ref) {
+  if (scene.standalone && !chars.length && !props.length && !ref) {
     return React.createElement(
       Tag,
       { color: "default", style: { fontSize: 10 } },
@@ -4755,7 +4961,14 @@ function AnchorTags({ scene }: any) {
         `👤 ${c}`,
       ),
     ),
-    chars.length === 0 && !ref && !scene.standalone
+    ...props.map((p: string) =>
+      React.createElement(
+        Tag,
+        { key: p, color: "lime", style: { fontSize: 10 } },
+        `prop ${p}`,
+      ),
+    ),
+    chars.length === 0 && props.length === 0 && !ref && !scene.standalone
       ? React.createElement(
           Tag, { color: "red", style: { fontSize: 10 } },
           "⚠ no anchors",
@@ -4775,11 +4988,23 @@ function RegenNotesBox({
   const [value, setValue] = React.useState<string>(initialValue);
   const [savedValue, setSavedValue] = React.useState<string>(initialValue);
   const [saving, setSaving] = React.useState(false);
+  const [focused, setFocused] = React.useState(false);
+  React.useEffect(() => {
+    const next = String(scene?.[field] ?? "");
+    if (focused || value !== savedValue) return;
+    setValue(next);
+    setSavedValue(next);
+    // Only external scene data should resync the controlled input. Including
+    // local value/savedValue here makes autosave snap active typing back to
+    // the stale parent draft after a save resolves.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene?.id, scene?.[field], field]);
   React.useEffect(() => {
     const next = String(scene?.[field] ?? "");
     setValue(next);
     setSavedValue(next);
-  }, [scene?.id, scene?.[field], field]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene?.id, field]);
   const dirty = value !== savedValue;
   React.useEffect(() => {
     if (!dirty) return undefined;
@@ -4789,7 +5014,7 @@ function RegenNotesBox({
         await onPatchScene?.(
           scene.id ?? scene.scene_id,
           { [field]: value },
-          { quiet: true, reload: false },
+          { quiet: true, reload: false, updateProject: false },
         );
         setSavedValue(value);
       } catch {
@@ -4807,7 +5032,7 @@ function RegenNotesBox({
       await onPatchScene?.(
         scene.id ?? scene.scene_id,
         { [field]: value },
-        { quiet: true, reload: false },
+        { quiet: true, reload: false, updateProject: false },
       );
       setSavedValue(value);
     } catch {
@@ -4822,11 +5047,14 @@ function RegenNotesBox({
     React.createElement(TextArea, {
       value,
       onChange: (e: any) => setValue(e.target.value),
-      onBlur: flush,
+      onFocus: () => setFocused(true),
+      onBlur: () => {
+        setFocused(false);
+        void flush();
+      },
       placeholder,
       autoSize: { minRows: 1, maxRows: 4 },
       style: { fontSize: 11, background: dirty ? "#fffbe6" : undefined },
-      disabled: saving,
     }),
     dirty
       ? React.createElement(

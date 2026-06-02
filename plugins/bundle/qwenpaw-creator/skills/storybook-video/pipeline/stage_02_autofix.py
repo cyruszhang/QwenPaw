@@ -55,6 +55,10 @@ def _hydrate_refs(spec, project_dir: Path) -> None:
         path = refs_dir / f"{cid}_ref.png"
         if path.exists() and path.stat().st_size > 0:
             ch.reference_image = path
+    for pid, prop in getattr(spec.assets, "props", {}).items():
+        path = refs_dir / f"prop_{pid}_ref.png"
+        if path.exists() and path.stat().st_size > 0:
+            prop.reference_image = path
     for sid, scene_ref in getattr(spec.assets, "scene_refs", {}).items():
         path = refs_dir / f"scene_{sid}_ref.png"
         if path.exists() and path.stat().st_size > 0:
