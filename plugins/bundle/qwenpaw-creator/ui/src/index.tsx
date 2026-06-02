@@ -50,6 +50,7 @@ const {
   EditOutlined,
   DeleteOutlined,
   PlusOutlined,
+  EyeOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   CheckCircleTwoTone,
@@ -57,6 +58,7 @@ const {
 } = antdIcons;
 const FoldIcon = MenuFoldOutlined ?? FileTextOutlined;
 const UnfoldIcon = MenuUnfoldOutlined ?? FileTextOutlined;
+const PreviewIcon = EyeOutlined ?? PictureOutlined;
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -291,6 +293,7 @@ interface StyleEntry {
   display_name: string;
   description: string;
   has_sample: boolean;
+  sample_ref?: string;
 }
 
 interface CostForecast {
@@ -320,6 +323,21 @@ function refUrl(
     ? ""
     : `?v=${encodeURIComponent(String(version))}`;
   return getApiUrl(`/creator/projects/${pid}/refs/${name}${v}`);
+}
+
+function takeUrl(
+  pid: string,
+  name: string,
+  version: string | number = "",
+): string {
+  const v = version === "" || version == null
+    ? ""
+    : `?v=${encodeURIComponent(String(version))}`;
+  return getApiUrl(`/creator/projects/${pid}/takes/${name}${v}`);
+}
+
+function styleSampleUrl(styleId: string): string {
+  return getApiUrl(`/creator/styles/${encodeURIComponent(styleId)}/sample`);
 }
 
 function yamlPreview(draft: any): string {
@@ -523,7 +541,7 @@ function HeaderBar({ status, onRefresh }: any) {
       React.createElement(
         Paragraph,
         { type: "secondary", style: { margin: 0 } },
-        "Upload a story → LLM decomposes it → generate anchor refs (Stage 0) → compose frames (Stage 2, gpt-image-2) → animate per scene (Stage 3: Wan / HappyHorse / Seedance) → final MP4 (Stage 4, ffmpeg).",
+        "Story in, living picture book out. Shape the scenes, paint the frames, stitch the little film.",
       ),
     ),
     React.createElement(
@@ -792,6 +810,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
   return React.createElement(
     Card,
     {
+      style: { borderRadius: 8, overflow: "hidden" },
+      headStyle: { background: "#fcfcfd", minHeight: 56 },
       title: React.createElement(
         Space,
         null,
@@ -801,11 +821,21 @@ function NewProjectPane({ styles, status, onCreated }: any) {
     },
     React.createElement(
       Steps,
-      { current: 0, size: "small", style: { marginBottom: 24 } },
+      {
+        current: 0,
+        size: "small",
+        style: {
+          margin: "6px 0 22px",
+          padding: "12px 16px",
+          border: "1px solid #f0f0f0",
+          borderRadius: 8,
+          background: "#fcfcfd",
+        },
+      },
       React.createElement(Step, { title: "Source", icon: React.createElement(CloudUploadOutlined) }),
-      React.createElement(Step, { title: "Decompose", icon: React.createElement(ScissorOutlined) }),
-      React.createElement(Step, { title: "Generate refs", icon: React.createElement(PictureOutlined) }),
-      React.createElement(Step, { title: "Compose frames", icon: React.createElement(PlayCircleOutlined) }),
+      React.createElement(Step, { title: "Storyboard", icon: React.createElement(ScissorOutlined) }),
+      React.createElement(Step, { title: "Anchors", icon: React.createElement(PictureOutlined) }),
+      React.createElement(Step, { title: "Frames", icon: React.createElement(PlayCircleOutlined) }),
     ),
     status && !status.has_dashscope
       ? React.createElement(Alert, {
@@ -845,35 +875,29 @@ function NewProjectPane({ styles, status, onCreated }: any) {
       ),
       React.createElement(Row, { gutter: 16 },
         React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, {
-            label: "Image model (Stage 0 refs + Stage 2 frames)",
-            extra: "Routes every image-gen call for this project — character/setting/style refs (Stage 0) and per-scene frame composition (Stage 2). gpt-image-2: strong identity, ~$0.20-0.30 / frame. qwen-image: ~5× cheaper, weaker identity, 3-ref cap. Per-scene Stage 2 override available later.",
-          },
+          React.createElement(Form.Item, { label: "Image model" },
             React.createElement(Select, {
               value: frameProvider,
               onChange: setFrameProvider,
               style: { width: "100%" },
               options: [
-                { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI (needs OPENAI_API_KEY)" },
-                { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope — same model, DashScope key (needs IP whitelist)" },
-                { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
+                { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+                { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+                { value: "qwen-image", label: "qwen-image-2.0-pro" },
               ],
             }),
           ),
         ),
         React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, {
-            label: "Video model (Stage 3)",
-            extra: "Wan 2.7 includes ambient audio. HappyHorse / Seedance are silent (narration mixed in Stage 4). Per-scene override available later.",
-          },
+          React.createElement(Form.Item, { label: "Video model" },
             React.createElement(Select, {
               value: videoProvider,
               onChange: setVideoProvider,
               style: { width: "100%" },
               options: [
-                { value: "wan27", label: "🎬 Wan 2.7" },
-                { value: "happyhorse", label: "🐎 HappyHorse 1.0 — faster + cheaper" },
-                { value: "seedance", label: "🌱 Doubao Seedance 2.0" },
+                { value: "wan27", label: "Wan 2.7" },
+                { value: "happyhorse", label: "HappyHorse 2.0" },
+                { value: "seedance", label: "Seedance 2.0" },
               ],
             }),
           ),
@@ -916,19 +940,8 @@ function NewProjectPane({ styles, status, onCreated }: any) {
     React.createElement(
       Paragraph,
       { type: "secondary", style: { fontSize: 12, marginTop: 16 } },
-      `Source is saved to your workspace; nothing leaves the machine until you run Decompose (which calls DashScope qwen-max) or Stage 0/2 (which calls OpenAI gpt-image-2).`,
+      "Saved locally. Generation starts when you run a stage.",
     ),
-    styles && styles.length
-      ? React.createElement(
-          "div",
-          { style: { marginTop: 16 } },
-          React.createElement(
-            Paragraph,
-            { type: "secondary", style: { fontSize: 12, margin: 0 } },
-            `${styles.length} style presets seeded — the LLM picks one during Decompose; you can override it in the next step.`,
-          ),
-        )
-      : null,
   );
 }
 
@@ -940,6 +953,10 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   const [projStatus, setProjStatus] = React.useState<any>(null);
   const [busy, setBusy] = React.useState(false);
   const [activeStage, setActiveStage] = React.useState<string | null>(null);
+  const [pendingSceneRun, setPendingSceneRun] = React.useState<{
+    stage: string;
+    sceneId?: string;
+  } | null>(null);
   const [anchorEditor, setAnchorEditor] = React.useState<{
     open: boolean;
     mode: "add" | "update";
@@ -1256,6 +1273,9 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     maybeRequestNotificationPermission();
     setBusy(true);
     setActiveStage(stage);
+    setPendingSceneRun(
+      extra?.only_scene ? { stage, sceneId: String(extra.only_scene) } : null,
+    );
     setTabBadge(1, 0);
     const stageLabel: Record<string, string> = {
       "0": "Stage 0 — anchor refs",
@@ -1293,16 +1313,21 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     } finally {
       setBusy(false);
       setActiveStage(null);
+      setPendingSceneRun(null);
     }
   };
 
-  const onSaveDraft = async (newDraft: any) => {
+  const onSaveDraft = async (
+    newDraft: any,
+    opts: { quiet?: boolean; reload?: boolean } = {},
+  ) => {
     try {
       await apiJson("PUT", `/creator/projects/${pid}`, { draft: newDraft });
-      antMessage.success("Saved.");
-      await reload();
+      if (!opts.quiet) antMessage.success("Saved.");
+      if (opts.reload !== false) await reload();
     } catch (e: any) {
       antMessage.error(`Save failed: ${e.message ?? e}`);
+      throw e;
     }
   };
 
@@ -1337,19 +1362,61 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     });
   };
 
-  const onPatchScene = async (sceneId: string, patch: any) => {
-    try {
-      const r = await apiJson(
+  const onPatchScene = async (
+    sceneId: string,
+    patch: any,
+    opts: { quiet?: boolean; reload?: boolean } = {},
+  ) => {
+    const applyPatch = async (payload: any) =>
+      apiJson(
         "PATCH",
         `/creator/projects/${pid}/scenes/${sceneId}`,
-        patch,
+        payload,
       );
-      antMessage.success(`Saved scene ${sceneId}`);
+    try {
+      let r: any;
+      try {
+        r = await applyPatch(patch);
+      } catch (e: any) {
+        const msg = String(e?.message ?? e);
+        const canRetryWithoutVideoNotes =
+          Object.prototype.hasOwnProperty.call(patch, "video_regen_notes")
+          && msg.includes("video_regen_notes")
+          && msg.includes("extra_forbidden");
+        if (!canRetryWithoutVideoNotes) throw e;
+        const { video_regen_notes: _ignored, ...legacyPatch } = patch;
+        r = await applyPatch(legacyPatch);
+        if (!opts.quiet) {
+          antMessage.warning(
+            "Scene saved. Restart QwenPaw to enable video regen notes.",
+          );
+        }
+      }
+      if (!opts.quiet) antMessage.success(`Saved scene ${sceneId}`);
       setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
       onChange?.();
-      await reload();
+      if (opts.reload !== false) await reload();
     } catch (e: any) {
       antMessage.error(`Save failed: ${e.message ?? e}`);
+      throw e;
+    }
+  };
+
+  const onSelectTake = async (
+    stage: "2" | "3",
+    sceneId: string,
+    takeId: string,
+  ) => {
+    try {
+      await apiJson("POST", `/creator/projects/${pid}/takes/select`, {
+        stage,
+        scene_id: sceneId,
+        take_id: takeId,
+      });
+      antMessage.success(`Restored take ${takeId}`);
+      await reload();
+    } catch (e: any) {
+      antMessage.error(`Restore failed: ${e.message ?? e}`);
     }
   };
 
@@ -1399,6 +1466,8 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
   return React.createElement(
     Card,
     {
+      style: { borderRadius: 8, overflow: "hidden" },
+      headStyle: { background: "#fcfcfd", minHeight: 56 },
       title: React.createElement(
         Space,
         null,
@@ -1428,11 +1497,21 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     },
     React.createElement(
       Steps,
-      { current: currentStep, size: "small", style: { marginBottom: 24 } },
+      {
+        current: currentStep,
+        size: "small",
+        style: {
+          margin: "6px 0 22px",
+          padding: "12px 16px",
+          border: "1px solid #f0f0f0",
+          borderRadius: 8,
+          background: "#fcfcfd",
+        },
+      },
       React.createElement(Step, { title: "Source", icon: React.createElement(CloudUploadOutlined) }),
-      React.createElement(Step, { title: "Decompose", icon: React.createElement(ScissorOutlined) }),
-      React.createElement(Step, { title: "Generate refs", icon: React.createElement(PictureOutlined) }),
-      React.createElement(Step, { title: "Compose frames", icon: React.createElement(PlayCircleOutlined) }),
+      React.createElement(Step, { title: "Storyboard", icon: React.createElement(ScissorOutlined) }),
+      React.createElement(Step, { title: "Anchors", icon: React.createElement(PictureOutlined) }),
+      React.createElement(Step, { title: "Frames", icon: React.createElement(PlayCircleOutlined) }),
     ),
 
     // Step 1: Decompose form (only if no draft yet)
@@ -1475,15 +1554,19 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       ? React.createElement(DraftPanel, {
           pid,
           draft,
+          styles,
           projStatus,
           busy,
           activeStage,
+          pendingSceneRun,
           forecast,
           status,
           onRunStage,
           onRunStageAllParallel,
           onAutofix,
           onSaveDraft,
+          onPatchScene,
+          onSelectTake,
           onReload: reload,
           onAddAnchor: (kind: "character" | "scene_ref") =>
             setAnchorEditor({
@@ -1524,6 +1607,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
       ? React.createElement(SceneEditModal, {
           scene: sceneEditor,
           draft,
+          onAutoSave: (patch: any) =>
+            onPatchScene(sceneEditor.id, patch, {
+              quiet: true,
+              reload: false,
+            }),
           onCancel: () => setSceneEditor(null),
           onSubmit: async (patch: any) => {
             await onPatchScene(sceneEditor.id, patch);
@@ -1536,7 +1624,9 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
 
 // ── scene edit modal ────────────────────────────────────────────────
 
-function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
+function SceneEditModal({
+  scene, draft, onCancel, onSubmit, onAutoSave,
+}: any) {
   const [name, setName] = React.useState(scene.name ?? "");
   const [duration, setDuration] = React.useState(scene.duration ?? 10);
   const [hasNarration, setHasNarration] = React.useState(
@@ -1565,6 +1655,9 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
   const [regenNotes, setRegenNotes] = React.useState(
     scene.regen_notes ?? "",
   );
+  const [videoRegenNotes, setVideoRegenNotes] = React.useState(
+    scene.video_regen_notes ?? "",
+  );
   const [videoProvider, setVideoProvider] = React.useState(
     scene.video_provider ?? "wan27",
   );
@@ -1579,14 +1672,72 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
   const refOptions = (draft.assets?.scene_refs ?? []).map((r: any) => ({
     value: r.id, label: r.id,
   }));
+  const itemStyle = { marginBottom: 14 };
+  const compactItemStyle = { marginBottom: 10 };
+  const switchItemStyle = { marginBottom: 4 };
+  const [autoSaving, setAutoSaving] = React.useState(false);
+  const lastSavedSignatureRef = React.useRef("");
+
+  const currentPatch = React.useCallback(() => {
+    const patch: any = {
+      name: name.trim() || undefined,
+      duration,
+      has_narration: hasNarration,
+      standalone,
+      uses_style: usesStyle,
+      uses_characters: usesCharacters,
+      uses_scene_ref: usesSceneRef || null,
+      scene_description: sceneDescription.trim(),
+      motion_prompt: motionPrompt.trim(),
+      narration: hasNarration ? narration.trim() : "",
+      n_candidates: nCandidates,
+      regen_notes: regenNotes.trim(),
+      video_provider: videoProvider,
+      frame_provider: frameProvider,
+    };
+    if (videoRegenNotes.trim() || scene.video_regen_notes) {
+      patch.video_regen_notes = videoRegenNotes.trim();
+    }
+    return patch;
+  }, [
+    name, duration, hasNarration, standalone, usesStyle, usesCharacters,
+    usesSceneRef, sceneDescription, motionPrompt, narration, nCandidates,
+    regenNotes, videoRegenNotes, videoProvider, frameProvider,
+    scene.video_regen_notes,
+  ]);
+
+  React.useEffect(() => {
+    lastSavedSignatureRef.current = JSON.stringify(currentPatch());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scene.id]);
+
+  React.useEffect(() => {
+    const patch = currentPatch();
+    if (!patch.scene_description.trim()) return;
+    if (hasNarration && !String(patch.narration || "").trim()) return;
+    const signature = JSON.stringify(patch);
+    if (signature === lastSavedSignatureRef.current) return;
+    const timer = window.setTimeout(async () => {
+      setAutoSaving(true);
+      try {
+        await onAutoSave?.(patch);
+        lastSavedSignatureRef.current = signature;
+      } catch {
+        // onAutoSave surfaces the error toast.
+      } finally {
+        setAutoSaving(false);
+      }
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [currentPatch, hasNarration, onAutoSave]);
 
   return React.createElement(
     Modal,
     {
       open: true,
       title: `Edit scene ${scene.id} — ${scene.name}`,
-      okText: "Save",
-      confirmLoading: submitting,
+      okText: "Done",
+      confirmLoading: submitting || autoSaving,
       onCancel,
       onOk: async () => {
         if (!sceneDescription.trim()) {
@@ -1601,32 +1752,31 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
         }
         setSubmitting(true);
         try {
-          await onSubmit({
-            name: name.trim() || undefined,
-            duration,
-            has_narration: hasNarration,
-            standalone,
-            uses_style: usesStyle,
-            uses_characters: usesCharacters,
-            uses_scene_ref: usesSceneRef || null,
-            scene_description: sceneDescription.trim(),
-            motion_prompt: motionPrompt.trim(),
-            narration: hasNarration ? narration.trim() : "",
-            n_candidates: nCandidates,
-            regen_notes: regenNotes.trim(),
-            video_provider: videoProvider,
-            frame_provider: frameProvider,
-          });
+          const patch = currentPatch();
+          await onAutoSave?.(patch);
+          lastSavedSignatureRef.current = JSON.stringify(patch);
+          onCancel?.();
         } finally {
           setSubmitting(false);
         }
       },
-      width: 800,
+      width: 880,
+      style: { top: 32 },
+      bodyStyle: {
+        maxHeight: "calc(100vh - 180px)",
+        overflowX: "hidden",
+        overflowY: "auto",
+        paddingTop: 8,
+      },
     },
-    React.createElement(Form, { layout: "vertical" },
-      React.createElement(Row, { gutter: 12 },
-        React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, { label: "Name (short label)" },
+    React.createElement(Form, {
+      layout: "vertical",
+      size: "middle",
+      style: { overflowX: "hidden" },
+    },
+      React.createElement(Row, { gutter: [16, 4] },
+        React.createElement(Col, { span: 14 },
+          React.createElement(Form.Item, { label: "Name", style: itemStyle },
             React.createElement(Input, {
               value: name,
               onChange: (e: any) => setName(e.target.value),
@@ -1634,17 +1784,18 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
             }),
           ),
         ),
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Duration (s)" },
+        React.createElement(Col, { span: 5 },
+          React.createElement(Form.Item, { label: "Duration", style: itemStyle },
             React.createElement(InputNumber, {
+              addonAfter: "s",
               min: 2, max: 60, value: duration,
               onChange: (v: any) => setDuration(v ?? 10),
               style: { width: "100%" },
             }),
           ),
         ),
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Take count (n_candidates)" },
+        React.createElement(Col, { span: 5 },
+          React.createElement(Form.Item, { label: "Takes", style: itemStyle },
             React.createElement(InputNumber, {
               min: 1, max: 4, value: nCandidates,
               onChange: (v: any) => setNCandidates(v ?? 1),
@@ -1654,38 +1805,43 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
         ),
       ),
 
-      React.createElement(Row, { gutter: 12 },
+      React.createElement(Row, { gutter: [16, 0], style: { marginBottom: 12 } },
         React.createElement(Col, { span: 8 },
           React.createElement(Form.Item, {
-            label: "Title / credits card",
-            extra: "Skip Stage 0/2 conditioning — pure standalone shot",
+            label: "Title card",
+            extra: "Standalone shot; skips Stage 0/2 conditioning.",
+            style: switchItemStyle,
           },
             React.createElement(antd.Switch, {
+              size: "small",
               checked: standalone,
               onChange: setStandalone,
             }),
           ),
         ),
         React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, { label: "Has narration" },
+          React.createElement(Form.Item, { label: "Narration", style: switchItemStyle },
             React.createElement(antd.Switch, {
+              size: "small",
               checked: hasNarration, onChange: setHasNarration,
             }),
           ),
         ),
         React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, { label: "Use style anchor" },
+          React.createElement(Form.Item, { label: "Style anchor", style: switchItemStyle },
             React.createElement(antd.Switch, {
+              size: "small",
               checked: usesStyle, onChange: setUsesStyle,
             }),
           ),
         ),
       ),
 
-      React.createElement(Row, { gutter: 12 },
+      React.createElement(Row, { gutter: [16, 4] },
         React.createElement(Col, { span: 14 },
           React.createElement(Form.Item, {
-            label: `Characters in this scene (${charOptions.length} available)`,
+            label: `Characters (${charOptions.length} available)`,
+            style: itemStyle,
           },
             React.createElement(Select, {
               mode: "multiple",
@@ -1703,6 +1859,7 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
         React.createElement(Col, { span: 10 },
           React.createElement(Form.Item, {
             label: `Setting (1 of ${refOptions.length})`,
+            style: itemStyle,
           },
             React.createElement(Select, {
               value: usesSceneRef,
@@ -1717,19 +1874,21 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
       ),
 
       React.createElement(Form.Item, {
-        label: "scene_description",
-        extra: "Visual scaffold sent to gpt-image-2 for frame composition.",
+        label: "Scene description",
+        extra: "Visual scaffold for Stage 2 frame composition.",
         required: true,
+        style: itemStyle,
       },
         React.createElement(TextArea, {
-          rows: 5,
+          rows: 4,
           value: sceneDescription,
           onChange: (e: any) => setSceneDescription(e.target.value),
         }),
       ),
       React.createElement(Form.Item, {
-        label: "motion_prompt",
-        extra: "Verbs + camera. Sent to the Stage 3 video model (Wan 2.7 / HappyHorse / Seedance) on top of the composed frame.",
+        label: "Motion prompt",
+        extra: "Action and camera direction for the Stage 3 video model.",
+        style: itemStyle,
       },
         React.createElement(TextArea, {
           rows: 3,
@@ -1739,8 +1898,9 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
       ),
       hasNarration
         ? React.createElement(Form.Item, {
-            label: "narration",
+            label: "Narration text",
             extra: `≤ ${(duration - 1) * 18} chars (roughly — CosyVoice longshu_v2 at 1.0x). Stage 1 will warn if it overruns.`,
+            style: itemStyle,
           },
             React.createElement(TextArea, {
               rows: 3,
@@ -1750,45 +1910,64 @@ function SceneEditModal({ scene, draft, onCancel, onSubmit }: any) {
           )
         : null,
       React.createElement(Form.Item, {
-        label: "regen_notes (applied on next Stage 2 regeneration)",
-        extra: "Free-text correction layered on top of scene_description. Clear to remove. Persists across runs.",
+        label: "Frame regeneration notes",
+        extra: "Optional correction applied on the next Stage 2 frame regeneration.",
+        style: itemStyle,
       },
         React.createElement(TextArea, {
-          rows: 3,
+          rows: 2,
           value: regenNotes,
           onChange: (e: any) => setRegenNotes(e.target.value),
           placeholder: "marlin should be about the same length as the skiff, not larger",
         }),
       ),
       React.createElement(Form.Item, {
-        label: "frame_provider (Stage 2 override for this scene)",
-        extra: "Overrides the project-wide image model just for this scene's Stage 2 frame. Stage 0 anchor refs always use the project-wide pick (set at the Source step).",
+        label: "Video regeneration notes",
+        extra: "Optional correction applied on the next Stage 3 video regeneration.",
+        style: itemStyle,
       },
-        React.createElement(Select, {
-          value: frameProvider,
-          onChange: setFrameProvider,
-          style: { width: "100%" },
-          options: [
-            { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI" },
-            { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope" },
-            { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper" },
-          ],
+        React.createElement(TextArea, {
+          rows: 2,
+          value: videoRegenNotes,
+          onChange: (e: any) => setVideoRegenNotes(e.target.value),
+          placeholder: "slower camera push, less flapping, keep the subject centered",
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "video_provider (Stage 3)",
-        extra: "Wan 2.7 — Alibaba's I2V model (default). HappyHorse 1.0 — alternative; faster + cheaper, but different style.",
-      },
-        React.createElement(Select, {
-          value: videoProvider,
-          onChange: setVideoProvider,
-          style: { width: "100%" },
-          options: [
-            { value: "wan27", label: "🎬 Wan 2.7 — wan2.7-i2v-2026-04-25" },
-            { value: "happyhorse", label: "🐎 HappyHorse 1.0 — happyhorse-1.0-i2v" },
-            { value: "seedance", label: "🌱 Doubao Seedance 2.0 — doubao.doubao-seedance-2-0-260128" },
-          ],
-        }),
+      React.createElement(Row, { gutter: [16, 0] },
+        React.createElement(Col, { span: 12 },
+          React.createElement(Form.Item, {
+            label: "Image model",
+            style: compactItemStyle,
+          },
+            React.createElement(Select, {
+              value: frameProvider,
+              onChange: setFrameProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+                { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+                { value: "qwen-image", label: "qwen-image-2.0-pro" },
+              ],
+            }),
+          ),
+        ),
+        React.createElement(Col, { span: 12 },
+          React.createElement(Form.Item, {
+            label: "Video model",
+            style: compactItemStyle,
+          },
+            React.createElement(Select, {
+              value: videoProvider,
+              onChange: setVideoProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "wan27", label: "Wan 2.7" },
+                { value: "happyhorse", label: "HappyHorse 2.0" },
+                { value: "seedance", label: "Seedance 2.0" },
+              ],
+            }),
+          ),
+        ),
       ),
     ),
   );
@@ -1807,7 +1986,7 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
     {
       open: true,
       title: `${isEdit ? "Edit" : "Add"} ${kindLabel}`,
-      okText: isEdit ? "Save" : "Add",
+      okText: isEdit ? "Done" : "Add",
       confirmLoading: submitting,
       onCancel,
       onOk: async () => {
@@ -1880,33 +2059,74 @@ function StageSection({
     {
       id,
       size: "small",
-      style: { marginTop: 16 },
+      style: {
+        marginTop: 14,
+        borderRadius: 8,
+        overflow: "hidden",
+        borderColor: open ? "#eadfd4" : "#ececec",
+        boxShadow: open ? "0 1px 4px rgba(20, 20, 20, 0.04)" : "none",
+      },
+      headStyle: {
+        minHeight: 50,
+        padding: "0 16px",
+        background: open ? "#fffaf5" : "#fcfcfd",
+        borderBottom: open ? "1px solid #f0e8dd" : 0,
+      },
       title: React.createElement(
         "div",
         {
-          style: { display: "flex", alignItems: "center", gap: 8, cursor: "pointer" },
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            minWidth: 0,
+          },
           onClick: () => onToggle?.(id),
         },
         React.createElement(
-          AntText,
-          { style: { fontSize: 14, color: "#999" } },
+          "span",
+          {
+            style: {
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: open ? "#d46b08" : "#8c8c8c",
+              background: open ? "#fff1e6" : "#f3f3f3",
+              fontSize: 11,
+              lineHeight: "18px",
+              flex: "0 0 auto",
+            },
+          },
           open ? "▼" : "▶",
         ),
-        React.createElement(AntText, { strong: true }, stageLabel),
+        React.createElement(AntText, { strong: true, style: { whiteSpace: "nowrap" } }, stageLabel),
         costUsd != null
           ? React.createElement(
-              Tag, { color: "gold", style: { fontSize: 11 } },
+              Tag, { color: "gold", style: { fontSize: 11, marginInlineEnd: 0 } },
               `≈ $${costUsd}`,
             )
           : null,
         React.createElement(
           AntText,
-          { type: "secondary", style: { fontSize: 12 } },
+          {
+            type: "secondary",
+            style: {
+              fontSize: 12,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            },
+          },
           `· ${summary}`,
         ),
       ),
       extra: extra,
-      bodyStyle: open ? undefined : { display: "none" },
+      bodyStyle: open ? { padding: 16 } : { display: "none", padding: 0 },
     },
     children,
   );
@@ -2054,6 +2274,7 @@ function SettingsCard({ draft, onSaveDraft }: any) {
   );
   const [saving, setSaving] = React.useState(false);
   const [open, setOpen] = React.useState(false);
+  const lastSavedSettingsRef = React.useRef("");
 
   // Reset local state when the draft changes (e.g. after Re-decompose).
   React.useEffect(() => {
@@ -2068,37 +2289,59 @@ function SettingsCard({ draft, onSaveDraft }: any) {
       Array.isArray(g.style_directives) ? g.style_directives.join("\n") : "",
     );
     setConcurrency(Number(g.concurrency) || 5);
+    lastSavedSettingsRef.current = "";
   }, [draft]);
 
-  const save = async () => {
+  const buildNextDraft = React.useCallback(() => {
+    const next = JSON.parse(JSON.stringify(draft));
+    next.global_config = next.global_config || {};
+    next.global_config.era = era.trim();
+    next.global_config.country = country.trim();
+    next.global_config.genre = genre.trim();
+    next.global_config.tone = tone.trim();
+    next.global_config.story_anchor = storyAnchor.trim();
+    next.global_config.world_bible = worldBible.trim();
+    next.global_config.style_directives = directives
+      .split("\n").map((s) => s.trim()).filter(Boolean);
+    next.global_config.concurrency = Math.max(1, Math.min(5, concurrency));
+    for (const k of ["era", "country", "genre", "tone", "story_anchor", "world_bible"]) {
+      if (!next.global_config[k]) delete next.global_config[k];
+    }
+    if (next.global_config.style_directives.length === 0) {
+      delete next.global_config.style_directives;
+    }
+    return next;
+  }, [
+    draft, era, country, genre, tone, storyAnchor,
+    worldBible, directives, concurrency,
+  ]);
+
+  const save = async (quiet = false) => {
     setSaving(true);
     try {
-      const next = JSON.parse(JSON.stringify(draft));
-      next.global_config = next.global_config || {};
-      next.global_config.era = era.trim();
-      next.global_config.country = country.trim();
-      next.global_config.genre = genre.trim();
-      next.global_config.tone = tone.trim();
-      next.global_config.story_anchor = storyAnchor.trim();
-      next.global_config.world_bible = worldBible.trim();
-      next.global_config.style_directives = directives
-        .split("\n").map((s) => s.trim()).filter(Boolean);
-      next.global_config.concurrency = Math.max(1, Math.min(5, concurrency));
-      // Strip empty strings so global_config stays clean.
-      for (const k of ["era", "country", "genre", "tone", "story_anchor", "world_bible"]) {
-        if (!next.global_config[k]) delete next.global_config[k];
-      }
-      if (next.global_config.style_directives.length === 0) {
-        delete next.global_config.style_directives;
-      }
-      await onSaveDraft(next);
-      antMessage.success("Settings saved.");
+      const next = buildNextDraft();
+      const signature = JSON.stringify(next.global_config || {});
+      await onSaveDraft(next, { quiet: true, reload: !quiet });
+      lastSavedSettingsRef.current = signature;
+      if (!quiet) antMessage.success("Settings saved.");
     } catch (e: any) {
       antMessage.error(`Save failed: ${e.message ?? e}`);
     } finally {
       setSaving(false);
     }
   };
+
+  React.useEffect(() => {
+    const next = buildNextDraft();
+    const signature = JSON.stringify(next.global_config || {});
+    if (!lastSavedSettingsRef.current) {
+      lastSavedSettingsRef.current = signature;
+      return undefined;
+    }
+    if (signature === lastSavedSettingsRef.current) return undefined;
+    const timer = window.setTimeout(() => { void save(true); }, 700);
+    return () => window.clearTimeout(timer);
+  }, [buildNextDraft]);
 
   const summary = [
     era && `era=${era}`,
@@ -2116,28 +2359,71 @@ function SettingsCard({ draft, onSaveDraft }: any) {
     Card,
     {
       size: "small",
-      style: { marginTop: 12 },
+      style: {
+        marginTop: 12,
+        borderRadius: 8,
+        overflow: "hidden",
+        borderColor: open ? "#e6e6e6" : "#eeeeee",
+      },
+      headStyle: {
+        minHeight: 46,
+        padding: "0 16px",
+        background: "#fcfcfd",
+        borderBottom: open ? "1px solid #f0f0f0" : 0,
+      },
+      bodyStyle: open ? { padding: 16 } : { display: "none", padding: 0 },
       title: React.createElement(
-        Space, null,
-        React.createElement(antd.Switch, {
-          size: "small",
-          checked: open,
-          onChange: setOpen,
-        }),
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            minWidth: 0,
+          },
+          onClick: () => setOpen(!open),
+        },
+        React.createElement(
+          "span",
+          {
+            style: {
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: open ? "#595959" : "#8c8c8c",
+              background: "#f3f3f3",
+              fontSize: 11,
+              flex: "0 0 auto",
+            },
+          },
+          open ? "▼" : "▶",
+        ),
         React.createElement(AntText, { strong: true }, "Story settings"),
         React.createElement(
           AntText,
-          { type: "secondary", style: { fontSize: 12 } },
+          {
+            type: "secondary",
+            style: {
+              fontSize: 12,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            },
+          },
           `· ${summary}`,
         ),
       ),
-      extra: open
-        ? React.createElement(Button, {
-            type: "primary", size: "small",
-            loading: saving,
-            onClick: save,
-            children: "Save settings",
-          })
+      extra: open && saving
+        ? React.createElement(
+            AntText,
+            { type: "secondary", style: { fontSize: 12 } },
+            "Autosaving...",
+          )
         : null,
     },
     open
@@ -2273,10 +2559,103 @@ function SettingsCard({ draft, onSaveDraft }: any) {
 
 // ── state timeline card (ledger view) ───────────────────────────────
 
+function slugStateId(value: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const ascii = raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .replace(/_+/g, "_")
+    .slice(0, 48)
+    .replace(/_+$/g, "");
+  if (ascii) return ascii;
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
+  }
+  return `state_${Math.abs(hash).toString(36)}`;
+}
+
+function humanizeStateId(value: string): string {
+  return String(value || "").replace(/_/g, " ").trim();
+}
+
+function stateRecordId(state: any): string {
+  if (typeof state === "string") return state.trim();
+  return String(state?.id || state?.title || state?.content || "").trim();
+}
+
+function normalizeStateRecord(state: any): any {
+  if (typeof state === "string") {
+    const id = slugStateId(state);
+    const title = humanizeStateId(id || state);
+    return { id, title, content: title };
+  }
+  const title = String(state?.title || state?.id || "").trim();
+  const content = String(state?.content || state?.title || state?.id || "").trim();
+  const id = slugStateId(state?.id || title || content);
+  return { id, title: title || humanizeStateId(id), content };
+}
+
+function stateRecordLabel(state: any): string {
+  const rec = normalizeStateRecord(state);
+  return rec.title && rec.title !== rec.id ? `${rec.title} (${rec.id})` : rec.id;
+}
+
+function sceneIdOf(scene: any): string {
+  return String(scene?.id ?? scene?.scene_id ?? "").trim();
+}
+
+function sceneLabel(scene: any): string {
+  const id = sceneIdOf(scene);
+  const title = String(scene?.title || scene?.name || scene?.summary || "").trim();
+  return title ? `${id} — ${title}` : id;
+}
+
+function humanizeId(value: string): string {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function compactText(value: string, max = 76): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trim()}...`;
+}
+
+function activeStatesForChange(
+  ledger: any[],
+  entity: string,
+  atScene: string,
+  originalIndex?: number,
+): any[] {
+  const active = new Map<string, any>();
+  ledger.forEach((ch, idx) => {
+    if (idx === originalIndex) return;
+    if (ch?.entity !== entity) return;
+    if (!ch?.at_scene || String(ch.at_scene) > String(atScene)) return;
+    if (ch.reset) active.clear();
+    (ch.remove || []).forEach((state: any) => active.delete(stateRecordId(state)));
+    (ch.add || []).forEach((state: any) => {
+      const rec = normalizeStateRecord(state);
+      if (rec.id) active.set(rec.id, rec);
+    });
+  });
+  return [...active.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
 function StateTimelineCard({ draft, onSaveDraft }: any) {
   const ledger: any[] = draft.state_changes || [];
   const chars: any[] = draft.assets?.characters ?? [];
   const refs: any[] = draft.assets?.scene_refs ?? [];
+  const scenes: any[] = draft.scenes ?? [];
   const entities = [
     ...chars.map((c: any) => ({ id: c.id, kind: "character" })),
     ...refs.map((r: any) => ({ id: r.id, kind: "scene_ref" })),
@@ -2292,7 +2671,7 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
       .sort((a, b) => String(a.at_scene).localeCompare(String(b.at_scene))),
   }));
 
-  const saveLedger = async (next: any[]) => {
+  const saveLedger = async (next: any[], quiet = false) => {
     setSaving(true);
     try {
       const draft2 = JSON.parse(JSON.stringify(draft));
@@ -2300,8 +2679,8 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
         c && c.entity && c.at_scene
         && ((c.add && c.add.length) || (c.remove && c.remove.length) || c.reset),
       );
-      await onSaveDraft(draft2);
-      antMessage.success("State ledger saved.");
+      await onSaveDraft(draft2, { quiet: true, reload: !quiet });
+      if (!quiet) antMessage.success("State ledger saved.");
     } catch (e: any) {
       antMessage.error(`Save failed: ${e.message ?? e}`);
     } finally {
@@ -2309,16 +2688,21 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
     }
   };
 
-  const upsertChange = async (change: any) => {
+  const upsertChange = async (change: any, close = true) => {
     const next = [...ledger];
+    let savedIdx = change._origIdx;
     if (change._origIdx != null) {
       next[change._origIdx] = { ...change };
       delete (next[change._origIdx] as any)._origIdx;
     } else {
+      savedIdx = next.length;
       next.push(change);
     }
-    await saveLedger(next);
-    setEditing(null);
+    await saveLedger(next, !close);
+    if (close) setEditing(null);
+    else if (change._origIdx == null && savedIdx != null) {
+      setEditing({ ...change, _origIdx: savedIdx });
+    }
   };
 
   const deleteChange = async (idx: number) => {
@@ -2336,15 +2720,61 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
     Card,
     {
       size: "small",
-      style: { marginTop: 12 },
+      style: {
+        marginTop: 12,
+        borderRadius: 8,
+        overflow: "hidden",
+        borderColor: open ? "#e6e6e6" : "#eeeeee",
+      },
+      headStyle: {
+        minHeight: 46,
+        padding: "0 16px",
+        background: "#fcfcfd",
+        borderBottom: open ? "1px solid #f0f0f0" : 0,
+      },
+      bodyStyle: open ? { padding: 16 } : { display: "none", padding: 0 },
       title: React.createElement(
-        Space, null,
-        React.createElement(antd.Switch, {
-          size: "small", checked: open, onChange: setOpen,
-        }),
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer",
+            minWidth: 0,
+          },
+          onClick: () => setOpen(!open),
+        },
+        React.createElement(
+          "span",
+          {
+            style: {
+              width: 18,
+              height: 18,
+              borderRadius: 999,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: open ? "#595959" : "#8c8c8c",
+              background: "#f3f3f3",
+              fontSize: 11,
+              flex: "0 0 auto",
+            },
+          },
+          open ? "▼" : "▶",
+        ),
         React.createElement(AntText, { strong: true }, "State timeline"),
         React.createElement(AntText,
-          { type: "secondary", style: { fontSize: 12 } },
+          {
+            type: "secondary",
+            style: {
+              fontSize: 12,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            },
+          },
           `· ${summary}`),
       ),
       extra: open
@@ -2352,8 +2782,9 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
             type: "dashed", size: "small",
             icon: React.createElement(PlusOutlined),
             onClick: () => setEditing({
-              entity: entities[0]?.id || "", at_scene: "",
-              add: [], remove: [], reset: false, note: "",
+              entity: entities[0]?.id || "", at_scene: sceneIdOf(scenes[0]),
+              add: [{ id: "", title: "", content: "" }],
+              remove: [], reset: false, note: "",
             }),
             children: "Add change",
           })
@@ -2381,8 +2812,8 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
                       const origIdx = ledger.indexOf(c);
                       const labelParts = [
                         c.reset && "↺ RESET",
-                        c.remove?.length && `− ${c.remove.join(", ")}`,
-                        c.add?.length && `+ ${c.add.join(", ")}`,
+                        c.remove?.length && `− ${c.remove.map(stateRecordId).join(", ")}`,
+                        c.add?.length && `+ ${c.add.map(stateRecordLabel).join(", ")}`,
                       ].filter(Boolean).join("  |  ");
                       return React.createElement(
                         "div",
@@ -2421,21 +2852,122 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
       : null,
     editing
       ? React.createElement(StateChangeEditor, {
-          change: editing, entities, saving,
+          change: editing, entities, scenes, ledger, saving,
           onCancel: () => setEditing(null),
           onSubmit: upsertChange,
+          onAutoSubmit: (changePatch: any) => upsertChange(changePatch, false),
         })
       : null,
   );
 }
 
-function StateChangeEditor({ change, entities, saving, onCancel, onSubmit }: any) {
+function StateChangeEditor({
+  change,
+  entities,
+  scenes,
+  ledger,
+  saving,
+  onCancel,
+  onSubmit,
+  onAutoSubmit,
+}: any) {
   const [entity, setEntity] = React.useState(change.entity || "");
-  const [atScene, setAtScene] = React.useState(change.at_scene || "");
-  const [addStr, setAddStr] = React.useState((change.add || []).join(", "));
-  const [removeStr, setRemoveStr] = React.useState((change.remove || []).join(", "));
+  const [atScene, setAtScene] = React.useState(
+    change.at_scene || sceneIdOf(scenes[0]),
+  );
+  const initialAddStates = (change.add || []).length
+    ? (change.add || []).map(normalizeStateRecord)
+    : [{ id: "", title: "", content: "" }];
+  const [addStates, setAddStates] = React.useState<any[]>(initialAddStates);
+  const [removeStates, setRemoveStates] = React.useState<string[]>(
+    (change.remove || []).map(stateRecordId).map(slugStateId).filter(Boolean),
+  );
   const [reset, setReset] = React.useState(!!change.reset);
   const [note, setNote] = React.useState(change.note || "");
+  const sceneOptions = scenes.map((scene: any) => ({
+    value: sceneIdOf(scene),
+    label: sceneLabel(scene),
+  })).filter((option: any) => option.value);
+  const activeStates = activeStatesForChange(
+    ledger || [],
+    entity,
+    atScene,
+    change._origIdx,
+  );
+  const removeOptions = [
+    ...activeStates,
+    ...removeStates.map((id) => ({ id, title: humanizeStateId(id), content: "" })),
+  ]
+    .filter((state: any) => state?.id)
+    .reduce((acc: any[], state: any) => {
+      if (!acc.some((item) => item.id === state.id)) acc.push(state);
+      return acc;
+    }, [])
+    .sort((a: any, b: any) => a.id.localeCompare(b.id))
+    .map((state: any) => ({
+      value: state.id,
+      label: state.title && state.title !== state.id
+        ? `${state.title} (${state.id})`
+        : state.id,
+    }));
+  const updateAddState = (idx: number, patch: any) =>
+    setAddStates((states: any[]) =>
+      states.map((state, i) => {
+        if (i !== idx) return state;
+        const next = { ...state, ...patch };
+        if (Object.prototype.hasOwnProperty.call(patch, "title")) {
+          next.id = slugStateId(patch.title);
+        }
+        return next;
+      }),
+    );
+  const removeAddState = (idx: number) =>
+    setAddStates((states: any[]) => states.filter((_, i) => i !== idx));
+  const appendAddState = () =>
+    setAddStates((states: any[]) => [
+      ...states,
+      { id: "", title: "", content: "" },
+    ]);
+  const lastAutoSaveRef = React.useRef("");
+  const buildChange = React.useCallback(() => {
+    const normalizedAdds = addStates
+      .map(normalizeStateRecord)
+      .filter((state: any) => state.id || state.title || state.content);
+    return {
+      _origIdx: change._origIdx,
+      entity: entity.trim(),
+      at_scene: atScene.trim(),
+      add: normalizedAdds,
+      remove: removeStates,
+      reset,
+      note: note.trim(),
+    };
+  }, [
+    addStates, atScene, change._origIdx, entity, note,
+    removeStates, reset,
+  ]);
+  React.useEffect(() => {
+    lastAutoSaveRef.current = JSON.stringify(buildChange());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [change._origIdx]);
+  React.useEffect(() => {
+    const next = buildChange();
+    if (!next.entity || !next.at_scene) return undefined;
+    const incomplete = next.add.some(
+      (state: any) => !state.title.trim() || !state.content.trim(),
+    );
+    if (incomplete) return undefined;
+    if (!next.add.length && !next.remove.length && !next.reset) {
+      return undefined;
+    }
+    const signature = JSON.stringify(next);
+    if (signature === lastAutoSaveRef.current) return undefined;
+    const timer = window.setTimeout(async () => {
+      await onAutoSubmit?.(next);
+      lastAutoSaveRef.current = signature;
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [buildChange, onAutoSubmit]);
   return React.createElement(
     Modal,
     {
@@ -2443,24 +2975,22 @@ function StateChangeEditor({ change, entities, saving, onCancel, onSubmit }: any
       title: change._origIdx != null ? "Edit state change" : "Add state change",
       confirmLoading: saving,
       onCancel,
-      onOk: () => {
+      onOk: async () => {
         if (!entity || !atScene) {
           antMessage.warning("entity and at_scene are required");
           return;
         }
-        const split = (s: string) =>
-          s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
-        onSubmit({
-          _origIdx: change._origIdx,
-          entity: entity.trim(),
-          at_scene: atScene.trim(),
-          add: split(addStr),
-          remove: split(removeStr),
-          reset,
-          note: note.trim(),
-        });
+        const next = buildChange();
+        const incomplete = next.add.some(
+          (state: any) => !state.title.trim() || !state.content.trim(),
+        );
+        if (incomplete) {
+          antMessage.warning("Each added state needs a title and content.");
+          return;
+        }
+        await onSubmit(next);
       },
-      okText: "Save",
+      okText: "Done",
       width: 560,
     },
     React.createElement(Form, { layout: "vertical" },
@@ -2479,34 +3009,116 @@ function StateChangeEditor({ change, entities, saving, onCancel, onSubmit }: any
         ),
         React.createElement(Col, { span: 10 },
           React.createElement(Form.Item, {
-            label: "At scene (id like '03')",
+            label: "At scene",
           },
-            React.createElement(Input, {
+            React.createElement(Select, {
               value: atScene,
-              onChange: (e: any) => setAtScene(e.target.value),
-              placeholder: "03",
+              onChange: setAtScene,
+              showSearch: true,
+              optionFilterProp: "label",
+              style: { width: "100%" },
+              options: sceneOptions,
+              placeholder: "Choose scene",
             }),
           ),
         ),
       ),
       React.createElement(Form.Item, {
-        label: "Add states (comma-separated)",
-        extra: "Persistent state set that becomes true at this scene and carries forward (e.g. 'bandaged_right_arm, tired_expression').",
+        label: "Add states",
+        extra: "Title becomes the concise state id; content is used in Stage 2 prompting.",
       },
-        React.createElement(Input, {
-          value: addStr,
-          onChange: (e: any) => setAddStr(e.target.value),
-          placeholder: "bandaged_right_arm, tired_expression",
-        }),
+        React.createElement(
+          "div",
+          { style: { display: "grid", gap: 8 } },
+          ...addStates.map((state: any, idx: number) =>
+            React.createElement(
+              "div",
+              {
+                key: idx,
+                style: {
+                  border: "1px solid #f0f0f0",
+                  borderRadius: 6,
+                  padding: 8,
+                },
+              },
+              React.createElement(
+                Row,
+                { gutter: 8 },
+                React.createElement(
+                  Col,
+                  { span: 14 },
+                  React.createElement(Input, {
+                    value: state.title,
+                    onChange: (e: any) => updateAddState(idx, { title: e.target.value }),
+                    placeholder: "Title, e.g. distressed hair",
+                  }),
+                ),
+                React.createElement(
+                  Col,
+                  { span: 8 },
+                  React.createElement(
+                    Tooltip,
+                    { title: state.id || "ID generated from title" },
+                    React.createElement(
+                      Tag,
+                      {
+                        style: {
+                          display: "block",
+                          lineHeight: "30px",
+                          marginRight: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        },
+                      },
+                      state.id || "state_id",
+                    ),
+                  ),
+                ),
+                React.createElement(
+                  Col,
+                  { span: 2 },
+                  React.createElement(Button, {
+                    danger: true,
+                    icon: React.createElement(DeleteOutlined),
+                    onClick: () => removeAddState(idx),
+                    size: "small",
+                    type: "text",
+                  }),
+                ),
+              ),
+              React.createElement(TextArea, {
+                value: state.content,
+                onChange: (e: any) => updateAddState(idx, { content: e.target.value }),
+                placeholder: "Content used for generation, e.g. Sparrow's head feathers are ruffled and yellowed, making him look distressed.",
+                rows: 2,
+                style: { marginTop: 8 },
+              }),
+            ),
+          ),
+          React.createElement(Button, {
+            icon: React.createElement(PlusOutlined),
+            onClick: appendAddState,
+            size: "small",
+            type: "dashed",
+            children: "Add state",
+          }),
+        ),
       ),
       React.createElement(Form.Item, {
-        label: "Remove states (comma-separated)",
-        extra: "States to clear at this scene (typically followed by 'add' of a new state, e.g. remove bandage and add scar).",
+        label: "Remove states",
+        extra: activeStates.length
+          ? "Pick from states already active for this entity at this point in the story."
+          : "No prior active states for this entity before this scene.",
       },
-        React.createElement(Input, {
-          value: removeStr,
-          onChange: (e: any) => setRemoveStr(e.target.value),
-          placeholder: "bandaged_right_arm",
+        React.createElement(Select, {
+          mode: "multiple",
+          value: removeStates,
+          onChange: setRemoveStates,
+          options: removeOptions,
+          disabled: removeOptions.length === 0,
+          placeholder: "Choose states to remove",
+          style: { width: "100%" },
         }),
       ),
       React.createElement(Form.Item, { label: "Reset (clear ALL prior state for this entity)" },
@@ -2520,6 +3132,103 @@ function StateChangeEditor({ change, entities, saving, onCancel, onSubmit }: any
         }),
       ),
     ),
+  );
+}
+
+function StyleSwatchPicker({ styles, value, onChange }: any) {
+  const list: StyleEntry[] = styles ?? [];
+  if (!list.length) return null;
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        gap: 8,
+        overflowX: "auto",
+        paddingTop: 8,
+        paddingBottom: 2,
+      },
+    },
+    ...list.map((style) => {
+      const selected = value === style.id;
+      const label = compactText(
+        String(style.display_name || style.id).replace(/\s*\([^)]*\)\s*/g, " "),
+        26,
+      );
+      return React.createElement(
+        Tooltip,
+        {
+          key: style.id,
+          title: style.description || style.display_name || style.id,
+        },
+        React.createElement(
+          "button",
+          {
+            type: "button",
+            onClick: () => onChange?.(style.id),
+            style: {
+              width: 112,
+              flex: "0 0 auto",
+              border: selected ? "2px solid #ff7a00" : "1px solid #d9d9d9",
+              borderRadius: 6,
+              padding: 4,
+              background: selected ? "#fff7e6" : "#fff",
+              cursor: "pointer",
+              textAlign: "left",
+            },
+          },
+          style.has_sample
+            ? React.createElement("img", {
+                src: styleSampleUrl(style.id),
+                alt: label,
+                onError: (e: any) => {
+                  e.currentTarget.style.opacity = "0.15";
+                },
+                style: {
+                  width: "100%",
+                  aspectRatio: "1 / 1",
+                  objectFit: "cover",
+                  borderRadius: 4,
+                  display: "block",
+                  background: "#f5f5f5",
+                },
+              })
+            : React.createElement(
+                "div",
+                {
+                  style: {
+                    width: "100%",
+                    aspectRatio: "1 / 1",
+                    borderRadius: 4,
+                    background: "#fafafa",
+                    border: "1px dashed #d9d9d9",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#999",
+                    fontSize: 11,
+                    textAlign: "center",
+                    padding: 6,
+                  },
+                },
+                "sample pending",
+              ),
+          React.createElement(
+            "div",
+            {
+              style: {
+                marginTop: 4,
+                fontSize: 11,
+                fontWeight: selected ? 600 : 400,
+                lineHeight: 1.2,
+                minHeight: 26,
+              },
+            },
+            label,
+          ),
+        ),
+      );
+    }),
   );
 }
 
@@ -2592,6 +3301,11 @@ function DecomposeForm({
             optionFilterProp: "label",
             showSearch: true,
           }),
+          React.createElement(StyleSwatchPicker, {
+            styles,
+            value: styleHint,
+            onChange: setStyleHint,
+          }),
         ),
       ),
     ),
@@ -2624,35 +3338,29 @@ function DecomposeForm({
 
     React.createElement(Row, { gutter: 16 },
       React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, {
-          label: "Image model (Stage 0 refs + Stage 2 frames)",
-          extra: "Drives every image-gen call: Stage 0 anchor refs AND Stage 2 per-scene frames. Per-scene Stage 2 override available later via the pencil icon.",
-        },
+        React.createElement(Form.Item, { label: "Image model" },
           React.createElement(Select, {
             value: frameProvider,
             onChange: setFrameProvider,
             style: { width: "100%" },
             options: [
-              { value: "gpt-image-2", label: "🖼️ gpt-image-2 — direct OpenAI, ~$0.20-0.30 / frame" },
-              { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 via DashScope — same model, DashScope billed" },
-              { value: "qwen-image", label: "🪶 qwen-image-2.0-pro — ~5× cheaper, weaker identity" },
+              { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+              { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+              { value: "qwen-image", label: "qwen-image-2.0-pro" },
             ],
           }),
         ),
       ),
       React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, {
-          label: "Video model (Stage 3)",
-          extra: "Applied to every scene; per-scene override available later via the pencil icon.",
-        },
+        React.createElement(Form.Item, { label: "Video model" },
           React.createElement(Select, {
             value: videoProvider,
             onChange: setVideoProvider,
             style: { width: "100%" },
             options: [
-              { value: "wan27", label: "🎬 Wan 2.7 — wan2.7-i2v-2026-04-25" },
-              { value: "happyhorse", label: "🐎 HappyHorse 1.0 — faster + cheaper" },
-              { value: "seedance", label: "🌱 Doubao Seedance 2.0" },
+              { value: "wan27", label: "Wan 2.7" },
+              { value: "happyhorse", label: "HappyHorse 2.0" },
+              { value: "seedance", label: "Seedance 2.0" },
             ],
           }),
         ),
@@ -2990,15 +3698,19 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
 function DraftPanel({
   pid,
   draft,
+  styles,
   projStatus,
   busy,
   activeStage,
+  pendingSceneRun,
   forecast,
   status,
   onRunStage,
   onRunStageAllParallel,
   onAutofix,
   onSaveDraft,
+  onPatchScene,
+  onSelectTake,
   onReload,
   onAddAnchor,
   onEditAnchor,
@@ -3149,9 +3861,8 @@ function DraftPanel({
     // Overview
     React.createElement(DraftSummary, {
       draft,
+      styles,
       forecast,
-      onToggleYaml: () => setYamlMode((v: boolean) => !v),
-      yamlMode,
       onSaveDraft,
     }),
 
@@ -3169,6 +3880,44 @@ function DraftPanel({
       draft,
       onSaveDraft,
     }),
+
+    React.createElement(
+      Card,
+      {
+        size: "small",
+        style: {
+          marginTop: 12,
+          borderRadius: 8,
+          overflow: "hidden",
+          borderColor: yamlMode ? "#eadfd4" : "#eeeeee",
+        },
+        headStyle: {
+          minHeight: 46,
+          padding: "0 16px",
+          background: yamlMode ? "#fffaf5" : "#fcfcfd",
+          borderBottom: 0,
+        },
+        bodyStyle: { display: "none", padding: 0 },
+        title: React.createElement(
+          Space,
+          { size: 8 },
+          React.createElement(FileTextOutlined),
+          React.createElement(AntText, { strong: true }, "Project YAML"),
+          React.createElement(
+            AntText,
+            { type: "secondary", style: { fontSize: 12 } },
+            "· raw draft source",
+          ),
+        ),
+        extra: React.createElement(Button, {
+          size: "small",
+          icon: React.createElement(EditOutlined),
+          onClick: () => setYamlMode((v: boolean) => !v),
+          type: yamlMode ? "primary" : "default",
+          children: yamlMode ? "Hide YAML" : "Edit YAML",
+        }),
+      },
+    ),
 
     // Raw YAML editor (collapsible)
     yamlMode
@@ -3219,13 +3968,13 @@ function DraftPanel({
     // Stage 0 runner + ref gallery — collapsible
     React.createElement(StageSection, {
       id: "stage-0",
-      stageLabel: "Stage 0 — anchor refs",
+      stageLabel: "Anchors",
       summary: (() => {
         const chars = (draft.assets?.characters ?? []).length;
         const refs = (draft.assets?.scene_refs ?? []).length;
         const total = chars + refs + (draft.assets?.style ? 1 : 0);
         const done = (projStatus?.stages?.["0"]?.refs ?? []).length;
-        return `${done}/${total} generated`;
+        return `${done}/${total} ready`;
       })(),
       costUsd: forecast?.stage_0_usd,
       open: openStage === "stage-0",
@@ -3255,7 +4004,7 @@ function DraftPanel({
               loading: busy && activeStage?.startsWith("0"),
               disabled: keyMissing,
               onClick: () => onRunStage("0"),
-              children: "Run Stage 0 (all)",
+              children: "Generate anchors",
             }),
           ),
           React.createElement(Button, {
@@ -3286,7 +4035,7 @@ function DraftPanel({
           : null;
       })(),
       React.createElement(RefGallery, {
-        pid, draft, projStatus, busy, activeStage,
+        pid, draft, styles, projStatus, busy, activeStage,
         onRunPiece: (kind: string, id: string) =>
           onRunStage(
             kind === "character" ? "0a" :
@@ -3302,11 +4051,11 @@ function DraftPanel({
     // Stage 1 — narration
     React.createElement(StageSection, {
       id: "stage-1",
-      stageLabel: "Stage 1 — narration",
+      stageLabel: "Narration",
       summary: (() => {
         const narrated = (draft.scenes ?? []).filter((s: any) => s.has_narration).length;
         const done = (projStatus?.stages?.["1"]?.audio ?? []).length;
-        return `${done}/${narrated} narrated`;
+        return `${done}/${narrated} voiced`;
       })(),
       costUsd: 0,
       open: openStage === "stage-1",
@@ -3316,7 +4065,7 @@ function DraftPanel({
         loading: busy && activeStage === "1",
         disabled: !status?.has_dashscope,
         onClick: () => onRunStage("1"),
-        children: "Generate narration",
+        children: "Create audio",
       }),
     },
       React.createElement(AudioGallery, {
@@ -3327,11 +4076,11 @@ function DraftPanel({
     // Stage 2 — frames
     React.createElement(StageSection, {
       id: "stage-2",
-      stageLabel: "Stage 2 — compose frames",
+      stageLabel: "Frames",
       summary: (() => {
         const total = (draft.scenes ?? []).length;
         const done = (projStatus?.stages?.["2"]?.frames ?? []).length;
-        return `${done}/${total} composed`;
+        return `${done}/${total} ready`;
       })(),
       costUsd: forecast?.stage_2_usd,
       open: openStage === "stage-2",
@@ -3357,8 +4106,8 @@ function DraftPanel({
         // which image provider was used to compose the frames.
         const validateDisabled = !status?.has_dashscope;
         const validateTitle = validateDisabled
-          ? "DASHSCOPE_API_KEY missing — Qwen-VL needs it to validate"
-          : "Validate frames against per-scene rules (Qwen-VL)";
+          ? "DASHSCOPE_API_KEY missing — needed for frame checks"
+          : "Review the current frames against scene rules";
         // Count failing scenes from the saved validation report
         // (read out of projStatus). Drives the auto-fix label.
         const vr = projStatus?.stages?.["2.5"]?.report || {};
@@ -3371,14 +4120,16 @@ function DraftPanel({
         return React.createElement(
           Space, { size: 6 },
           React.createElement(Tooltip, {
-            title: keyMissing ? missingLabel : "",
+            title: keyMissing
+              ? missingLabel
+              : `Create missing frames. Up to ${conc} run in parallel.`,
           },
             React.createElement(Button, {
               type: "primary",
               loading: busy && activeStage === "2",
               disabled: keyMissing,
               onClick: () => onRunStageAllParallel("2", false),
-              children: `Run Stage 2 (×${conc})`,
+              children: "Create missing",
             }),
           ),
           React.createElement(Tooltip, { title: validateTitle },
@@ -3386,13 +4137,13 @@ function DraftPanel({
               loading: busy && activeStage === "2.5",
               disabled: validateDisabled,
               onClick: () => onRunStage("2.5"),
-              children: "Validate",
+              children: "Review frames",
             }),
           ),
           React.createElement(Tooltip, {
             title: failingCount > 0
-              ? `Re-craft ${failingCount} failing scene(s) with VLM-extracted regen notes, up to 2 iters. Each iter regenerates one frame per failing scene (paid).`
-              : "Run Validate first; if any scenes fail, this button auto-regens them.",
+              ? `Regenerate ${failingCount} flagged frame(s) with correction notes.`
+              : "Review frames first; flagged frames can be repaired here.",
           },
             React.createElement(Button, {
               loading: busy && activeStage === "autofix",
@@ -3400,30 +4151,32 @@ function DraftPanel({
               danger: failingCount > 0,
               onClick: () => onAutofix?.(2),
               children: failingCount > 0
-                ? `Auto-fix ${failingCount}`
-                : "Auto-fix",
+                ? `Repair flagged ${failingCount}`
+                : "Repair flagged",
             }),
           ),
         );
       })(),
     },
       React.createElement(FrameGallery, {
-        pid, draft, projStatus, busy, activeStage,
+        pid, draft, projStatus, busy, activeStage, pendingSceneRun,
         liveProgress,
         onRunOne: (sceneId: string) =>
           onRunStage("2", { only_scene: sceneId, overwrite: true }),
         onEditScene,
+        onPatchScene,
+        onSelectTake,
       }),
     ),
 
     // Stage 3 — animate
     React.createElement(StageSection, {
       id: "stage-3",
-      stageLabel: "Stage 3 — animate",
+      stageLabel: "Motion",
       summary: (() => {
         const total = (draft.scenes ?? []).length;
         const done = (projStatus?.stages?.["3"]?.shots ?? []).length;
-        return `${done}/${total} animated`;
+        return `${done}/${total} moving`;
       })(),
       costUsd: forecast?.stage_3_usd,
       open: openStage === "stage-3",
@@ -3439,34 +4192,37 @@ function DraftPanel({
             Number((draft.global_config || {}).concurrency) || 5));
           const wallMin = Math.ceil((n / conc) * 10);
           Modal.confirm({
-            title: "Animate ALL scenes?",
+            title: "Animate missing scenes?",
             content:
               `Each scene calls the chosen video model (~$0.50, 5-15 min). ` +
               `${n} scenes at concurrency ${conc} ≈ $${forecast?.stage_3_usd ?? "?"}` +
               ` and ~${wallMin} min wall-clock. Keep this browser tab open.`,
             okType: "danger",
-            okText: `Animate all (×${conc} parallel)`,
+            okText: `Animate missing`,
             onOk: () => { void onRunStageAllParallel("3", false); },
           });
         },
-        children: "Animate all scenes",
+        children: "Animate missing",
       }),
     },
       React.createElement(ShotGallery, {
-        pid, draft, projStatus, busy, activeStage,
+        pid, draft, projStatus, busy, activeStage, pendingSceneRun,
+        liveProgress,
         onRunOne: (sceneId: string) =>
           onRunStage("3", { only_scene: sceneId, overwrite: true }),
         onEditScene,
+        onPatchScene,
+        onSelectTake,
       }),
     ),
 
     // Stage 4 — final MP4
     React.createElement(StageSection, {
       id: "stage-4",
-      stageLabel: "Stage 4 — final MP4",
+      stageLabel: "Final film",
       summary: (() => {
         const final = (projStatus?.stages?.["4"]?.final ?? []).length;
-        return final > 0 ? "✓ assembled" : "not yet assembled";
+        return final > 0 ? "ready" : "not assembled";
       })(),
       costUsd: 0,
       open: openStage === "stage-4",
@@ -3475,7 +4231,7 @@ function DraftPanel({
         type: "primary",
         loading: busy && activeStage === "4",
         onClick: () => onRunStage("4"),
-        children: "Build final MP4",
+        children: "Assemble film",
       }),
     },
       React.createElement(FinalGallery, {
@@ -3541,12 +4297,33 @@ function DraftPanel({
 // ── draft summary panel ──────────────────────────────────────────────
 
 function DraftSummary({
-  draft, forecast, onToggleYaml, yamlMode, onSaveDraft,
+  draft, styles, forecast, onSaveDraft,
 }: any) {
   const chars: any[] = draft.assets?.characters ?? [];
   const refs: any[] = draft.assets?.scene_refs ?? [];
   const scenes: any[] = draft.scenes ?? [];
-  const styleId = draft.assets?.style?.catalog_id;
+  const styleAsset = draft.assets?.style;
+  const styleId = styleAsset?.catalog_id;
+  const catalogStyle = (styles ?? []).find((s: StyleEntry) => s.id === styleId);
+  const styleDescription = String(
+    styleAsset?.description
+    || catalogStyle?.description
+    || styleAsset?.positive_template
+    || "",
+  ).trim();
+  const styleName = String(catalogStyle?.display_name || "").trim();
+  const styleDisplay = styleName
+    ? compactText(styleName.replace(/\s*\([^)]*\)\s*/g, " "), 52)
+    : styleDescription
+    ? compactText(styleDescription.replace(/\{prompt\}\.?\s*/i, "").trim(), 52)
+    : styleId
+      ? humanizeId(styleId)
+      : "—";
+  const styleTooltip = [
+    styleName || null,
+    styleDescription || null,
+    styleId ? `Style ID: ${styleId}` : null,
+  ].filter(Boolean).join("\n\n");
   const defaultProvider =
     (draft.global_config?.video_provider as string | undefined) || "wan27";
   const defaultFrameProvider =
@@ -3622,64 +4399,101 @@ function DraftSummary({
         "Draft",
         React.createElement(Tag, null, draft.project_id),
       ),
-      // Right-side cluster: Stage 3 default video picker + Edit YAML.
-      // Moved out of the stats row to free up space for the 4 counts.
-      extra: React.createElement(
-        Space,
-        { size: 8 },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "repeat(2, minmax(220px, 1fr))",
+          gap: 12,
+          alignItems: "end",
+          padding: "10px 12px 12px",
+          marginBottom: 14,
+          border: "1px solid #eeeeee",
+          borderRadius: 8,
+          background: "#fafafa",
+        },
+      },
+      React.createElement(
+        "label",
+        { style: { display: "block", minWidth: 0 } },
         React.createElement(
-          Tooltip,
+          AntText,
           {
-            title:
-              "Default image model — used for both Stage 0 anchor refs and Stage 2 per-scene frames. Changing this re-syncs every scene's frame_provider. Per-scene Stage 2 override via the pencil icon on each scene card.",
+            style: {
+              color: "#595959",
+              fontSize: 12,
+              fontWeight: 600,
+              display: "block",
+              marginBottom: 4,
+            },
           },
-          React.createElement(Select, {
-            value: defaultFrameProvider,
-            disabled: savingFrameProvider,
-            onChange: updateDefaultFrameProvider,
-            size: "small",
-            style: { minWidth: 200 },
-            options: [
-              { value: "gpt-image-2", label: "🖼️ gpt-image-2 (OpenAI)" },
-              { value: "gpt-image-2-dashscope", label: "☁️ gpt-image-2 (DashScope)" },
-              { value: "qwen-image", label: "🪶 qwen-image" },
-            ],
-          }),
+          "Image model",
         ),
-        React.createElement(
-          Tooltip,
-          {
-            title:
-              "Default Stage 3 video model. Changing this re-syncs every scene's video_provider. Per-scene override available via the pencil icon on each scene card.",
-          },
-          React.createElement(Select, {
-            value: defaultProvider,
-            disabled: savingProvider,
-            onChange: updateDefaultProvider,
-            size: "small",
-            style: { minWidth: 180 },
-            options: [
-              { value: "wan27", label: "🎬 Wan 2.7" },
-              { value: "happyhorse", label: "🐎 HappyHorse 1.0" },
-              { value: "seedance", label: "🌱 Seedance 2.0" },
-            ],
-          }),
-        ),
-        React.createElement(Button, {
-          size: "small",
-          icon: React.createElement(EditOutlined),
-          onClick: onToggleYaml,
-          type: yamlMode ? "primary" : "default",
-          children: yamlMode ? "Hide YAML" : "Edit YAML",
+        React.createElement(Select, {
+          value: defaultFrameProvider,
+          disabled: savingFrameProvider,
+          onChange: updateDefaultFrameProvider,
+          size: "middle",
+          style: { width: "100%" },
+          options: [
+            { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+            { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+            { value: "qwen-image", label: "qwen-image-2.0-pro" },
+          ],
         }),
       ),
-    },
+      React.createElement(
+        "label",
+        { style: { display: "block", minWidth: 0 } },
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#595959",
+              fontSize: 12,
+              fontWeight: 600,
+              display: "block",
+              marginBottom: 4,
+            },
+          },
+          "Video model",
+        ),
+        React.createElement(Select, {
+          value: defaultProvider,
+          disabled: savingProvider,
+          onChange: updateDefaultProvider,
+          size: "middle",
+          style: { width: "100%" },
+          options: [
+            { value: "wan27", label: "Wan 2.7" },
+            { value: "happyhorse", label: "HappyHorse 2.0" },
+            { value: "seedance", label: "Seedance 2.0" },
+          ],
+        }),
+      ),
+    ),
     // Stats row — back to clean 4-up so Style name isn't truncated.
     React.createElement(Row, { gutter: 16 },
       React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Scenes", value: scenes.length })),
       React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Characters", value: chars.length })),
       React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Settings", value: refs.length })),
-      React.createElement(Col, { span: 6 }, React.createElement(Stat, { label: "Style", value: styleId ?? "—" })),
+      React.createElement(
+        Col,
+        { span: 6 },
+        React.createElement(
+          Tooltip,
+          { title: styleTooltip || undefined },
+          React.createElement("div", null,
+            React.createElement(Stat, {
+              label: "Style",
+              value: styleDisplay,
+              title: styleTooltip || styleDisplay,
+            }),
+          ),
+        ),
+      ),
     ),
     forecast
       ? React.createElement(
@@ -3691,14 +4505,24 @@ function DraftSummary({
   );
 }
 
-function Stat({ label, value }: any) {
+function Stat({ label, value, title }: any) {
   return React.createElement(
     "div",
     null,
     React.createElement(AntText, { type: "secondary", style: { fontSize: 12 } }, label),
     React.createElement(
       "div",
-      { style: { fontSize: 22, fontWeight: 600, lineHeight: 1.2 } },
+      {
+        title,
+        style: {
+          fontSize: 22,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        },
+      },
       String(value),
     ),
   );
@@ -3707,7 +4531,7 @@ function Stat({ label, value }: any) {
 // ── ref gallery (Stage 0) ────────────────────────────────────────────
 
 function RefGallery({
-  pid, draft, projStatus, busy, activeStage,
+  pid, draft, styles, projStatus, busy, activeStage,
   onRunPiece, onAddAnchor, onEditAnchor, onDeleteAnchor,
 }: any) {
   const refsByName = new Map<string, any>(
@@ -3716,6 +4540,18 @@ function RefGallery({
   const chars: any[] = draft.assets?.characters ?? [];
   const sRefs: any[] = draft.assets?.scene_refs ?? [];
   const style = draft.assets?.style;
+  const catalogStyle = (styles ?? []).find(
+    (s: StyleEntry) => s.id === style?.catalog_id,
+  );
+  const styleName = String(catalogStyle?.display_name || "").trim();
+  const styleLabel = styleName
+    ? compactText(styleName.replace(/\s*\([^)]*\)\s*/g, " "), 48)
+    : style?.catalog_id
+      ? humanizeId(style.catalog_id)
+      : "";
+  const styleDescription = String(
+    style?.description || catalogStyle?.description || "",
+  ).trim();
 
   const renderItem = (it: {
     kind: string; id: string; name: string; refName: string;
@@ -3842,15 +4678,15 @@ function RefGallery({
   return React.createElement(
     "div",
     null,
-    sectionHeader(`Style — anchored first so characters carry its look`, null),
+    sectionHeader("Style anchor", null),
     style?.catalog_id
       ? React.createElement(Row, { gutter: [12, 12] },
           renderItem({
             kind: "style",
             id: style.catalog_id,
-            name: `style: ${style.catalog_id}`,
+            name: styleLabel,
             refName: "style_ref.png",
-            description: style.description,
+            description: styleDescription || `Style ID: ${style.catalog_id}`,
           }),
         )
       : React.createElement(Empty, { description: "No style picked" }),
@@ -3928,30 +4764,54 @@ function AnchorTags({ scene }: any) {
   );
 }
 
-function FrameRegenNotes({ pid, scene, onSaved }: any) {
-  const [value, setValue] = React.useState<string>(scene.regen_notes ?? "");
-  const [savedValue, setSavedValue] = React.useState<string>(
-    scene.regen_notes ?? "",
-  );
+function RegenNotesBox({
+  scene,
+  field,
+  placeholder,
+  savedLabel,
+  onPatchScene,
+}: any) {
+  const initialValue = String(scene?.[field] ?? "");
+  const [value, setValue] = React.useState<string>(initialValue);
+  const [savedValue, setSavedValue] = React.useState<string>(initialValue);
   const [saving, setSaving] = React.useState(false);
   React.useEffect(() => {
-    setValue(scene.regen_notes ?? "");
-    setSavedValue(scene.regen_notes ?? "");
-  }, [scene.regen_notes]);
+    const next = String(scene?.[field] ?? "");
+    setValue(next);
+    setSavedValue(next);
+  }, [scene?.id, scene?.[field], field]);
   const dirty = value !== savedValue;
-  const save = async () => {
-    if (!dirty) return;
+  React.useEffect(() => {
+    if (!dirty) return undefined;
+    const timer = window.setTimeout(async () => {
+      setSaving(true);
+      try {
+        await onPatchScene?.(
+          scene.id ?? scene.scene_id,
+          { [field]: value },
+          { quiet: true, reload: false },
+        );
+        setSavedValue(value);
+      } catch {
+        // onPatchScene owns the visible error.
+      } finally {
+        setSaving(false);
+      }
+    }, 550);
+    return () => window.clearTimeout(timer);
+  }, [dirty, field, onPatchScene, scene.id, scene.scene_id, value]);
+  const flush = async () => {
+    if (!dirty || saving) return;
     setSaving(true);
     try {
-      await apiJson(
-        "PATCH",
-        `/creator/projects/${pid}/scenes/${scene.id}`,
-        { regen_notes: value },
+      await onPatchScene?.(
+        scene.id ?? scene.scene_id,
+        { [field]: value },
+        { quiet: true, reload: false },
       );
       setSavedValue(value);
-      onSaved?.(value);
-    } catch (e: any) {
-      antMessage.error(`Note save failed: ${e.message ?? e}`);
+    } catch {
+      // onPatchScene owns the visible error.
     } finally {
       setSaving(false);
     }
@@ -3962,8 +4822,8 @@ function FrameRegenNotes({ pid, scene, onSaved }: any) {
     React.createElement(TextArea, {
       value,
       onChange: (e: any) => setValue(e.target.value),
-      onBlur: save,
-      placeholder: "Notes for next Regen — e.g. \"marlin smaller, no hat band\"",
+      onBlur: flush,
+      placeholder,
       autoSize: { minRows: 1, maxRows: 4 },
       style: { fontSize: 11, background: dirty ? "#fffbe6" : undefined },
       disabled: saving,
@@ -3972,20 +4832,85 @@ function FrameRegenNotes({ pid, scene, onSaved }: any) {
       ? React.createElement(
           AntText,
           { type: "warning", style: { fontSize: 10 } },
-          "unsaved · click outside to save",
+          saving ? "saving..." : "autosaves shortly",
         )
       : savedValue
         ? React.createElement(
             AntText,
             { type: "secondary", style: { fontSize: 10 } },
-            "will be applied on next Regen",
+            savedLabel,
           )
         : null,
   );
 }
 
+function MediaTakeSelector({
+  pid,
+  stage,
+  sceneId,
+  asset,
+  media,
+  onSelectTake,
+}: any) {
+  const takes = asset?.takes ?? [];
+  if (!takes.length) return null;
+  const active = asset?.active_take || takes.find((t: any) => t.active);
+  const activeId = active?.id || takes[takes.length - 1]?.id;
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        gap: 6,
+        alignItems: "center",
+        marginTop: 6,
+      },
+    },
+    React.createElement(Tag, { color: "blue", style: { margin: 0 } },
+      `take ${active?.take ?? takes.length}/${takes.length}`,
+    ),
+    React.createElement(Select, {
+      size: "small",
+      value: activeId,
+      style: { minWidth: 110 },
+      onChange: (takeId: string) => onSelectTake?.(stage, sceneId, takeId),
+      options: takes.map((t: any) => ({
+        value: t.id,
+        label: `Take ${t.take}${t.active ? " • active" : ""}`,
+        title: t.note || t.created_at,
+      })),
+    }),
+    React.createElement(
+      Tooltip,
+      {
+        title: active?.name
+          ? React.createElement(
+              media === "video" ? "video" : "img",
+              {
+                src: takeUrl(pid, active.name, active.size),
+                controls: media === "video" ? true : undefined,
+                style: {
+                  maxWidth: 220,
+                  maxHeight: 160,
+                  objectFit: "cover",
+                  background: media === "video" ? "#000" : undefined,
+                },
+              },
+            )
+          : undefined,
+      },
+      React.createElement(Button, {
+        size: "small",
+        type: "text",
+        icon: React.createElement(PreviewIcon),
+      }),
+    ),
+  );
+}
+
 function FrameGallery({
-  pid, draft, projStatus, busy, activeStage, onRunOne, onEditScene, liveProgress,
+  pid, draft, projStatus, busy, activeStage, pendingSceneRun,
+  onRunOne, onEditScene, liveProgress, onPatchScene, onSelectTake,
 }: any) {
   const live = liveProgress || {};
   const framesByName = new Map<string, any>(
@@ -4000,11 +4925,18 @@ function FrameGallery({
     { gutter: [12, 12] },
     ...scenes.map((s: any) => {
       const refName = `${s.id}_${s.name}_frame.png`;
-      const exists = framesByName.has(refName);
+      const frameAsset = framesByName.get(refName);
+      const exists = Boolean(frameAsset);
       const livePhase = live[s.id]?.state;  // 'running' | 'done' | 'failed'
       const liveStageMatch = live[s.id]?.stage === "2";
       const liveBusy = liveStageMatch && livePhase === "running";
-      const busyHere = liveBusy || (busy && activeStage === "2");
+      const pendingBusy = pendingSceneRun?.stage === "2"
+        && pendingSceneRun?.sceneId === s.id;
+      const stageBusy = busy && activeStage === "2";
+      const busyHere = liveBusy || pendingBusy || (
+        stageBusy && !pendingSceneRun?.sceneId
+      );
+      const dimmed = stageBusy && !busyHere;
       const hasNotes = !!(s.regen_notes && s.regen_notes.trim());
       return React.createElement(
         Col,
@@ -4083,12 +5015,14 @@ function FrameGallery({
                   size: "small",
                   type: "text",
                   icon: React.createElement(EditOutlined),
+                  disabled: dimmed,
                   onClick: () => onEditScene?.(s.id),
                 }),
               ),
               React.createElement(Button, {
                 size: "small",
                 loading: busyHere,
+                disabled: dimmed,
                 icon: React.createElement(ReloadOutlined),
                 onClick: () => onRunOne(s.id),
                 children: exists
@@ -4097,13 +5031,14 @@ function FrameGallery({
                 type: hasNotes ? "primary" : "default",
               }),
             ),
+            style: dimmed ? { opacity: 0.45 } : undefined,
             bodyStyle: { padding: 8 },
           },
           exists
             ? React.createElement(Image, {
                 src: refUrl(
                   pid, refName,
-                  framesByName.get(refName)?.size,
+                  frameAsset?.size,
                 ),
                 style: { width: "100%", maxHeight: 360, objectFit: "cover", borderRadius: 4 },
                 fallback: "",
@@ -4126,6 +5061,16 @@ function FrameGallery({
                 busyHere ? React.createElement(Spin) : "Not composed",
               ),
           React.createElement(AnchorTags, { scene: s }),
+          exists
+            ? React.createElement(MediaTakeSelector, {
+                pid,
+                stage: "2",
+                sceneId: s.id,
+                asset: frameAsset,
+                media: "image",
+                onSelectTake,
+              })
+            : null,
           s.scene_description
             ? React.createElement(
                 AntText,
@@ -4152,7 +5097,13 @@ function FrameGallery({
                 ),
               )
             : null,
-          React.createElement(FrameRegenNotes, { pid, scene: s }),
+          React.createElement(RegenNotesBox, {
+            scene: s,
+            field: "regen_notes",
+            placeholder: "Frame notes for next Regen — e.g. \"marlin smaller, no hat band\"",
+            savedLabel: "will be applied on next frame Regen",
+            onPatchScene,
+          }),
         ),
       );
     }),
@@ -4228,8 +5179,10 @@ function AudioGallery({ pid, draft, projStatus, busy, activeStage }: any) {
 // ── shot gallery (Stage 3) — Wan 2.7 I2V ─────────────────────────────
 
 function ShotGallery({
-  pid, draft, projStatus, busy, activeStage, onRunOne, onEditScene,
+  pid, draft, projStatus, busy, activeStage, pendingSceneRun,
+  liveProgress, onRunOne, onEditScene, onPatchScene, onSelectTake,
 }: any) {
+  const live = liveProgress || {};
   const shotsByName = new Map<string, any>(
     (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
   );
@@ -4243,8 +5196,21 @@ function ShotGallery({
     ...scenes.map((s: any) => {
       const sid = s.id ?? s.scene_id;
       const refName = `${sid}_${s.name}_raw.mp4`;
-      const exists = shotsByName.has(refName);
-      const busyHere = busy && activeStage === "3";
+      const shotAsset = shotsByName.get(refName);
+      const exists = Boolean(shotAsset);
+      const livePhase = live[sid]?.state;
+      const liveStageMatch = live[sid]?.stage === "3";
+      const liveBusy = liveStageMatch && livePhase === "running";
+      const pendingBusy = pendingSceneRun?.stage === "3"
+        && pendingSceneRun?.sceneId === sid;
+      const stageBusy = busy && activeStage === "3";
+      const busyHere = liveBusy || pendingBusy || (
+        stageBusy && !pendingSceneRun?.sceneId
+      );
+      const dimmed = stageBusy && !busyHere;
+      const hasVideoNotes = !!(
+        s.video_regen_notes && s.video_regen_notes.trim()
+      );
       return React.createElement(
         Col,
         { key: sid, span: 12 },
@@ -4281,23 +5247,29 @@ function ShotGallery({
                   size: "small",
                   type: "text",
                   icon: React.createElement(EditOutlined),
+                  disabled: dimmed,
                   onClick: () => onEditScene?.(sid),
                 }),
               ),
               React.createElement(Button, {
                 size: "small",
                 loading: busyHere,
+                disabled: dimmed,
                 icon: React.createElement(ReloadOutlined),
                 onClick: () => onRunOne(sid),
-                children: exists ? "Regen" : "Animate",
+                children: exists
+                  ? (hasVideoNotes ? "Regen w/ note" : "Regen")
+                  : "Animate",
+                type: hasVideoNotes ? "primary" : "default",
               }),
             ),
+            style: dimmed ? { opacity: 0.45 } : undefined,
             bodyStyle: { padding: 8 },
           },
           exists
             ? React.createElement("video", {
                 src: refUrl(
-                  pid, refName, shotsByName.get(refName)?.size,
+                  pid, refName, shotAsset?.size,
                 ),
                 controls: true,
                 preload: "metadata",
@@ -4333,6 +5305,16 @@ function ShotGallery({
           React.createElement(AnchorTags, {
             scene: { ...s, id: sid },
           }),
+          exists
+            ? React.createElement(MediaTakeSelector, {
+                pid,
+                stage: "3",
+                sceneId: sid,
+                asset: shotAsset,
+                media: "video",
+                onSelectTake,
+              })
+            : null,
           s.motion_prompt
             ? React.createElement(
                 AntText,
@@ -4344,6 +5326,13 @@ function ShotGallery({
                 String(s.motion_prompt).slice(0, 100),
               )
             : null,
+          React.createElement(RegenNotesBox, {
+            scene: { ...s, id: sid },
+            field: "video_regen_notes",
+            placeholder: "Video notes for next Regen — e.g. \"slower pan, keep subject centered\"",
+            savedLabel: "will be applied on next video Regen",
+            onPatchScene,
+          }),
         ),
       );
     }),

@@ -41,6 +41,18 @@ from spec import ProjectSpec  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+def _try_emit(pid: str | None, kind: str, **payload) -> None:
+    """Best-effort progress emit for the web panel."""
+    if not pid:
+        return
+    try:
+        from progress import emit  # type: ignore
+
+        emit(pid, kind, **payload)
+    except Exception:
+        pass
+
+
 def _load_wan27_tool():
     from tools_loader import load_tool_module  # type: ignore
 
@@ -187,6 +199,8 @@ async def run_stage_03(
 
     produced: list[Path] = []
     generated_count = 0
+    pid = output_dir.name
+    _try_emit(pid, "stage_start", stage="3", total=len(target_scenes))
 
     for scene in target_scenes:
         target_mp4 = output_dir / f"{scene.scene_id}_{scene.name}_raw.mp4"
@@ -197,7 +211,12 @@ async def run_stage_03(
             produced.append(target_mp4)
             continue
 
+        _try_emit(pid, "scene_start", stage="3",
+                  scene_id=scene.scene_id, name=scene.name)
         if not frame_png.exists():
+            _try_emit(pid, "scene_failed", stage="3",
+                      scene_id=scene.scene_id, name=scene.name,
+                      error="frame missing")
             raise FileNotFoundError(
                 f"Frame missing for scene {scene.scene_id}: {frame_png}. "
                 f"Run Stage 02 first."
@@ -211,6 +230,15 @@ async def run_stage_03(
             continue
 
         provider = getattr(scene, "video_provider", None) or default_provider
+        prompt = scene.motion_prompt
+        regen_notes = getattr(scene, "video_regen_notes", "") or ""
+        if regen_notes.strip():
+            prompt = (
+                f"{prompt}\n\n"
+                "IMPORTANT user corrections for this video regeneration "
+                "(must affect motion/camera/timing only): "
+                f"{regen_notes.strip()}"
+            )
         logger.info(
             f"[{provider}] {scene.scene_id}_{scene.name}: "
             f"{scene.duration}s @ {resolution} — this takes ~1-3 min"
@@ -218,7 +246,7 @@ async def run_stage_03(
 
         resp = await _call_provider_i2v(
             provider,
-            scene.motion_prompt,
+            prompt,
             str(frame_png),
             resolution=resolution,
             duration=scene.duration,
@@ -227,6 +255,9 @@ async def run_stage_03(
         )
         summary = _block_text(resp.content[-1])
         if summary.startswith("Error:"):
+            _try_emit(pid, "scene_failed", stage="3",
+                      scene_id=scene.scene_id, name=scene.name,
+                      error=summary)
             raise RuntimeError(summary)
 
         wan_path = _parse_saved_path(resp)
@@ -235,11 +266,16 @@ async def run_stage_03(
 
         produced.append(target_mp4)
         generated_count += 1
+        _try_emit(pid, "scene_done", stage="3",
+                  scene_id=scene.scene_id, name=scene.name,
+                  file=target_mp4.name)
 
     logger.info(
         f"Stage 03 done: {generated_count} new shot(s), "
         f"{len(produced)} total in {output_dir}"
     )
+    _try_emit(pid, "stage_done", stage="3",
+              ok=generated_count, total=len(produced))
     return produced
 
 

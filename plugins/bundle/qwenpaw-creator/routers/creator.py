@@ -184,6 +184,181 @@ def _write_meta(pid: str, meta: dict) -> None:
     )
 
 
+def _takes_dir(proj: Path) -> Path:
+    return proj / "takes"
+
+
+def _takes_manifest_path(proj: Path) -> Path:
+    return _takes_dir(proj) / "manifest.json"
+
+
+def _read_takes_manifest(proj: Path) -> dict:
+    path = _takes_manifest_path(proj)
+    if not path.is_file():
+        return {"version": 1, "takes": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": 1, "takes": {}}
+    if not isinstance(data, dict):
+        return {"version": 1, "takes": {}}
+    data.setdefault("version", 1)
+    data.setdefault("takes", {})
+    return data
+
+
+def _write_takes_manifest(proj: Path, manifest: dict) -> None:
+    takes_dir = _takes_dir(proj)
+    takes_dir.mkdir(parents=True, exist_ok=True)
+    _takes_manifest_path(proj).write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _take_kind_for_stage(stage: str) -> str:
+    if stage == "2":
+        return "frame"
+    if stage == "3":
+        return "shot"
+    raise HTTPException(400, f"takes unsupported for stage {stage!r}")
+
+
+def _take_key(kind: str, scene_id: str) -> str:
+    return f"{kind}:{scene_id}"
+
+
+def _scene_asset_name(kind: str, scene: dict) -> str:
+    sid = str(scene.get("id") or scene.get("scene_id") or "")
+    name = str(scene.get("name") or "")
+    if kind == "frame":
+        return f"{sid}_{name}_frame.png"
+    if kind == "shot":
+        return f"{sid}_{name}_raw.mp4"
+    raise ValueError(f"unknown take kind {kind!r}")
+
+
+def _scene_for_id(draft: dict, scene_id: str) -> dict:
+    for scene in draft.get("scenes", []) or []:
+        if str(scene.get("id") or scene.get("scene_id")) == str(scene_id):
+            return scene
+    raise HTTPException(404, f"scene {scene_id!r} not found")
+
+
+def _archive_take(
+    proj: Path,
+    *,
+    kind: str,
+    scene: dict,
+    source: Path,
+    active: bool,
+    note: str = "",
+) -> dict | None:
+    if not source.is_file() or source.stat().st_size <= 0:
+        return None
+    sid = str(scene.get("id") or scene.get("scene_id"))
+    stem = Path(_scene_asset_name(kind, scene)).stem
+    ext = source.suffix.lower()
+    manifest = _read_takes_manifest(proj)
+    key = _take_key(kind, sid)
+    bucket = list(manifest.setdefault("takes", {}).get(key, []) or [])
+    next_no = max([int(t.get("take", 0)) for t in bucket] + [0]) + 1
+    take_id = f"t{next_no:02d}"
+    dest_name = f"{stem}_take{next_no:02d}{ext}"
+    dest = _takes_dir(proj) / dest_name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, dest)
+    if active:
+        for take in bucket:
+            take["active"] = False
+    entry = {
+        "id": take_id,
+        "take": next_no,
+        "kind": kind,
+        "scene_id": sid,
+        "name": dest_name,
+        "size": dest.stat().st_size,
+        "created_at": _now_iso(),
+        "active": bool(active),
+        "note": note,
+    }
+    bucket.append(entry)
+    manifest["takes"][key] = bucket
+    _write_takes_manifest(proj, manifest)
+    return entry
+
+
+def _archive_existing_before_overwrite(
+    proj: Path,
+    *,
+    kind: str,
+    scene: dict,
+) -> None:
+    canonical = proj / _scene_asset_name(kind, scene)
+    if not canonical.is_file() or canonical.stat().st_size <= 0:
+        return
+    manifest = _read_takes_manifest(proj)
+    key = _take_key(kind, str(scene.get("id") or scene.get("scene_id")))
+    bucket = manifest.setdefault("takes", {}).get(key, []) or []
+    if any(t.get("active") for t in bucket):
+        return
+    _archive_take(
+        proj,
+        kind=kind,
+        scene=scene,
+        source=canonical,
+        active=True,
+        note="archived before regeneration",
+    )
+
+
+def _archive_generated_takes(
+    proj: Path,
+    *,
+    stage: str,
+    draft: dict,
+    only_scene: str | None,
+    scene_ids: set[str] | None = None,
+) -> None:
+    kind = _take_kind_for_stage(stage)
+    scenes = [
+        scene for scene in (draft.get("scenes", []) or [])
+        if only_scene is None
+        or str(scene.get("id") or scene.get("scene_id")) == only_scene
+        or f"{scene.get('id')}_{scene.get('name')}" == only_scene
+    ]
+    for scene in scenes:
+        sid = str(scene.get("id") or scene.get("scene_id"))
+        if scene_ids is not None and sid not in scene_ids:
+            continue
+        canonical = proj / _scene_asset_name(kind, scene)
+        note_field = "regen_notes" if kind == "frame" else "video_regen_notes"
+        _archive_take(
+            proj,
+            kind=kind,
+            scene=scene,
+            source=canonical,
+            active=True,
+            note=str(scene.get(note_field) or ""),
+        )
+
+
+def _attach_takes(entries: list[dict], *, kind: str, manifest: dict) -> None:
+    for entry in entries:
+        name = str(entry.get("name") or "")
+        if kind == "frame" and name.endswith("_frame.png"):
+            scene_id = name.split("_", 1)[0]
+        elif kind == "shot" and name.endswith("_raw.mp4"):
+            scene_id = name.split("_", 1)[0]
+        else:
+            continue
+        takes = list(manifest.get("takes", {}).get(_take_key(kind, scene_id), []) or [])
+        entry["takes"] = takes
+        active = next((t for t in takes if t.get("active")), None)
+        if active:
+            entry["active_take"] = active
+
+
 def _hydrate_refs(spec: Any, proj_dir: Path) -> None:
     """Walk ``proj_dir/refs/`` and back-fill each asset's ``reference_image``
     so a Stage 2 invocation can find images produced by an earlier
@@ -292,6 +467,13 @@ class StageRunRequest(BaseModel):
     max_shots: int = 8                # for stage 3 cost guardrail
 
 
+class TakeSelectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: str                         # "2" frame | "3" shot
+    scene_id: str
+    take_id: str
+
+
 class AnchorEditRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     # One of: "add", "update", "delete"
@@ -352,11 +534,14 @@ class SceneEditRequest(BaseModel):
     # Free-text user correction appended to Stage 2's edit prompt on
     # the next regeneration. Persisted so subsequent re-runs keep it.
     regen_notes: Optional[str] = None
+    # Free-text user correction appended to Stage 3's video prompt on
+    # the next regeneration.
+    video_regen_notes: Optional[str] = None
     # Which Stage 3 video model to use: "wan27" (default) or "happyhorse".
     video_provider: Optional[str] = None
     # Which Stage 2 image model to use: "gpt-image-2" (default) or
-    # "qwen-image". qwen-image is ~5× cheaper but weaker on multi-ref
-    # identity coherence — switch for cost-sensitive iteration.
+    # "qwen-image". qwen-image uses DashScope-native generation with
+    # a 3-ref cap.
     frame_provider: Optional[str] = None
 
 
@@ -534,13 +719,31 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         # small; UI just needs id/display_name/description.
         out = []
         for s in data.get("styles", []) or []:
+            sample_ref = str(s.get("sample_ref") or "")
+            sample_path = _SKILL_DIR / "styles" / sample_ref
+            has_sample = bool(
+                sample_ref
+                and sample_path.is_file()
+                and sample_path.stat().st_size > 0
+            )
             out.append({
                 "id": s.get("id"),
                 "display_name": s.get("display_name", s.get("id")),
                 "description": (s.get("description") or "").strip(),
-                "has_sample": bool(s.get("sample_ref")),
+                "sample_ref": sample_ref if has_sample else "",
+                "has_sample": has_sample,
             })
         return {"styles": out}
+
+    @router.get("/styles/{style_id}/sample")
+    def style_sample(style_id: str):
+        """Serve a pre-generated style catalog sample, when present."""
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", style_id):
+            raise HTTPException(400, "invalid style id")
+        sample = _SKILL_DIR / "styles" / "samples" / f"{style_id}.png"
+        if not sample.is_file() or sample.stat().st_size <= 0:
+            raise HTTPException(404, f"style sample not found: {style_id}")
+        return FileResponse(sample, media_type="image/png")
 
     # ─── projects: CRUD ──────────────────────────────────────────────
 
@@ -1235,6 +1438,53 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 )
         raise HTTPException(404, f"asset not found: {name}")
 
+    @router.get("/projects/{pid}/takes/{name}")
+    def get_take(pid: str, name: str):
+        """Serve an archived frame/video take by manifest filename."""
+        if not _SAFE_REF_NAME.fullmatch(name):
+            raise HTTPException(400, "invalid name")
+        proj = project_dir(pid, create=False)
+        takes_dir = _takes_dir(proj).resolve()
+        cand = (takes_dir / name).resolve()
+        try:
+            cand.relative_to(takes_dir)
+        except ValueError as exc:
+            raise HTTPException(400, "invalid take path") from exc
+        if not cand.is_file():
+            raise HTTPException(404, f"take not found: {name}")
+        media, _ = mimetypes.guess_type(str(cand))
+        return FileResponse(
+            cand, media_type=media or "application/octet-stream",
+        )
+
+    @router.post("/projects/{pid}/takes/select")
+    def select_take(pid: str, body: TakeSelectRequest) -> dict:
+        """Restore an archived Stage 2/3 take as the active canonical file."""
+        proj = project_dir(pid, create=False)
+        draft = _read_project(pid)
+        kind = _take_kind_for_stage(body.stage)
+        scene = _scene_for_id(draft, body.scene_id)
+        manifest = _read_takes_manifest(proj)
+        key = _take_key(kind, body.scene_id)
+        bucket = list(manifest.get("takes", {}).get(key, []) or [])
+        take = next((t for t in bucket if t.get("id") == body.take_id), None)
+        if not take:
+            raise HTTPException(
+                404,
+                f"take {body.take_id!r} not found for scene {body.scene_id}",
+            )
+        src = _takes_dir(proj) / str(take.get("name") or "")
+        if not src.is_file():
+            raise HTTPException(404, f"take file missing: {src.name}")
+        dest = proj / _scene_asset_name(kind, scene)
+        shutil.copy2(src, dest)
+        for t in bucket:
+            t["active"] = t.get("id") == body.take_id
+        manifest["takes"][key] = bucket
+        _write_takes_manifest(proj, manifest)
+        _write_meta(pid, {"updated_at": _now_iso()})
+        return {"ok": True, "active_take": take}
+
     @router.get("/projects/{pid}/status")
     def get_proj_status(pid: str) -> dict:
         """Asset inventory for the UI — which stage outputs exist.
@@ -1273,6 +1523,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 elif n.endswith("_final.mp4"):
                     final.append(entry)
         out["stages"]["1"] = {"audio": audio}
+        manifest = _read_takes_manifest(proj)
+        _attach_takes(frames, kind="frame", manifest=manifest)
+        _attach_takes(shots, kind="shot", manifest=manifest)
         out["stages"]["2"] = {"frames": frames}
         out["stages"]["3"] = {"shots": shots}
         out["stages"]["4"] = {"final": final}
@@ -1433,12 +1686,28 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 raise HTTPException(
                     400, "DASHSCOPE_API_KEY missing (required by qwen-image)",
                 )
-            return await run_stage_02_v15(
+            if body.overwrite:
+                for scene in scenes_to_run:
+                    _archive_existing_before_overwrite(
+                        proj, kind="frame", scene=scene,
+                    )
+            result = await run_stage_02_v15(
                 spec, output_dir,
                 keys={"openai": oa, "dashscope": ds},
                 only_scene=body.only_scene,
                 overwrite=body.overwrite,
             )
+            generated_ids = {
+                str(item.get("scene_id"))
+                for item in (result.get("scenes") or [])
+                if item.get("path") and not item.get("skipped")
+            }
+            if generated_ids:
+                _archive_generated_takes(
+                    proj, stage="2", draft=draft,
+                    only_scene=body.only_scene, scene_ids=generated_ids,
+                )
+            return result
 
         async def _run_2_5():
             from pipeline.stage_02_5_validate import run_stage_02_5
@@ -1459,13 +1728,50 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             ds = _resolve_dashscope_key()
             if not ds:
                 raise HTTPException(400, "DASHSCOPE_API_KEY missing")
-            return await run_stage_03(
+            scenes_to_run = [
+                s for s in (draft.get("scenes") or [])
+                if (
+                    body.only_scene is None
+                    or str(s.get("id")) == body.only_scene
+                    or f"{s.get('id')}_{s.get('name')}" == body.only_scene
+                )
+            ]
+            if body.overwrite:
+                for scene in scenes_to_run:
+                    _archive_existing_before_overwrite(
+                        proj, kind="shot", scene=scene,
+                    )
+            existed_before = {
+                str(s.get("id")): (
+                    proj / _scene_asset_name("shot", s)
+                ).is_file()
+                for s in scenes_to_run
+            }
+            produced = await run_stage_03(
                 spec, output_dir,
                 api_key=ds,
                 only_scene=body.only_scene,
                 overwrite=body.overwrite,
                 max_shots=body.max_shots,
             )
+            produced_ids = {
+                p.name.split("_", 1)[0]
+                for p in produced
+                if (
+                    p.is_file()
+                    and p.name.endswith("_raw.mp4")
+                    and (
+                        body.overwrite
+                        or not existed_before.get(p.name.split("_", 1)[0])
+                    )
+                )
+            }
+            if produced_ids:
+                _archive_generated_takes(
+                    proj, stage="3", draft=draft,
+                    only_scene=body.only_scene, scene_ids=produced_ids,
+                )
+            return produced
 
         async def _run_4():
             from pipeline.stage_04_assemble import run_stage_04_full

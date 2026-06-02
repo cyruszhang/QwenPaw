@@ -132,6 +132,9 @@ def load_project_spec_from_dict(raw: dict) -> ProjectSpec:
             uses_scene_ref=s.get("uses_scene_ref") or None,
             uses_style=bool(s.get("uses_style", True)),
             regen_notes=_flatten_prose(s.get("regen_notes", "")),
+            video_regen_notes=_flatten_prose(
+                s.get("video_regen_notes", ""),
+            ),
             video_provider=str(s.get("video_provider") or "wan27"),
             frame_provider=str(s.get("frame_provider") or "gpt-image-2"),
         )
@@ -148,11 +151,21 @@ def load_project_spec_from_dict(raw: dict) -> ProjectSpec:
         at_scene = str(ch.get("at_scene") or "").strip()
         if not entity or not at_scene:
             continue
+        def _state_id(item: object) -> str:
+            if isinstance(item, dict):
+                return str(
+                    item.get("id")
+                    or item.get("title")
+                    or item.get("content")
+                    or "",
+                ).strip()
+            return str(item or "").strip()
+
         state_changes.append(StateChange(
             entity=entity,
             at_scene=at_scene,
             add=list(ch.get("add") or []),
-            remove=list(ch.get("remove") or []),
+            remove=[sid for sid in (_state_id(x) for x in (ch.get("remove") or [])) if sid],
             reset=bool(ch.get("reset", False)),
             note=str(ch.get("note") or "").strip(),
         ))

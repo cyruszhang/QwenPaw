@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -101,6 +102,11 @@ class SceneSpec:
     # Clear by setting to "" to revert to the original composition.
     regen_notes: str = ""
 
+    # Free-text user feedback appended to Stage 03's video prompt.
+    # Kept separate from frame regen notes because these corrections
+    # usually describe motion, timing, camera, or temporal artifacts.
+    video_regen_notes: str = ""
+
     # Which video model Stage 3 uses for this scene. Defaults to wan27
     # (drop-in with the existing pipeline). Other options:
     #   - "happyhorse" → happyhorse-1.0-i2v
@@ -110,8 +116,7 @@ class SceneSpec:
     # Which image model Stage 2 uses to compose this scene's frame.
     # "gpt-image-2" (default) uses OpenAI's /v1/images/edits — strong
     # prompt adherence but ~$0.20-0.30 per frame at high quality.
-    # "qwen-image" uses DashScope's edit_image_qwen — roughly 5× cheaper
-    # but weaker multi-ref identity coherence.
+    # "qwen-image" uses DashScope's edit_image_qwen with a 3-ref cap.
     frame_provider: str = "gpt-image-2"
 
 
@@ -241,7 +246,7 @@ class StateChange:
 
     entity: str               # character/scene_ref id (e.g. "carrot_gentleman")
     at_scene: str             # scene id at which the change applies (e.g. "03")
-    add: list[str] = field(default_factory=list)
+    add: list[Any] = field(default_factory=list)
     remove: list[str] = field(default_factory=list)
     reset: bool = False
     note: str = ""
@@ -271,6 +276,24 @@ class ProjectSpec:
     state_changes: list[StateChange] = field(default_factory=list)
 
 
+def _state_id(state: Any) -> str:
+    if isinstance(state, dict):
+        raw = state.get("id") or state.get("title") or state.get("content") or ""
+        return str(raw).strip()
+    return str(state or "").strip()
+
+
+def _state_prompt(state: Any) -> str:
+    if isinstance(state, dict):
+        sid = str(state.get("id") or "").strip()
+        title = str(state.get("title") or "").strip()
+        content = str(state.get("content") or "").strip()
+        if content and title:
+            return f"{title}: {content}"
+        return content or title or sid
+    return str(state or "").strip()
+
+
 def world_state_at(
     spec: ProjectSpec, scene_id: str, entity: str,
 ) -> tuple[set[str], list[str]]:
@@ -287,7 +310,7 @@ def world_state_at(
     with ``at_scene == scene_id`` ARE applied (the change happens AT
     that scene, not after it).
     """
-    active: set[str] = set()
+    active: dict[str, str] = {}
     notes: list[str] = []
     # Walk in author order; respect within-scene ordering as written.
     for ch in spec.state_changes:
@@ -300,12 +323,15 @@ def world_state_at(
         if ch.reset:
             active.clear()
         for s in ch.remove or []:
-            active.discard(s)
+            active.pop(_state_id(s), None)
         for s in ch.add or []:
-            active.add(s)
+            sid = _state_id(s)
+            prompt = _state_prompt(s)
+            if sid and prompt:
+                active[sid] = prompt
         if ch.note:
             notes.append(f"[{ch.at_scene}] {ch.note}")
-    return active, notes
+    return set(active.values()), notes
 
 
 def assemble_frame_prompt(anchors: AnchorSet, scene: SceneSpec) -> str:
