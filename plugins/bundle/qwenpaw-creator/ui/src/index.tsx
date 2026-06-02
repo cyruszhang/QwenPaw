@@ -1913,52 +1913,124 @@ function StageSection({
 }
 
 /**
- * Sticky right-edge rail: jump to any stage, see status at a glance.
- * Each pill is `Stage N — ✓✓✓·· (3/5)` — green for done, grey for pending.
+ * Right-edge stage palette. It stays compact until hover/focus, and the
+ * wrapper lets clicks pass through so it does not mask scene-card controls.
  */
 function StageRail({ rows }: any) {
+  const [expanded, setExpanded] = React.useState(false);
+  const jumpToStage = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return React.createElement(
     "div",
     {
       style: {
-        position: "fixed", right: 16, top: 140, zIndex: 10,
-        background: "#fff", border: "1px solid #eee", borderRadius: 8,
-        padding: 8, fontSize: 12, minWidth: 140,
-        boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+        position: "fixed",
+        right: 10,
+        top: 152,
+        zIndex: 10,
+        pointerEvents: "none",
       },
     },
-    React.createElement(AntText, { strong: true, style: { fontSize: 12 } }, "Stages"),
-    React.createElement("div", { style: { marginTop: 6 } },
-      ...rows.map((r: any) =>
-        React.createElement(
-          "div",
-          {
-            key: r.id,
-            style: {
-              padding: "3px 0", cursor: "pointer",
-              color: r.active ? "#1a73e8" : "#555",
-            },
-            onClick: () => {
-              const el = document.getElementById(r.id);
-              if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-            },
-          },
-          React.createElement(
-            "span",
-            { style: { color: r.done === r.total && r.total > 0 ? "#52c41a" : "#999" } },
-            r.done === r.total && r.total > 0 ? "✓" : "○",
+    React.createElement(
+      "div",
+      {
+        onMouseEnter: () => setExpanded(true),
+        onMouseLeave: () => setExpanded(false),
+        onFocus: () => setExpanded(true),
+        onBlur: (e: any) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) setExpanded(false);
+        },
+        style: {
+          pointerEvents: "auto",
+          background: "#fff",
+          border: "1px solid #e8e8e8",
+          borderRadius: 8,
+          boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+          minWidth: expanded ? 154 : 38,
+          padding: expanded ? 8 : 6,
+          transition: "min-width 140ms ease, padding 140ms ease",
+        },
+      },
+      expanded
+        ? React.createElement(
+            React.Fragment,
+            null,
+            React.createElement(
+              AntText,
+              { strong: true, style: { display: "block", fontSize: 12, marginBottom: 6 } },
+              "Stages",
+            ),
+            ...rows.map((r: any) =>
+              React.createElement(
+                "button",
+                {
+                  key: r.id,
+                  type: "button",
+                  onClick: () => jumpToStage(r.id),
+                  style: {
+                    alignItems: "center",
+                    background: r.active ? "#e6f4ff" : "transparent",
+                    border: 0,
+                    borderRadius: 6,
+                    color: r.active ? "#1677ff" : "#444",
+                    cursor: "pointer",
+                    display: "flex",
+                    fontSize: 12,
+                    gap: 6,
+                    lineHeight: 1.4,
+                    margin: 0,
+                    padding: "4px 6px",
+                    textAlign: "left",
+                    width: "100%",
+                  },
+                },
+                React.createElement(
+                  "span",
+                  {
+                    style: {
+                      color: r.done === r.total && r.total > 0 ? "#52c41a" : "#bfbfbf",
+                      fontSize: 10,
+                      lineHeight: 1,
+                    },
+                  },
+                  "●",
+                ),
+                React.createElement(
+                  "span",
+                  {
+                    style: {
+                      flex: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  r.label,
+                ),
+                r.total > 0
+                  ? React.createElement(
+                      "span",
+                      { style: { color: "#999", fontVariantNumeric: "tabular-nums" } },
+                      `${r.done}/${r.total}`,
+                    )
+                  : null,
+              ),
+            ),
+          )
+        : React.createElement(
+            Tooltip,
+            { title: "Stages", placement: "left" },
+            React.createElement(Button, {
+              size: "small",
+              type: rows.some((r: any) => r.active) ? "primary" : "default",
+              icon: React.createElement(PlayCircleOutlined),
+              onClick: () => setExpanded(true),
+              style: { width: 28, height: 28, padding: 0 },
+            }),
           ),
-          " ",
-          r.label,
-          r.total > 0
-            ? React.createElement(
-                AntText,
-                { type: "secondary", style: { fontSize: 11 } },
-                ` ${r.done}/${r.total}`,
-              )
-            : null,
-        ),
-      ),
     ),
   );
 }
