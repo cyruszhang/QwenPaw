@@ -269,9 +269,10 @@ class AutoFixRequest(BaseModel):
     """Body for POST /projects/{pid}/autofix.
 
     Validates all scenes, appends VLM failure reasons to each failing
-    scene's regen_notes, re-runs Stage 2 for the failures, re-validates.
-    Caps at ``max_iters`` (default 2 — each iter is one Stage 2 regen
-    per failing scene, ~$0.20-0.30 per regen on gpt-image-2).
+    scene's regen_notes, re-runs Stage 2 for the failures, then validates
+    the regenerated frames. ``max_iters`` is the number of regeneration
+    attempts (default 2 — each attempt is one Stage 2 regen per failing
+    scene, ~$0.20-0.30 per regen on gpt-image-2).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -992,9 +993,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
     async def autofix(pid: str, body: AutoFixRequest) -> dict:
         """Auto-fix loop: validate → regen failing scenes with the VLM
         failure reasons appended to regen_notes → re-validate. Up to
-        ``max_iters`` iterations.
+        ``max_iters`` regeneration attempts, with a final validation
+        after the last attempt.
 
-        Per-iteration:
+        Flow:
           1. Run Stage 2.5 on the current set of (possibly filtered)
              scenes.
           2. Collect failing scene ids. If none, exit early.
@@ -1002,7 +1004,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
              ``regen_notes`` (deduped against the existing text).
           4. Persist the draft, then re-run Stage 2 with
              ``overwrite=True`` for each failing scene.
-          5. Loop.
+          5. Validate again. If the attempt budget is exhausted, return
+             ``converged=false`` plus ``final_failed_scenes``.
 
         Returns a structured report with per-iteration validation
         snapshots so the UI can render a "fixed N/M scenes" summary.
@@ -1021,172 +1024,32 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 404, "project.yml missing — decompose+craft first",
             )
 
-        from pipeline.stage_02_5_validate import run_stage_02_5
-        from pipeline.stage_02_v15_compose import run_stage_02_v15
-        from pipeline.stage_00_script import draft_to_yaml
+        from pipeline.stage_02_autofix import (  # noqa: PLC0415
+            ValidatorUnavailableError,
+            run_stage_02_autofix,
+        )
 
-        iterations: list[dict] = []
-        fixed_scenes: set[str] = set()
-        failed_scenes: set[str] = set()
-
-        for i in range(body.max_iters):
-            # Reload the draft each iter (the previous loop may have
-            # edited regen_notes and committed Stage 2 outputs).
-            draft = _read_project(pid)
-            spec = _draft_to_projectspec(draft)
-            _hydrate_refs(spec, proj)
-
-            report = await run_stage_02_5(
-                spec, proj,
-                api_key=ds, only_scene=body.only_scene,
+        try:
+            report = await run_stage_02_autofix(
+                proj,
+                qwen_vl_api_key=ds,
+                keys={
+                    "openai": _resolve_openai_key() or "",
+                    "dashscope": ds,
+                },
+                max_iters=body.max_iters,
+                only_scene=body.only_scene,
             )
+        except ValidatorUnavailableError as exc:
+            raise HTTPException(
+                502,
+                "Auto-fix aborted: fix the validator before retrying — "
+                f"no frames were regenerated. {exc}",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
-            # Separate REAL failures (VLM answered, answer was wrong)
-            # from INDETERMINATE checks (VLM call errored — 403, timeout,
-            # unparseable). An indeterminate check means "we couldn't
-            # verify," NOT "the frame is wrong" — regenerating on it
-            # wastes money and pollutes regen_notes with error strings.
-            def _real_failures(info: dict) -> list:
-                return [
-                    c for c in (info.get("failures") or [])
-                    if not c.get("indeterminate")
-                ]
-
-            failing = [
-                (sid, info) for sid, info in report.items()
-                if sid != "_summary"
-                and info.get("rule_count", 0) > 0
-                and _real_failures(info)
-            ]
-
-            # Global validator-health check: if NO scene produced any
-            # determinate check at all (every check indeterminate),
-            # the validator itself is down (e.g. Qwen-VL auth/403).
-            # Abort cleanly instead of regenerating every scene.
-            any_determinate = any(
-                any(not c.get("indeterminate")
-                    for c in (info.get("checks") or []))
-                for sid, info in report.items()
-                if sid != "_summary"
-            )
-            indeterminate_total = sum(
-                sum(1 for c in (info.get("checks") or [])
-                    if c.get("indeterminate"))
-                for sid, info in report.items()
-                if sid != "_summary"
-            )
-            if not any_determinate and indeterminate_total > 0:
-                # Surface a sample error so the user knows why.
-                sample = ""
-                for sid, info in report.items():
-                    if sid == "_summary":
-                        continue
-                    for c in (info.get("checks") or []):
-                        if c.get("indeterminate"):
-                            sample = str(c.get("vlm_answer", ""))[:160]
-                            break
-                    if sample:
-                        break
-                raise HTTPException(
-                    502,
-                    "Auto-fix aborted: the Qwen-VL validator could not "
-                    "evaluate any rule (every check errored). Fix the "
-                    "validator before retrying — no frames were "
-                    f"regenerated. Sample error: {sample}",
-                )
-
-            iterations.append({
-                "iter": i,
-                "scenes_checked": report.get("_summary", {}).get(
-                    "scenes_checked", 0,
-                ),
-                "scenes_passed": report.get("_summary", {}).get(
-                    "scenes_passed", 0,
-                ),
-                "scenes_failed": len(failing),
-                "indeterminate_checks": indeterminate_total,
-                "failing_scene_ids": [sid for sid, _ in failing],
-            })
-
-            if not failing:
-                # Nothing with a real, determinate failure — done.
-                fixed_scenes.update(
-                    s.get("id") for s in (draft.get("scenes") or [])
-                )
-                break
-
-            # Append the failed RULE TEXT to each failing scene's
-            # regen_notes (additive, deduped). Never include the VLM's
-            # raw answer/error string — only the actionable rule.
-            for sid, info in failing:
-                fail_lines = []
-                for chk in _real_failures(info)[:5]:
-                    rule = (chk.get("rule") or "").strip()
-                    if not rule:
-                        continue
-                    kind = chk.get("kind", "")
-                    if kind == "must_not_contain":
-                        fail_lines.append(f"Remove from frame: {rule}")
-                    elif kind == "composition":
-                        fail_lines.append(f"Fix composition: {rule}")
-                    else:
-                        fail_lines.append(f"Make clearly visible: {rule}")
-                if not fail_lines:
-                    continue
-                fail_block = "[auto-fix] " + "; ".join(fail_lines)
-                for sc in draft.get("scenes") or []:
-                    if str(sc.get("id")) == sid:
-                        # Strip any prior auto-fix lines (old polluted
-                        # "[auto-fix iter N] ... (VLM said: ...)" format
-                        # included) so notes don't accumulate stale or
-                        # error-laced text. Keep user-authored lines.
-                        existing = (sc.get("regen_notes") or "")
-                        user_lines = [
-                            ln for ln in existing.splitlines()
-                            if not ln.strip().startswith("[auto-fix")
-                        ]
-                        kept = "\n".join(user_lines).strip()
-                        sc["regen_notes"] = (
-                            (kept + "\n" + fail_block).strip()
-                            if kept else fail_block
-                        )
-                        break
-            proj_yml.write_text(
-                draft_to_yaml(draft), encoding="utf-8",
-            )
-
-            # Re-run Stage 2 for the failing scenes only. Use the same
-            # provider/key resolution as the regular /stage handler.
-            spec = _draft_to_projectspec(_read_project(pid))
-            _hydrate_refs(spec, proj)
-            oa = _resolve_openai_key()
-            keys = {"openai": oa or "", "dashscope": ds}
-            for sid, _ in failing:
-                try:
-                    await run_stage_02_v15(
-                        spec, proj,
-                        keys=keys,
-                        only_scene=sid,
-                        overwrite=True,
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    logger.exception(
-                        "[autofix] scene %s regen failed at iter %d",
-                        sid, i,
-                    )
-                    failed_scenes.add(sid)
-                    iterations[-1].setdefault("regen_errors", []).append({
-                        "scene_id": sid, "error": str(exc),
-                    })
-
-        return {
-            "ok": True,
-            "project_id": pid,
-            "max_iters": body.max_iters,
-            "iterations": iterations,
-            "fixed_scenes": sorted(fixed_scenes),
-            "errored_scenes": sorted(failed_scenes),
-        }
+        return {"project_id": pid, **report}
 
     @router.patch("/projects/{pid}/anchors")
     def edit_anchor(pid: str, body: AnchorEditRequest) -> dict:
