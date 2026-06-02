@@ -17,6 +17,7 @@ import { getApiUrl, getApiToken } from "../api/config";
 interface PluginInfo {
   id: string;
   name: string;
+  version?: string;
   frontend_entry?: string;
 }
 
@@ -28,8 +29,17 @@ interface PluginInfo {
  * Resolve a backend-relative API path (e.g. `/plugins/…/files/index.js`)
  * to a full URL using the same base that all other API calls use.
  */
-function resolveUrl(pluginId: string, apiPath: string): string {
-  return getApiUrl(`frontend_plugin/${pluginId}/files/${apiPath}`);
+function resolveUrl(plugin: PluginInfo): string {
+  const apiPath = plugin.frontend_entry!;
+  const url = new URL(
+    getApiUrl(`frontend_plugin/${plugin.id}/files/${apiPath}`),
+    window.location.origin,
+  );
+  url.searchParams.set(
+    "v",
+    `${plugin.id}:${plugin.version ?? "0"}:${Date.now()}`,
+  );
+  return url.toString();
 }
 
 /**
@@ -94,7 +104,7 @@ export async function loadAllPlugins(): Promise<{
 
   const results = await Promise.allSettled(
     frontendPlugins.map(async (p) => {
-      await executePluginScript(resolveUrl(p.id, p.frontend_entry!));
+      await executePluginScript(resolveUrl(p));
       console.info(`[PluginLoader] ✓ ${p.id}`);
     }),
   );

@@ -50,9 +50,13 @@ const {
   EditOutlined,
   DeleteOutlined,
   PlusOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   CheckCircleTwoTone,
   ExclamationCircleOutlined,
 } = antdIcons;
+const FoldIcon = MenuFoldOutlined ?? FileTextOutlined;
+const UnfoldIcon = MenuUnfoldOutlined ?? FileTextOutlined;
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -328,6 +332,16 @@ function yamlPreview(draft: any): string {
   }
 }
 
+function useViewportWidth(): number {
+  const [width, setWidth] = React.useState(() => window.innerWidth);
+  React.useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
 // ── main page ────────────────────────────────────────────────────────
 
 function CreatorPage(): any {
@@ -335,6 +349,9 @@ function CreatorPage(): any {
   const [projects, setProjects] = React.useState<ProjectEntry[]>([]);
   const [selectedPid, setSelectedPid] = React.useState<string | null>(null);
   const [styles, setStyles] = React.useState<StyleEntry[]>([]);
+  const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
+  const viewportWidth = useViewportWidth();
+  const effectiveProjectsCollapsed = projectsCollapsed || viewportWidth < 900;
 
   const [loadingProjects, setLoadingProjects] = React.useState(false);
 
@@ -376,20 +393,50 @@ function CreatorPage(): any {
     reloadStyles();
   }, [reloadStatus, reloadProjects, reloadStyles]);
 
+  React.useEffect(() => {
+    setProjectsCollapsed(Boolean(selectedPid));
+  }, [selectedPid]);
+
+  const selectProject = React.useCallback((pid: string) => {
+    setSelectedPid(pid);
+    setProjectsCollapsed(true);
+  }, []);
+
+  const createProject = React.useCallback(() => {
+    setSelectedPid(null);
+    setProjectsCollapsed(false);
+  }, []);
+
   return React.createElement(
     "div",
-    { style: { padding: 24, maxWidth: 1400, margin: "0 auto" } },
+    { style: { padding: 24, maxWidth: 1560, margin: "0 auto" } },
     React.createElement(HeaderBar, { status, onRefresh: reloadStatus }),
-    React.createElement(Row, { gutter: 24, style: { marginTop: 16 } },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: effectiveProjectsCollapsed
+            ? "56px minmax(0, 1fr)"
+            : "320px minmax(0, 1fr)",
+          gap: effectiveProjectsCollapsed ? 16 : 24,
+          alignItems: "start",
+          marginTop: 16,
+          transition: "grid-template-columns 160ms ease, gap 160ms ease",
+        },
+      },
       React.createElement(
-        Col,
-        { span: 7 },
+        "div",
+        { style: { minWidth: 0 } },
         React.createElement(ProjectSidebar, {
           projects,
           selectedPid,
           loading: loadingProjects,
-          onSelect: setSelectedPid,
-          onCreate: () => setSelectedPid(null),
+          collapsed: effectiveProjectsCollapsed,
+          collapseLocked: viewportWidth < 900,
+          onToggleCollapsed: () => setProjectsCollapsed((v) => !v),
+          onSelect: selectProject,
+          onCreate: createProject,
           onReload: reloadProjects,
           onRename: async (p: ProjectEntry) => {
             // Best default: the draft's auto-generated project_id
@@ -420,8 +467,8 @@ function CreatorPage(): any {
         }),
       ),
       React.createElement(
-        Col,
-        { span: 17 },
+        "div",
+        { style: { minWidth: 0 } },
         selectedPid
           ? React.createElement(ProjectPane, {
               key: selectedPid,
@@ -441,7 +488,7 @@ function CreatorPage(): any {
                 setSelectedPid(pid);
                 reloadProjects();
               },
-            }),
+          }),
       ),
     ),
   );
@@ -506,11 +553,101 @@ function ProjectSidebar({
   projects,
   selectedPid,
   loading,
+  collapsed,
+  collapseLocked,
+  onToggleCollapsed,
   onSelect,
   onCreate,
   onReload,
   onRename,
 }: any) {
+  const selectedProject = projects.find(
+    (p: ProjectEntry) => p.id === selectedPid,
+  );
+  const selectedLabel = selectedProject
+    ? selectedProject.title || selectedProject.id
+    : "";
+  const selectedLabelHasCjk =
+    /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(
+      selectedLabel,
+    );
+  const railLabel = selectedLabelHasCjk && selectedLabel.length > 9
+    ? `${selectedLabel.slice(0, 8)}…`
+    : selectedLabel;
+
+  if (collapsed) {
+    return React.createElement(
+      Card,
+      {
+        size: "small",
+        bodyStyle: {
+          padding: 8,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 8,
+        },
+      },
+      React.createElement(
+        Tooltip,
+        { title: collapseLocked ? "Widen the window to show projects" : "Show projects" },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          icon: React.createElement(UnfoldIcon),
+          onClick: onToggleCollapsed,
+          disabled: collapseLocked,
+        }),
+      ),
+      React.createElement(
+        Tooltip,
+        { title: "New storybook" },
+        React.createElement(Button, {
+          size: "small",
+          type: "primary",
+          icon: React.createElement(PlusOutlined),
+          onClick: onCreate,
+        }),
+      ),
+      React.createElement(
+        Tooltip,
+        { title: "Refresh projects" },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          icon: React.createElement(ReloadOutlined),
+          onClick: onReload,
+          loading,
+        }),
+      ),
+      selectedProject
+        ? React.createElement(
+            Tooltip,
+            { title: selectedLabel },
+            React.createElement(
+              "div",
+              {
+                style: {
+                  writingMode: "vertical-rl",
+                  textOrientation: selectedLabelHasCjk ? "upright" : "mixed",
+                  maxHeight: 220,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  color: "#8c8c8c",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  lineHeight: 1.25,
+                  marginTop: 8,
+                },
+              },
+              railLabel,
+            ),
+          )
+        : null,
+    );
+  }
+
   return React.createElement(
     Card,
     {
@@ -524,6 +661,15 @@ function ProjectSidebar({
       extra: React.createElement(
         Space,
         null,
+        React.createElement(
+          Tooltip,
+          { title: "Collapse projects" },
+          React.createElement(Button, {
+            size: "small",
+            icon: React.createElement(FoldIcon),
+            onClick: onToggleCollapsed,
+          }),
+        ),
         React.createElement(Button, {
           type: "primary",
           size: "small",
