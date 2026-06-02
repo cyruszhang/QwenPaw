@@ -413,6 +413,7 @@ function CreatorPage(): any {
   const [selectedPid, setSelectedPid] = React.useState<string | null>(null);
   const [styles, setStyles] = React.useState<StyleEntry[]>([]);
   const [projectsCollapsed, setProjectsCollapsed] = React.useState(false);
+  const [stageRows, setStageRows] = React.useState<any[] | null>(null);
   const viewportWidth = useViewportWidth();
   const effectiveProjectsCollapsed = projectsCollapsed || viewportWidth < 900;
 
@@ -468,6 +469,11 @@ function CreatorPage(): any {
   const createProject = React.useCallback(() => {
     setSelectedPid(null);
     setProjectsCollapsed(false);
+    setStageRows(null);
+  }, []);
+
+  const updateStageRows = React.useCallback((rows: any[] | null) => {
+    setStageRows(rows);
   }, []);
 
   return React.createElement(
@@ -490,30 +496,36 @@ function CreatorPage(): any {
       },
       React.createElement(
         "div",
-        { style: { minWidth: 0 } },
+        {
+          style: {
+            minWidth: 0,
+            ...(effectiveProjectsCollapsed
+              ? {
+                  position: "sticky",
+                  top: 12,
+                  zIndex: 4,
+                  alignSelf: "start",
+                }
+              : {}),
+          },
+        },
         React.createElement(ProjectSidebar, {
           projects,
           selectedPid,
           loading: loadingProjects,
           collapsed: effectiveProjectsCollapsed,
+          stageRows: effectiveProjectsCollapsed ? stageRows : null,
           collapseLocked: viewportWidth < 900,
           onToggleCollapsed: () => setProjectsCollapsed((v) => !v),
           onSelect: selectProject,
           onCreate: createProject,
           onReload: reloadProjects,
           onRename: async (p: ProjectEntry) => {
-            // Best default: the draft's auto-generated project_id
-            // (e.g. "the_old_man_and_the_sea"); fall back to title.
-            let suggested = p.title || p.id;
-            try {
-              const proj = await apiGet<any>(`/creator/projects/${p.id}`);
-              suggested = proj?.draft?.project_id || suggested;
-            } catch { /* keep title */ }
             const next = window.prompt(
               `Rename "${p.id}" — pick a new id.\n` +
-              `Chinese titles auto-romanize via pinyin (e.g. 老人与海 → lao_ren_yu_hai).\n` +
-              `Or paste the draft's project_id: ${suggested}`,
-              suggested,
+              "Chinese titles auto-romanize via pinyin " +
+              "(e.g. 老人与海 → lao_ren_yu_hai).",
+              p.id,
             );
             if (!next || next === p.id) return;
             try {
@@ -538,6 +550,7 @@ function CreatorPage(): any {
               pid: selectedPid,
               styles,
               status,
+              onStageRowsChange: updateStageRows,
               onChange: reloadProjects,
               onDeleted: () => {
                 setSelectedPid(null);
@@ -617,6 +630,7 @@ function ProjectSidebar({
   selectedPid,
   loading,
   collapsed,
+  stageRows,
   collapseLocked,
   onToggleCollapsed,
   onSelect,
@@ -640,72 +654,89 @@ function ProjectSidebar({
 
   if (collapsed) {
     return React.createElement(
-      Card,
-      {
-        size: "small",
-        bodyStyle: {
-          padding: 8,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 8,
+      React.Fragment,
+      null,
+      React.createElement(
+        Card,
+        {
+          size: "small",
+          bodyStyle: {
+            padding: 8,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 8,
+          },
         },
-      },
-      React.createElement(
-        Tooltip,
-        { title: collapseLocked ? "Widen the window to show projects" : "Show projects" },
-        React.createElement(Button, {
-          size: "small",
-          type: "text",
-          icon: React.createElement(UnfoldIcon),
-          onClick: onToggleCollapsed,
-          disabled: collapseLocked,
-        }),
-      ),
-      React.createElement(
-        Tooltip,
-        { title: "New storybook" },
-        React.createElement(Button, {
-          size: "small",
-          type: "primary",
-          icon: React.createElement(PlusOutlined),
-          onClick: onCreate,
-        }),
-      ),
-      React.createElement(
-        Tooltip,
-        { title: "Refresh projects" },
-        React.createElement(Button, {
-          size: "small",
-          type: "text",
-          icon: React.createElement(ReloadOutlined),
-          onClick: onReload,
-          loading,
-        }),
-      ),
-      selectedProject
-        ? React.createElement(
-            Tooltip,
-            { title: selectedLabel },
-            React.createElement(
-              "div",
-              {
-                style: {
-                  writingMode: "vertical-rl",
-                  textOrientation: selectedLabelHasCjk ? "upright" : "mixed",
-                  maxHeight: 220,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  color: "#8c8c8c",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  lineHeight: 1.25,
-                  marginTop: 8,
+        React.createElement(
+          Tooltip,
+          { title: collapseLocked ? "Widen the window to show projects" : "Show projects" },
+          React.createElement(Button, {
+            size: "small",
+            type: "text",
+            icon: React.createElement(UnfoldIcon),
+            onClick: onToggleCollapsed,
+            disabled: collapseLocked,
+          }),
+        ),
+        React.createElement(
+          Tooltip,
+          { title: "New storybook" },
+          React.createElement(Button, {
+            size: "small",
+            type: "primary",
+            icon: React.createElement(PlusOutlined),
+            onClick: onCreate,
+          }),
+        ),
+        React.createElement(
+          Tooltip,
+          { title: "Refresh projects" },
+          React.createElement(Button, {
+            size: "small",
+            type: "text",
+            icon: React.createElement(ReloadOutlined),
+            onClick: onReload,
+            loading,
+          }),
+        ),
+        selectedProject
+          ? React.createElement(
+              Tooltip,
+              { title: selectedLabel },
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    writingMode: "vertical-rl",
+                    textOrientation: selectedLabelHasCjk ? "upright" : "mixed",
+                    maxHeight: 220,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    color: "#8c8c8c",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    lineHeight: 1.25,
+                    marginTop: 8,
+                  },
                 },
+                railLabel,
+              ),
+            )
+          : null,
+      ),
+      stageRows?.length
+        ? React.createElement(
+            "div",
+            {
+              style: {
+                position: "sticky",
+                top: 12,
+                zIndex: 3,
               },
-              railLabel,
-            ),
+            },
+            React.createElement(StageRail, { rows: stageRows, inline: true }),
           )
         : null,
     );
@@ -992,7 +1023,9 @@ function NewProjectPane({ styles, status, onCreated }: any) {
 
 // ── project pane: workflow per loaded project ────────────────────────
 
-function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
+function ProjectPane({
+  pid, styles, status, onStageRowsChange, onChange, onDeleted,
+}: any) {
   const [project, setProject] = React.useState<any>(null);
   const [forecast, setForecast] = React.useState<CostForecast | null>(null);
   const [projStatus, setProjStatus] = React.useState<any>(null);
@@ -1534,6 +1567,17 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
     });
   };
 
+  const sidebarDraft = project?.draft ?? {};
+  const sidebarStageRows = React.useMemo(
+    () => buildStageRows(sidebarDraft, projStatus, activeStage),
+    [sidebarDraft, projStatus, activeStage],
+  );
+  React.useEffect(() => {
+    const hasScenes = (sidebarDraft?.scenes ?? []).length > 0;
+    onStageRowsChange?.(hasScenes ? sidebarStageRows : null);
+  }, [sidebarDraft, sidebarStageRows, onStageRowsChange]);
+  React.useEffect(() => () => onStageRowsChange?.(null), [onStageRowsChange]);
+
   if (!project) {
     return React.createElement(Card, null, React.createElement(Spin));
   }
@@ -1570,7 +1614,11 @@ function ProjectPane({ pid, styles, status, onChange, onDeleted }: any) {
         Space,
         null,
         React.createElement(AntText, { strong: true }, project?.meta?.title ?? pid),
-        React.createElement(Tag, { color: "blue" }, pid),
+        React.createElement(
+          Tooltip,
+          { title: "Project folder id" },
+          React.createElement(Tag, { color: "blue" }, `folder: ${pid}`),
+        ),
       ),
       extra: React.createElement(
         Space,
@@ -2289,16 +2337,139 @@ function StageSection({
   );
 }
 
+function buildStageRows(draft: any, projStatus: any, activeStage: string | null) {
+  return [
+    {
+      id: "stage-meta",
+      label: "Meta",
+      short: "M",
+      active: activeStage === "meta",
+      done: 1,
+      total: 1,
+    },
+    {
+      id: "stage-0",
+      label: "Anchors",
+      short: "A",
+      active: activeStage?.startsWith("0"),
+      done: (projStatus?.stages?.["0"]?.refs ?? []).length,
+      total: (draft.assets?.characters ?? []).length
+             + (draft.assets?.props ?? []).length
+             + (draft.assets?.scene_refs ?? []).length
+             + (draft.assets?.style ? 1 : 0),
+    },
+    {
+      id: "stage-1",
+      label: "Narration",
+      short: "N",
+      active: activeStage === "1",
+      done: (projStatus?.stages?.["1"]?.audio ?? []).length,
+      total: (draft.scenes ?? []).filter((s: any) => s.has_narration).length,
+    },
+    {
+      id: "stage-2",
+      label: "Frames",
+      short: "F",
+      active: activeStage === "2",
+      done: (projStatus?.stages?.["2"]?.frames ?? []).length,
+      total: (draft.scenes ?? []).length,
+    },
+    {
+      id: "stage-3",
+      label: "Motion",
+      short: "Mo",
+      active: activeStage === "3",
+      done: (projStatus?.stages?.["3"]?.shots ?? []).length,
+      total: (draft.scenes ?? []).length,
+    },
+    {
+      id: "stage-4",
+      label: "Final",
+      short: "Fi",
+      active: activeStage === "4",
+      done: (projStatus?.stages?.["4"]?.final ?? []).length,
+      total: 1,
+    },
+  ];
+}
+
 /**
- * Right-edge stage palette. It stays compact until hover/focus, and the
- * wrapper lets clicks pass through so it does not mask scene-card controls.
+ * Compact stage snapshot used under the collapsed project strip.
  */
-function StageRail({ rows }: any) {
+function StageRail({ rows, inline = false }: any) {
   const [expanded, setExpanded] = React.useState(false);
   const jumpToStage = (id: string) => {
-    const el = document.getElementById(id);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    window.dispatchEvent(
+      new CustomEvent("qwenpaw:open-stage", { detail: { id } }),
+    );
+    window.setTimeout(() => {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
   };
+
+  if (inline) {
+    return React.createElement(
+      Card,
+      {
+        size: "small",
+        style: { marginTop: 10, borderRadius: 8 },
+        bodyStyle: {
+          padding: "8px 6px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 6,
+        },
+      },
+      ...rows.map((r: any) => {
+        const done = r.total > 0 && r.done >= r.total;
+        const title = `${r.label}${r.total > 0 ? ` ${r.done}/${r.total}` : ""}`;
+        return React.createElement(
+          Tooltip,
+          { key: r.id, title, placement: "right" },
+          React.createElement(
+            "button",
+            {
+              type: "button",
+              onClick: () => jumpToStage(r.id),
+              style: {
+                width: 34,
+                minHeight: 32,
+                borderRadius: 8,
+                border: r.active ? "1px solid #91caff" : "1px solid #eeeeee",
+                background: r.active ? "#e6f4ff" : "#fff",
+                color: r.active ? "#1677ff" : "#595959",
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 2,
+                padding: "3px 0",
+                fontSize: 10,
+                fontWeight: 700,
+                lineHeight: 1,
+              },
+            },
+            React.createElement(
+              "span",
+              {
+                style: {
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: done ? "#52c41a" : r.active ? "#1677ff" : "#d9d9d9",
+                  display: "block",
+                },
+              },
+            ),
+            React.createElement("span", null, r.short || r.label.slice(0, 1)),
+          ),
+        );
+      }),
+    );
+  }
 
   return React.createElement(
     "div",
@@ -3918,6 +4089,15 @@ function DraftPanel({
   );
   const toggleStage = (id: string) =>
     setOpenStage((cur: string | null) => (cur === id ? null : id));
+  React.useEffect(() => {
+    const onOpenStage = (event: Event) => {
+      const id = (event as CustomEvent)?.detail?.id;
+      if (typeof id !== "string" || !id.startsWith("stage-")) return;
+      setOpenStage(id);
+    };
+    window.addEventListener("qwenpaw:open-stage", onOpenStage);
+    return () => window.removeEventListener("qwenpaw:open-stage", onOpenStage);
+  }, []);
   const [yamlMode, setYamlMode] = React.useState(false);
   const [yamlText, setYamlText] = React.useState("");
   const [savingYaml, setSavingYaml] = React.useState(false);
@@ -4426,57 +4606,6 @@ function DraftPanel({
       }),
     ),
 
-    // Right-edge stage rail — sticky, click-to-jump per stage.
-    React.createElement(StageRail, {
-      rows: [
-        {
-          id: "stage-meta",
-          label: "Meta",
-          active: false,
-          done: 1,
-          total: 1,
-        },
-        {
-          id: "stage-0",
-          label: "Anchors",
-          active: activeStage?.startsWith("0"),
-          done: (projStatus?.stages?.["0"]?.refs ?? []).length,
-          total: (draft.assets?.characters ?? []).length
-                 + (draft.assets?.props ?? []).length
-                 + (draft.assets?.scene_refs ?? []).length
-                 + (draft.assets?.style ? 1 : 0),
-        },
-        {
-          id: "stage-1",
-          label: "Narration",
-          active: activeStage === "1",
-          done: (projStatus?.stages?.["1"]?.audio ?? []).length,
-          total: (draft.scenes ?? []).filter((s: any) => s.has_narration).length,
-        },
-        {
-          id: "stage-2",
-          label: "Frames",
-          active: activeStage === "2",
-          done: (projStatus?.stages?.["2"]?.frames ?? []).length,
-          total: (draft.scenes ?? []).length,
-        },
-        {
-          id: "stage-3",
-          label: "Motion",
-          active: activeStage === "3",
-          done: (projStatus?.stages?.["3"]?.shots ?? []).length,
-          total: (draft.scenes ?? []).length,
-        },
-        {
-          id: "stage-4",
-          label: "Final",
-          active: activeStage === "4",
-          done: (projStatus?.stages?.["4"]?.final ?? []).length,
-          total: 1,
-        },
-      ],
-    }),
-
     React.createElement(
       Paragraph,
       { type: "secondary", style: { fontSize: 12, marginTop: 16 } },
@@ -4590,8 +4719,7 @@ function DraftSummary({
         Space,
         { size: 8 },
         React.createElement(FileTextOutlined),
-        "Draft",
-        React.createElement(Tag, null, draft.project_id),
+        "Overview",
       ),
     },
     React.createElement(

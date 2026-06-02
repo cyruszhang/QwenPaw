@@ -163,6 +163,8 @@ def _read_project(pid: str) -> dict:
 
 def _write_project(pid: str, draft: dict) -> Path:
     proj = project_dir(pid, create=True)
+    draft = dict(draft)
+    draft["project_id"] = safe_project_id(pid)
     f = proj / "project.yml"
     f.write_text(_yaml_dumps(draft), encoding="utf-8")
     return f
@@ -851,6 +853,19 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             src.rename(dst)
         except OSError as exc:
             raise HTTPException(500, f"rename failed: {exc}") from exc
+        yml = dst / "project.yml"
+        if yml.is_file():
+            try:
+                draft = _yaml_loads(yml.read_text(encoding="utf-8"))
+                if isinstance(draft, dict):
+                    draft["project_id"] = normalized
+                    yml.write_text(_yaml_dumps(draft), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "[creator] renamed project but could not sync YAML "
+                    "project_id for %s",
+                    normalized,
+                )
         _write_meta(normalized, {
             "renamed_from": pid,
             "renamed_at": _now_iso(),
@@ -1137,6 +1152,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             logger.exception("[creator] stage_00 v2 extract_beats failed")
             raise HTTPException(500, f"decompose failed: {exc}") from exc
 
+        draft["project_id"] = safe_project_id(pid)
         # Persist. project.yml carries `beats: [...]` and `scenes: []`
         # at this point; /craft will populate scenes later.
         (proj / "project.yml").write_text(
@@ -1195,6 +1211,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             logger.exception("[creator] stage_00 v2 craft_scenes failed")
             raise HTTPException(500, f"craft failed: {exc}") from exc
 
+        draft["project_id"] = safe_project_id(pid)
         proj_yml.write_text(draft_to_yaml(draft), encoding="utf-8")
         _write_meta(pid, {
             "crafted_at": _now_iso(),
