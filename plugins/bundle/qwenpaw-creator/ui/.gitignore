@@ -1,0 +1,4 @@
+# Playwright smoke-harness outputs
+/test-results/
+/playwright-report/
+/.playwright/

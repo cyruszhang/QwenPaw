@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>QwenPaw Creator panel — test harness</title>
+    <!--
+      Loads the REAL built panel bundle (../dist/index.js) inside a faithful
+      mock of the QwenPaw console host, so Playwright can drive the panel
+      with mocked /api/creator responses (see test/smoke.spec.ts) — no real
+      backend, no API cost. React + antd + icons are served from the
+      installed dev deps, exactly as the console host provides them at
+      runtime.
+    -->
+    <script src="../node_modules/react/umd/react.development.js"></script>
+    <script src="../node_modules/react-dom/umd/react-dom.development.js"></script>
+    <script src="../node_modules/dayjs/dayjs.min.js"></script>
+    <script src="../node_modules/antd/dist/antd.js"></script>
+    <script src="../node_modules/@ant-design/icons/dist/index.umd.js"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script>
+      // The host contract the panel bundle reads at module load.
+      window.__capturedRoutes = null;
+      window.QwenPaw = {
+        host: {
+          React: window.React,
+          antd: window.antd,
+          antdIcons: window.icons,
+          getApiUrl: function (p) {
+            return "https://mock.local/api" + p;
+          },
+          getApiToken: function () {
+            return "test-token";
+          },
+        },
+        registerRoutes: function (id, routes) {
+          window.__capturedRoutes = routes;
+        },
+      };
+
+      // The panel opens an SSE EventSource when a project is selected.
+      // Stub it so the harness makes no real connection; SSE behaviour is
+      // exercised separately by injecting events onto this stub.
+      window.__esInstances = [];
+      window.EventSource = function (url) {
+        this.url = url;
+        this.listeners = {};
+        this.onmessage = null;
+        this.close = function () {};
+        this.addEventListener = function (type, cb) {
+          (this.listeners[type] = this.listeners[type] || []).push(cb);
+        };
+        // Test helper: push a server event to this EventSource.
+        this.__emit = function (obj) {
+          var ev = { data: JSON.stringify(obj) };
+          if (this.onmessage) this.onmessage(ev);
+          (this.listeners.message || []).forEach(function (cb) {
+            cb(ev);
+          });
+        };
+        window.__esInstances.push(this);
+      };
+    </script>
+
+    <!-- The real built panel. Registers its route via registerRoutes. -->
+    <script src="../dist/index.js"></script>
+
+    <script>
+      (function renderCapturedRoute() {
+        var routes = window.__capturedRoutes || [];
+        var route = routes[0];
+        var root = window.ReactDOM.createRoot(
+          document.getElementById("root"),
+        );
+        if (!route || !route.component) {
+          root.render(
+            window.React.createElement(
+              "div",
+              { id: "harness-error" },
+              "NO ROUTE REGISTERED",
+            ),
+          );
+          return;
+        }
+        root.render(window.React.createElement(route.component));
+      })();
+    </script>
+  </body>
+</html>
