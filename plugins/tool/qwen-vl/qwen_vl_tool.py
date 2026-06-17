@@ -48,7 +48,7 @@ _RETRIABLE_NAMES = {
 
 
 def _is_retriable_network_error(exc: BaseException) -> bool:
-    """Walk __cause__/__context__ chain and detect transient network failures."""
+    """Walk __cause__/__context__ chain and detect transient network failures."""  # noqa: E501
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
@@ -59,14 +59,15 @@ def _is_retriable_network_error(exc: BaseException) -> bool:
         cause = exc.__cause__ or exc.__context__
         if cause is exc:
             break
-        exc = cause   # type: ignore[assignment]
+        exc = cause  # type: ignore[assignment]
     return False
+
 
 # Thread lock to protect dashscope global base_http_api_url setting.
 _DASHSCOPE_LOCK = threading.Lock()
 
 _DEFAULT_ENDPOINT = "https://dashscope.aliyuncs.com/api/v1"
-_DEFAULT_TIMEOUT = 180.0   # bumped from 60s — DashScope can be slow under load
+_DEFAULT_TIMEOUT = 180.0  # bumped from 60s — DashScope can be slow under load
 # Default to the stable `qwen-vl-max` snapshot, NOT `-latest`: the
 # `-latest` alias is gated behind per-account access on DashScope and
 # returns 403 AccessDenied on keys that work fine for the bare alias.
@@ -160,7 +161,7 @@ def _call_vlm(
     max_retries: int = 3,
     backoff_base_s: float = 3.0,
 ):
-    """Call DashScope MultiModalConversation with one image + one text question.
+    """Call DashScope MultiModalConversation: one image + one question.
 
     Retries on transient network errors (TCP reset, read timeout,
     ProtocolError, executor-thread-stall) with exponential backoff.
@@ -204,7 +205,7 @@ def _call_vlm(
                     f"giving up: {exc!r}",
                 )
                 raise
-            sleep_s = backoff_base_s * (2 ** attempt)
+            sleep_s = backoff_base_s * (2**attempt)
             logger.warning(
                 f"VLM transient network error "
                 f"(attempt {attempt + 1}/{max_retries + 1}); "
@@ -272,46 +273,72 @@ async def vlm_check_image(
         ToolResponse: One TextBlock with the model's text answer (and
         a status line; see source for the format).
     """
-    timeout = _DEFAULT_TIMEOUT  # bound early so the TimeoutError except can read it
+    timeout = (
+        _DEFAULT_TIMEOUT  # bound early so the TimeoutError except can read it
+    )
     try:
         if not image_path or not image_path.strip():
-            return ToolResponse(content=[
-                TextBlock(type="text", text="Error: image_path is empty."),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(type="text", text="Error: image_path is empty."),
+                ],
+            )
         if not question or not question.strip():
-            return ToolResponse(content=[
-                TextBlock(type="text", text="Error: question is empty."),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(type="text", text="Error: question is empty."),
+                ],
+            )
 
         resolved = _resolve_tool_config("vlm_check_image", api_key, model)
         if resolved is None:
-            return ToolResponse(content=[
-                TextBlock(type="text", text=(
-                    "Error: Tool not configured. Please set your API key.")),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            "Error: Tool not configured. Please set your API key."  # noqa: E501
+                        ),
+                    ),
+                ],
+            )
         api_key_val, endpoint, timeout, model_name = resolved
         if not api_key_val:
-            return ToolResponse(content=[
-                TextBlock(type="text", text=(
-                    "Error: DashScope API key not configured.")),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=("Error: DashScope API key not configured."),
+                    ),
+                ],
+            )
         if model_name not in _VALID_MODELS:
-            return ToolResponse(content=[
-                TextBlock(type="text", text=(
-                    f"Error: Invalid model '{model_name}'. "
-                    f"Valid: {', '.join(sorted(_VALID_MODELS))}")),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            f"Error: Invalid model '{model_name}'. "
+                            f"Valid: {', '.join(sorted(_VALID_MODELS))}"
+                        ),
+                    ),
+                ],
+            )
 
         try:
             image_url = _resolve_image_url(image_path)
         except (FileNotFoundError, ValueError) as e:
-            return ToolResponse(content=[
-                TextBlock(type="text", text=f"Error: image_path - {e}"),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(type="text", text=f"Error: image_path - {e}"),
+                ],
+            )
 
         logger.info(
             "Qwen-VL check: model=%s image=%s question=%r",
-            model_name, image_path, question[:80],
+            model_name,
+            image_path,
+            question[:80],
         )
 
         rsp = await asyncio.wait_for(
@@ -332,28 +359,44 @@ async def vlm_check_image(
                 f"{rsp.code}: {rsp.message}"
             )
             logger.error(err)
-            return ToolResponse(content=[
-                TextBlock(type="text", text=f"Error: {err}"),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(type="text", text=f"Error: {err}"),
+                ],
+            )
 
         answer = _extract_answer_text(rsp).strip()
         if not answer:
-            return ToolResponse(content=[
-                TextBlock(type="text", text=(
-                    "Error: Qwen-VL returned no answer text.")),
-            ])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=("Error: Qwen-VL returned no answer text."),
+                    ),
+                ],
+            )
 
-        return ToolResponse(content=[
-            TextBlock(type="text", text=answer),
-        ])
+        return ToolResponse(
+            content=[
+                TextBlock(type="text", text=answer),
+            ],
+        )
 
     except asyncio.TimeoutError:
-        return ToolResponse(content=[
-            TextBlock(type="text", text=(
-                f"Error: Qwen-VL request timed out after {timeout}s")),
-        ])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=(
+                        f"Error: Qwen-VL request timed out after {timeout}s"
+                    ),
+                ),
+            ],
+        )
     except Exception as e:  # noqa: BLE001
         logger.error("Qwen-VL check failed: %s", e, exc_info=True)
-        return ToolResponse(content=[
-            TextBlock(type="text", text=f"Error: VLM check failed - {e}"),
-        ])
+        return ToolResponse(
+            content=[
+                TextBlock(type="text", text=f"Error: VLM check failed - {e}"),
+            ],
+        )

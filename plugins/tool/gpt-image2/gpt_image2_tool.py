@@ -113,18 +113,31 @@ async def generate_image_gpt(
     """
     try:
         resolved = _resolve_tool_config(
-            "generate_image_gpt", api_key,
+            "generate_image_gpt",
+            api_key,
             default_endpoint="https://api.openai.com/v1/images/generations",
         )
         if resolved is None:
-            return ToolResponse(content=[TextBlock(type="text", text=(
-                "Error: Tool not configured. Please set your API key."
-            ))])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            "Error: Tool not configured. Please set your API key."  # noqa: E501
+                        ),
+                    ),
+                ],
+            )
         api_key, endpoint, timeout = resolved
         if not api_key:
-            return ToolResponse(content=[TextBlock(type="text", text=(
-                "Error: OpenAI API key not configured."
-            ))])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=("Error: OpenAI API key not configured."),
+                    ),
+                ],
+            )
 
         # Validate parameters
         valid_sizes = {"1024x1024", "1024x1792", "1792x1024"}
@@ -345,18 +358,31 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
             )
 
         resolved = _resolve_tool_config(
-            "edit_image_gpt", api_key,
+            "edit_image_gpt",
+            api_key,
             default_endpoint="https://api.openai.com/v1/images/edits",
         )
         if resolved is None:
-            return ToolResponse(content=[TextBlock(type="text", text=(
-                "Error: Tool not configured. Please set your API key."
-            ))])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            "Error: Tool not configured. Please set your API key."  # noqa: E501
+                        ),
+                    ),
+                ],
+            )
         api_key, endpoint, timeout = resolved
         if not api_key:
-            return ToolResponse(content=[TextBlock(type="text", text=(
-                "Error: OpenAI API key not configured."
-            ))])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=("Error: OpenAI API key not configured."),
+                    ),
+                ],
+            )
 
         # Validate parameters
         valid_sizes = {"auto", "1024x1024", "1024x1536", "1536x1024"}
@@ -536,7 +562,7 @@ async def edit_image_gpt(  # pylint: disable=too-many-statements
 # The Aliyun eval cluster brokers OpenAI's gpt-image-2 behind a custom
 # chat-completions-style URL with a non-standard body shape:
 #
-#     POST https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+#     POST https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions  # noqa: E501
 #     Authorization: Bearer <DASHSCOPE_API_KEY>
 #     {
 #       "model": "azure.gpt-image-2",
@@ -630,7 +656,8 @@ async def _eval_post_once(
 
     async with httpx.AsyncClient(timeout=httpx_timeout) as client:
         async with client.stream(
-            "POST", _EVAL_ENDPOINT,
+            "POST",
+            _EVAL_ENDPOINT,
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -702,7 +729,8 @@ async def _eval_call_and_save(
         _flush_logs()
         try:
             body, first_byte_at = await _eval_post_once(
-                payload=payload, api_key=api_key,
+                payload=payload,
+                api_key=api_key,
                 httpx_timeout=httpx_timeout,
             )
             elapsed = time.time() - t_attempt_start
@@ -725,44 +753,70 @@ async def _eval_call_and_save(
         except _EvalNon200Error as exc:
             logger.error(f"[eval] non-200: {exc}")
             _flush_logs()
-            return ToolResponse(content=[TextBlock(
-                type="text", text=f"Error: {exc}",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=f"Error: {exc}",
+                    ),
+                ],
+            )
         except RuntimeError as exc:
             logger.error(f"[eval] stream error: {exc}")
             _flush_logs()
-            return ToolResponse(content=[TextBlock(
-                type="text", text=f"Error: {exc}",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=f"Error: {exc}",
+                    ),
+                ],
+            )
 
     if body is None:
         if last_timeout is not None:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text=(
-                    f"Error: eval cluster timed out after "
-                    f"{attempts} attempt(s) of ~{timeout:.0f}s each. "
-                    "Broker is either backlogged or the request is "
-                    "malformed. Click Run again to retry."
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            f"Error: eval cluster timed out after "
+                            f"{attempts} attempt(s) of ~{timeout:.0f}s each. "
+                            "Broker is either backlogged or the request is "
+                            "malformed. Click Run again to retry."
+                        ),
+                    ),
+                ],
+            )
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text="Error: eval call failed without a recognized error.",
                 ),
-            )])
-        return ToolResponse(content=[TextBlock(
-            type="text",
-            text="Error: eval call failed without a recognized error.",
-        )])
+            ],
+        )
 
     data_list = body.get("data") or []
     if not data_list:
-        return ToolResponse(content=[TextBlock(
-            type="text",
-            text=f"Error: eval response had no data: {body}",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=f"Error: eval response had no data: {body}",
+                ),
+            ],
+        )
     payload_field = data_list[0].get("b64_json") or ""
     if not payload_field:
-        return ToolResponse(content=[TextBlock(
-            type="text",
-            text=f"Error: eval response missing b64_json: {body}",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=f"Error: eval response missing b64_json: {body}",
+                ),
+            ],
+        )
 
     # ``b64_json`` may actually be a signed OSS URL (despite the
     # field name) — DashScope returns either depending on its size.
@@ -770,22 +824,30 @@ async def _eval_call_and_save(
         async with httpx.AsyncClient(timeout=timeout) as client:
             img_resp = await client.get(payload_field)
         if img_resp.status_code != 200:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text=(
-                    f"Error: failed to download generated image from "
-                    f"{payload_field[:120]}: {img_resp.status_code}"
-                ),
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=(
+                            f"Error: failed to download generated image from "
+                            f"{payload_field[:120]}: {img_resp.status_code}"
+                        ),
+                    ),
+                ],
+            )
         img_bytes = img_resp.content
     else:
         try:
             img_bytes = base64.b64decode(payload_field)
         except Exception as e:  # noqa: BLE001
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text=f"Error: could not decode b64_json: {e}",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=f"Error: could not decode b64_json: {e}",
+                    ),
+                ],
+            )
 
     media_dir = DEFAULT_MEDIA_DIR / "gpt_image2"
     media_dir.mkdir(parents=True, exist_ok=True)
@@ -796,23 +858,25 @@ async def _eval_call_and_save(
 
     usage = body.get("usage") or {}
     size_actual = body.get("size") or "?"
-    return ToolResponse(content=[
-        ImageBlock(
-            type="image",
-            source={"type": "url", "url": str(image_path)},
-        ),
-        TextBlock(
-            type="text",
-            text=(
-                f"Generated image via DashScope eval cluster "
-                f"({_EVAL_MODEL})\n"
-                f"Prompt: {payload.get('prompt', '')[:200]}\n"
-                f"Size: {size_actual}\n"
-                f"Tokens: {usage.get('total_tokens', '?')}\n"
-                f"Saved to: {image_path}"
+    return ToolResponse(
+        content=[
+            ImageBlock(
+                type="image",
+                source={"type": "url", "url": str(image_path)},
             ),
-        ),
-    ])
+            TextBlock(
+                type="text",
+                text=(
+                    f"Generated image via DashScope eval cluster "
+                    f"({_EVAL_MODEL})\n"
+                    f"Prompt: {payload.get('prompt', '')[:200]}\n"
+                    f"Size: {size_actual}\n"
+                    f"Tokens: {usage.get('total_tokens', '?')}\n"
+                    f"Saved to: {image_path}"
+                ),
+            ),
+        ],
+    )
 
 
 async def generate_image_gpt_eval(
@@ -829,21 +893,30 @@ async def generate_image_gpt_eval(
     """
     try:
         resolved = _resolve_tool_config(
-            "generate_image_gpt_eval", api_key,
+            "generate_image_gpt_eval",
+            api_key,
             default_endpoint=_EVAL_ENDPOINT,
             default_timeout=_EVAL_DEFAULT_TIMEOUT,
         )
         if resolved is None:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text="Error: Tool not configured.",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: Tool not configured.",
+                    ),
+                ],
+            )
         api_key, _, timeout = resolved
         if not api_key:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text="Error: DashScope API key not configured.",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: DashScope API key not configured.",
+                    ),
+                ],
+            )
 
         payload = {
             "model": _EVAL_MODEL,
@@ -858,19 +931,30 @@ async def generate_image_gpt_eval(
         )
         _flush_logs()
         return await _eval_call_and_save(
-            payload=payload, api_key=api_key, timeout=timeout,
+            payload=payload,
+            api_key=api_key,
+            timeout=timeout,
             file_prefix="gpt_image2_eval",
         )
     except httpx.TimeoutException:
-        return ToolResponse(content=[TextBlock(
-            type="text",
-            text="Error: eval cluster timed out.",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text="Error: eval cluster timed out.",
+                ),
+            ],
+        )
     except Exception as e:  # noqa: BLE001
         logger.error(f"eval gen failed: {e}", exc_info=True)
-        return ToolResponse(content=[TextBlock(
-            type="text", text=f"Error: eval gen failed - {e}",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=f"Error: eval gen failed - {e}",
+                ),
+            ],
+        )
 
 
 async def edit_image_gpt_eval(
@@ -889,40 +973,61 @@ async def edit_image_gpt_eval(
     """
     try:
         if not reference_images:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text="Error: reference_images is required.",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: reference_images is required.",
+                    ),
+                ],
+            )
 
         resolved = _resolve_tool_config(
-            "edit_image_gpt_eval", api_key,
+            "edit_image_gpt_eval",
+            api_key,
             default_endpoint=_EVAL_ENDPOINT,
             default_timeout=_EVAL_DEFAULT_TIMEOUT,
         )
         if resolved is None:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text="Error: Tool not configured.",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: Tool not configured.",
+                    ),
+                ],
+            )
         api_key, _, timeout = resolved
         if not api_key:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text="Error: DashScope API key not configured.",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text="Error: DashScope API key not configured.",
+                    ),
+                ],
+            )
 
         try:
             image_payload = [_to_url_or_data_uri(p) for p in reference_images]
         except FileNotFoundError as e:
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text=f"Error: reference image not found - {e}",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=f"Error: reference image not found - {e}",
+                    ),
+                ],
+            )
         except (ValueError, Exception) as e:  # noqa: BLE001
-            return ToolResponse(content=[TextBlock(
-                type="text",
-                text=f"Error: failed to process reference images - {e}",
-            )])
+            return ToolResponse(
+                content=[
+                    TextBlock(
+                        type="text",
+                        text=f"Error: failed to process reference images - {e}",  # noqa: E501
+                    ),
+                ],
+            )
 
         payload = {
             "model": _EVAL_MODEL,
@@ -939,19 +1044,30 @@ async def edit_image_gpt_eval(
         )
         _flush_logs()
         return await _eval_call_and_save(
-            payload=payload, api_key=api_key, timeout=timeout,
+            payload=payload,
+            api_key=api_key,
+            timeout=timeout,
             file_prefix="gpt_image2_eval_edit",
         )
     except httpx.TimeoutException:
-        return ToolResponse(content=[TextBlock(
-            type="text",
-            text="Error: eval cluster timed out.",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text="Error: eval cluster timed out.",
+                ),
+            ],
+        )
     except Exception as e:  # noqa: BLE001
         logger.error(f"eval edit failed: {e}", exc_info=True)
-        return ToolResponse(content=[TextBlock(
-            type="text", text=f"Error: eval edit failed - {e}",
-        )])
+        return ToolResponse(
+            content=[
+                TextBlock(
+                    type="text",
+                    text=f"Error: eval edit failed - {e}",
+                ),
+            ],
+        )
 
 
 def _process_image_url(image_path: str) -> dict:

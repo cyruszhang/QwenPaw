@@ -39,12 +39,12 @@ _VALID_FORMATS = {"mp3", "wav", "pcm"}
 # https://help.aliyun.com/zh/model-studio/cosyvoice-quick-start for the
 # full set including custom voice-clone ids.
 _VOICE_CATALOG_V2 = {
-    "longshu_v2",         # mature male, narration-friendly (≈ OpenAI onyx)
-    "longwan_v2",         # warm male
-    "longxiaochun_v2",    # warm female
-    "longxiaoxia_v2",     # bright female
-    "longxiaobai_v2",     # neutral
-    "longshuo_v2",        # younger male
+    "longshu_v2",  # mature male, narration-friendly (≈ OpenAI onyx)
+    "longwan_v2",  # warm male
+    "longxiaochun_v2",  # warm female
+    "longxiaoxia_v2",  # bright female
+    "longxiaobai_v2",  # neutral
+    "longshuo_v2",  # younger male
 }
 
 _VOICE_CATALOG_V1 = {
@@ -289,7 +289,7 @@ async def synthesize_speech_cosyvoice(
                         type="text",
                         text=(
                             f"Error: Invalid model '{model}'. "
-                            f"Valid options: {', '.join(sorted(_VALID_MODELS))}"
+                            f"Valid options: {', '.join(sorted(_VALID_MODELS))}"  # noqa: E501
                         ),
                     ),
                 ],
@@ -302,7 +302,7 @@ async def synthesize_speech_cosyvoice(
                         type="text",
                         text=(
                             f"Error: Invalid format '{format}'. "
-                            f"Valid options: {', '.join(sorted(_VALID_FORMATS))}"
+                            f"Valid options: {', '.join(sorted(_VALID_FORMATS))}"  # noqa: E501
                         ),
                     ),
                 ],
@@ -419,7 +419,9 @@ async def synthesize_speech_cosyvoice(
         save_dir = DEFAULT_MEDIA_DIR / "cosyvoice"
         save_dir.mkdir(parents=True, exist_ok=True)
         ts = int(time.time() * 1000)
-        ext = "mp3" if format == "mp3" else ("wav" if format == "wav" else "pcm")
+        ext = (
+            "mp3" if format == "mp3" else ("wav" if format == "wav" else "pcm")
+        )
         audio_path = save_dir / f"cosyvoice_{ts}.{ext}"
         await asyncio.to_thread(audio_path.write_bytes, audio_bytes)
 

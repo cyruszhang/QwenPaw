@@ -41,9 +41,7 @@ class CosyVoiceToolPlugin:
         api.register_tool(
             tool_name="synthesize_speech_cosyvoice",
             tool_func=tool.synthesize_speech_cosyvoice,
-            description=(
-                "Generate speech audio from text using CosyVoice"
-            ),
+            description=("Generate speech audio from text using CosyVoice"),
             icon="🎙️",
         )
 

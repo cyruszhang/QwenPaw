@@ -15,7 +15,8 @@ _PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
 def _load_tool_module():
     tool_path = os.path.join(_PLUGIN_DIR, "happyhorse_tool.py")
     spec = importlib.util.spec_from_file_location(
-        "happyhorse_tool", tool_path,
+        "happyhorse_tool",
+        tool_path,
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -30,19 +31,22 @@ class HappyHorseToolPlugin:
         api.register_tool(
             tool_name="text_to_video_happyhorse",
             tool_func=tool.text_to_video_happyhorse,
-            description="Generate videos from text prompts using HappyHorse 1.0 t2v",
+            description="Generate videos from text prompts using HappyHorse 1.0 t2v",  # noqa: E501
             icon="🐎",
         )
         api.register_tool(
             tool_name="image_to_video_happyhorse",
             tool_func=tool.image_to_video_happyhorse,
-            description="Generate videos from a starting image using HappyHorse 1.0 i2v",
+            description=(
+                "Generate videos from a starting image using "
+                "HappyHorse 1.0 i2v"
+            ),
             icon="🎞️",
         )
         api.register_tool(
             tool_name="reference_to_video_happyhorse",
             tool_func=tool.reference_to_video_happyhorse,
-            description="Generate videos with references using HappyHorse 1.0 r2v",
+            description="Generate videos with references using HappyHorse 1.0 r2v",  # noqa: E501
             icon="🎭",
         )
         logger.info("HappyHorse tool plugin registered")

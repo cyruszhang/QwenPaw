@@ -131,11 +131,13 @@ def list_projects() -> list[dict]:
                 title = data.get("title") or child.name
         except Exception:
             pass
-        out.append({
-            "id": child.name,
-            "path": str(child.resolve()),
-            "title": title,
-            "created_at": meta.get("created_at"),
-            "scene_count": scene_count,
-        })
+        out.append(
+            {
+                "id": child.name,
+                "path": str(child.resolve()),
+                "title": title,
+                "created_at": meta.get("created_at"),
+                "scene_count": scene_count,
+            },
+        )
     return out

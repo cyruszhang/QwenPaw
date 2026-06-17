@@ -36,7 +36,7 @@ from qwenpaw.plugins import get_tool_config
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TIMEOUT = 900.0       # 15 min — Seedance polls take a while
+_DEFAULT_TIMEOUT = 900.0  # 15 min — Seedance polls take a while
 _POLL_INTERVAL_S = 8.0
 _SUBMIT_URL = (
     "https://dashscope.aliyuncs.com/api/v1/services/aigc/"
@@ -47,8 +47,10 @@ _MODEL_ID = "doubao.doubao-seedance-2-0-260128"
 
 _VALID_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 _IMAGE_MIME_TYPES = {
-    ".png": "image/png", ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 
@@ -58,12 +60,17 @@ _IMAGE_MIME_TYPES = {
 def _extract_config(tool_config: dict) -> tuple[str, float]:
     api_key = tool_config.get("api_key", "")
     raw = tool_config.get("timeout")
-    timeout = float(raw) if (raw is not None and float(raw) > 0) else _DEFAULT_TIMEOUT
+    timeout = (
+        float(raw)
+        if (raw is not None and float(raw) > 0)
+        else _DEFAULT_TIMEOUT
+    )
     return api_key, timeout
 
 
 def _resolve_tool_config(
-    tool_name: str, api_key_override: Optional[str],
+    tool_name: str,
+    api_key_override: Optional[str],
 ) -> Optional[tuple[str, float]]:
     if api_key_override and api_key_override.strip():
         return _extract_config({"api_key": api_key_override.strip()})
@@ -78,19 +85,21 @@ def _error_response(msg: str) -> ToolResponse:
 
 
 def _ok_response(local_path: Path) -> ToolResponse:
-    return ToolResponse(content=[
-        VideoBlock(
-            type="video",
-            source={"type": "url", "url": str(local_path)},
-        ),
-        TextBlock(
-            type="text",
-            text=(
-                f"Generated video saved to {local_path}\n"
-                f"Saved to: {local_path}"
+    return ToolResponse(
+        content=[
+            VideoBlock(
+                type="video",
+                source={"type": "url", "url": str(local_path)},
             ),
-        ),
-    ])
+            TextBlock(
+                type="text",
+                text=(
+                    f"Generated video saved to {local_path}\n"
+                    f"Saved to: {local_path}"
+                ),
+            ),
+        ],
+    )
 
 
 def _save_dir() -> Path:
@@ -121,9 +130,13 @@ def _resolve_image_url(path_or_url: str) -> str:
 
 
 async def _submit_task(
-    api_key: str, content: list[dict], *,
-    ratio: str, duration: int,
-    generate_audio: bool, watermark: bool,
+    api_key: str,
+    content: list[dict],
+    *,
+    ratio: str,
+    duration: int,
+    generate_audio: bool,
+    watermark: bool,
 ) -> dict:
     """POST to the async-inference submit endpoint."""
     payload = {
@@ -185,13 +198,16 @@ async def _poll_task(api_key: str, task_id: str, *, deadline: float) -> dict:
             return body
         if status in ("FAILED", "FAILURE", "ERROR"):
             raise RuntimeError(
-                f"task failed: {out.get('message') or out.get('error') or out}",
+                f"task failed: {out.get('message') or out.get('error') or out}",  # noqa: E501
             )
         # else PENDING / RUNNING / IN_QUEUE — keep polling
 
 
 async def _download_video(
-    video_url: str, save_dir: Path, prefix: str, timeout: float,
+    video_url: str,
+    save_dir: Path,
+    prefix: str,
+    timeout: float,
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     ts = int(time.time() * 1000)
@@ -243,7 +259,9 @@ def _extract_video_url(task_result: dict) -> Optional[str]:
             return v
         if isinstance(v, list) and v:
             first = v[0]
-            if isinstance(first, str) and first.startswith(("http://", "https://")):
+            if isinstance(first, str) and first.startswith(
+                ("http://", "https://"),
+            ):
                 return first
             if isinstance(first, dict):
                 u = first.get("url") or first.get("video_url")
@@ -273,7 +291,7 @@ async def _generate(
     resolved = _resolve_tool_config(tool_name, api_key)
     if resolved is None:
         return _error_response(
-            "Tool not configured. Set your DashScope API key in the tool settings.",
+            "Tool not configured. Set your DashScope API key in the tool settings.",  # noqa: E501
         )
     key, timeout = resolved
     if not key:
@@ -286,8 +304,12 @@ async def _generate(
         return _error_response("duration must be in [2, 30]")
     try:
         submit_body = await _submit_task(
-            key, content, ratio=ratio, duration=duration,
-            generate_audio=generate_audio, watermark=watermark,
+            key,
+            content,
+            ratio=ratio,
+            duration=duration,
+            generate_audio=generate_audio,
+            watermark=watermark,
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("Seedance submit failed")
@@ -322,9 +344,12 @@ async def text_to_video_seedance(
     content = [{"type": "text", "text": prompt}]
     return await _generate(
         tool_name="text_to_video_seedance",
-        content=content, api_key=api_key,
-        ratio=ratio, duration=duration,
-        generate_audio=generate_audio, watermark=watermark,
+        content=content,
+        api_key=api_key,
+        ratio=ratio,
+        duration=duration,
+        generate_audio=generate_audio,
+        watermark=watermark,
         prefix="seedance_t2v",
     )
 
@@ -354,7 +379,7 @@ async def image_to_video_seedance(
         img_url = _resolve_image_url(first_frame_url)
     except Exception as exc:  # noqa: BLE001
         return _error_response(f"first_frame_url: {exc}")
-    content = [
+    content: List[dict] = [
         {"type": "text", "text": prompt},
         {
             "type": "image_url",
@@ -364,9 +389,12 @@ async def image_to_video_seedance(
     ]
     return await _generate(
         tool_name="image_to_video_seedance",
-        content=content, api_key=api_key,
-        ratio=ratio, duration=duration,
-        generate_audio=generate_audio, watermark=watermark,
+        content=content,
+        api_key=api_key,
+        ratio=ratio,
+        duration=duration,
+        generate_audio=generate_audio,
+        watermark=watermark,
         prefix="seedance_i2v",
     )
 
@@ -392,31 +420,40 @@ async def reference_to_video_seedance(
             url = _resolve_image_url(img)
         except Exception as exc:  # noqa: BLE001
             return _error_response(f"ref_images_url: {exc}")
-        content.append({
-            "type": "image_url",
-            "image_url": {"url": url},
-            "role": "reference_image",
-        })
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": url},
+                "role": "reference_image",
+            },
+        )
     if ref_video_url:
         if not ref_video_url.startswith(("http://", "https://")):
             return _error_response("ref_video_url must be an http(s) URL")
-        content.append({
-            "type": "video_url",
-            "video_url": {"url": ref_video_url},
-            "role": "reference_video",
-        })
+        content.append(
+            {
+                "type": "video_url",
+                "video_url": {"url": ref_video_url},
+                "role": "reference_video",
+            },
+        )
     if ref_audio_url:
         if not ref_audio_url.startswith(("http://", "https://")):
             return _error_response("ref_audio_url must be an http(s) URL")
-        content.append({
-            "type": "audio_url",
-            "audio_url": {"url": ref_audio_url},
-            "role": "reference_audio",
-        })
+        content.append(
+            {
+                "type": "audio_url",
+                "audio_url": {"url": ref_audio_url},
+                "role": "reference_audio",
+            },
+        )
     return await _generate(
         tool_name="reference_to_video_seedance",
-        content=content, api_key=api_key,
-        ratio=ratio, duration=duration,
-        generate_audio=generate_audio, watermark=watermark,
+        content=content,
+        api_key=api_key,
+        ratio=ratio,
+        duration=duration,
+        generate_audio=generate_audio,
+        watermark=watermark,
         prefix="seedance_r2v",
     )

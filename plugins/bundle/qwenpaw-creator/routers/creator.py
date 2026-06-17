@@ -37,7 +37,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -73,12 +73,12 @@ def _now_iso() -> str:
 def _slug(s: str, *, fallback_seed: str = "") -> str:
     """ASCII-only slug. Resolution order:
 
-      1. If the input has alphanumerics, keep them. ("Old Man & Sea" →
-         "old_man_sea")
-      2. If the input is pure CJK / non-ASCII, try pinyin transliteration
-         via ``pypinyin`` if available. ("老人与海" → "lao_ren_yu_hai")
-      3. Fall back to ``untitled_<sha1[:6]>`` so two non-ASCII titles
-         don't collide on the literal string ``project``.
+    1. If the input has alphanumerics, keep them. ("Old Man & Sea" →
+       "old_man_sea")
+    2. If the input is pure CJK / non-ASCII, try pinyin transliteration
+       via ``pypinyin`` if available. ("老人与海" → "lao_ren_yu_hai")
+    3. Fall back to ``untitled_<sha1[:6]>`` so two non-ASCII titles
+       don't collide on the literal string ``project``.
     """
     raw = (s or "").strip()
     cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", raw).strip("_").lower()
@@ -144,8 +144,10 @@ def _yaml_dumps(data: dict) -> str:
 
     return yaml.dump(
         data,
-        sort_keys=False, default_flow_style=False,
-        allow_unicode=True, width=78,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=78,
     )
 
 
@@ -324,7 +326,8 @@ def _archive_generated_takes(
 ) -> None:
     kind = _take_kind_for_stage(stage)
     scenes = [
-        scene for scene in (draft.get("scenes", []) or [])
+        scene
+        for scene in (draft.get("scenes", []) or [])
         if only_scene is None
         or str(scene.get("id") or scene.get("scene_id")) == only_scene
         or f"{scene.get('id')}_{scene.get('name')}" == only_scene
@@ -354,7 +357,9 @@ def _attach_takes(entries: list[dict], *, kind: str, manifest: dict) -> None:
             scene_id = name.split("_", 1)[0]
         else:
             continue
-        takes = list(manifest.get("takes", {}).get(_take_key(kind, scene_id), []) or [])
+        takes = list(
+            manifest.get("takes", {}).get(_take_key(kind, scene_id), []) or [],
+        )
         entry["takes"] = takes
         active = next((t for t in takes if t.get("active")), None)
         if active:
@@ -428,7 +433,9 @@ class DecomposeRequest(BaseModel):
     # Per-project model picks — propagated to every scene so the
     # downstream stages don't have to re-resolve from globals.
     frame_provider: Optional[str] = None  # Stage 2: gpt-image-2 | qwen-image
-    video_provider: Optional[str] = None  # Stage 3: wan27 | happyhorse | seedance
+    video_provider: Optional[
+        str
+    ] = None  # Stage 3: wan27 | happyhorse | seedance
     # Optional explicit beat count override. When None, the Pass 1
     # prompt suggests a range derived from duration_target_s.
     target_scenes: Optional[int] = Field(default=None, ge=3, le=60)
@@ -471,12 +478,12 @@ class StageRunRequest(BaseModel):
     only_scene_ref: Optional[str] = None
     only_scene: Optional[str] = None
     final_name: Optional[str] = None  # for stage 4
-    max_shots: int = 8                # for stage 3 cost guardrail
+    max_shots: int = 8  # for stage 3 cost guardrail
 
 
 class TakeSelectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    stage: str                         # "2" frame | "3" shot
+    stage: str  # "2" frame | "3" shot
     scene_id: str
     take_id: str
 
@@ -590,9 +597,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             "https://dashscope.aliyuncs.com/api/v1/services/aigc/"
             "video-generation/video-synthesis"
         )
-        base_oai = (
-            "https://dashscope.aliyuncs.com/compatible-mode/v1"
-        )
+        base_oai = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
         async def _probe_image_native(model_name: str) -> dict:
             payload = {
@@ -633,7 +638,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         async def _probe_video(model_name: str) -> dict:
             payload = {
                 "model": model_name,
-                "input": {"prompt": "A small apple on a wooden table, slow zoom"},
+                "input": {
+                    "prompt": "A small apple on a wooden table, slow zoom",
+                },
                 "parameters": {"duration": 5, "resolution": "720P"},
             }
             async with httpx.AsyncClient(timeout=30.0) as cli:
@@ -653,10 +660,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 body = r.json()
             except Exception:
                 body = {"raw": r.text[:600]}
-            code = (
-                body.get("code")
-                or (body.get("error") or {}).get("code")
-            )
+            code = body.get("code") or (body.get("error") or {}).get("code")
             msg = (
                 body.get("message")
                 or (body.get("error") or {}).get("message")
@@ -676,28 +680,28 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         probes: dict = {}
 
-        probes["image:qwen-image-plus (control, native)"] = (
-            await _probe_image_native("qwen-image-plus")
-        )
-        probes["image:openai.gpt-image-2 (native)"] = (
-            await _probe_image_native("openai.gpt-image-2")
-        )
-        probes["image:openai.gpt-image-2 (oai-compat)"] = (
-            await _probe_image_oai("openai.gpt-image-2")
-        )
-        probes["image:gpt-image-2 (oai-compat, no ns)"] = (
-            await _probe_image_oai("gpt-image-2")
-        )
+        probes[
+            "image:qwen-image-plus (control, native)"
+        ] = await _probe_image_native("qwen-image-plus")
+        probes[
+            "image:openai.gpt-image-2 (native)"
+        ] = await _probe_image_native("openai.gpt-image-2")
+        probes[
+            "image:openai.gpt-image-2 (oai-compat)"
+        ] = await _probe_image_oai("openai.gpt-image-2")
+        probes[
+            "image:gpt-image-2 (oai-compat, no ns)"
+        ] = await _probe_image_oai("gpt-image-2")
 
-        probes["video:wan2.7-i2v-1080p-prompt-extend (control)"] = (
-            await _probe_video("wan2.7-i2v-1080p-prompt-extend")
+        probes[
+            "video:wan2.7-i2v-1080p-prompt-extend (control)"
+        ] = await _probe_video("wan2.7-i2v-1080p-prompt-extend")
+        probes["video:doubao.doubao-seedance-2-0-260128"] = await _probe_video(
+            "doubao.doubao-seedance-2-0-260128",
         )
-        probes["video:doubao.doubao-seedance-2-0-260128"] = (
-            await _probe_video("doubao.doubao-seedance-2-0-260128")
-        )
-        probes["video:doubao-seedance-2-0-260128 (no ns)"] = (
-            await _probe_video("doubao-seedance-2-0-260128")
-        )
+        probes[
+            "video:doubao-seedance-2-0-260128 (no ns)"
+        ] = await _probe_video("doubao-seedance-2-0-260128")
 
         return {"probes": probes}
 
@@ -732,15 +736,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             has_sample = bool(
                 sample_ref
                 and sample_path.is_file()
-                and sample_path.stat().st_size > 0
+                and sample_path.stat().st_size > 0,
             )
-            out.append({
-                "id": s.get("id"),
-                "display_name": s.get("display_name", s.get("id")),
-                "description": (s.get("description") or "").strip(),
-                "sample_ref": sample_ref if has_sample else "",
-                "has_sample": has_sample,
-            })
+            out.append(
+                {
+                    "id": s.get("id"),
+                    "display_name": s.get("display_name", s.get("id")),
+                    "description": (s.get("description") or "").strip(),
+                    "sample_ref": sample_ref if has_sample else "",
+                    "has_sample": has_sample,
+                },
+            )
         return {"styles": out}
 
     @router.get("/styles/{style_id}/sample")
@@ -787,7 +793,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 draft = _yaml_loads(proj_yml.read_text(encoding="utf-8"))
             except Exception as exc:  # noqa: BLE001
                 raise HTTPException(
-                    400, f"invalid YAML for {pid}: {exc}",
+                    400,
+                    f"invalid YAML for {pid}: {exc}",
                 ) from exc
         return {
             "id": pid,
@@ -866,12 +873,19 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     "project_id for %s",
                     normalized,
                 )
-        _write_meta(normalized, {
-            "renamed_from": pid,
-            "renamed_at": _now_iso(),
-        })
-        return {"ok": True, "old_id": pid, "id": normalized,
-                "path": str(dst)}
+        _write_meta(
+            normalized,
+            {
+                "renamed_from": pid,
+                "renamed_at": _now_iso(),
+            },
+        )
+        return {
+            "ok": True,
+            "old_id": pid,
+            "id": normalized,
+            "path": str(dst),
+        }
 
     # ─── YAML editor ─────────────────────────────────────────────────
 
@@ -914,16 +928,20 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     else:
                         files = [f"refs/scene_{o_id}_ref.png"]
                     label = (
-                        "character" if kind == "characters"
-                        else "prop" if kind == "props"
+                        "character"
+                        if kind == "characters"
+                        else "prop"
+                        if kind == "props"
                         else "scene_ref"
                     )
-                    out.append({
-                        "kind": label,
-                        "from": o_id,
-                        "to": n_id,
-                        "orphan_files": files,
-                    })
+                    out.append(
+                        {
+                            "kind": label,
+                            "from": o_id,
+                            "to": n_id,
+                            "orphan_files": files,
+                        },
+                    )
 
         old_scenes = old.get("scenes") or []
         new_scenes = new.get("scenes") or []
@@ -942,12 +960,14 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     f"{stem}_mixed.mp4",
                     f"{stem}_text.mp4",
                 ]
-                out.append({
-                    "kind": "scene",
-                    "from": stem,
-                    "to": f"{n_id}_{n_name}",
-                    "orphan_files": files,
-                })
+                out.append(
+                    {
+                        "kind": "scene",
+                        "from": stem,
+                        "to": f"{n_id}_{n_name}",
+                        "orphan_files": files,
+                    },
+                )
 
         return out
 
@@ -967,7 +987,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             new_draft = _yaml_loads(body.yaml)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
-                400, f"YAML parse error: {exc}",
+                400,
+                f"YAML parse error: {exc}",
             ) from exc
         if not isinstance(new_draft, dict):
             raise HTTPException(400, "top-level must be a mapping")
@@ -1064,8 +1085,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise HTTPException(400, "empty file")
         if len(file_bytes) > 20 * 1024 * 1024:
             raise HTTPException(413, "upload exceeds 20 MB cap")
-        title_str = (title or Path(file.filename or "upload").stem
-                     or "untitled")
+        title_str = title or Path(file.filename or "upload").stem or "untitled"
         pid = _allocate_pid(title_str, project_id)
         proj = project_dir(pid, create=True)
 
@@ -1078,7 +1098,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             text = extract_text(orig)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
-                400, f"failed to extract text from {ext}: {exc}",
+                400,
+                f"failed to extract text from {ext}: {exc}",
             ) from exc
         (proj / "source.txt").write_text(text, encoding="utf-8")
         meta_extra = {
@@ -1121,7 +1142,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         src = proj / "source.txt"
         if not src.is_file():
             raise HTTPException(
-                404, "source.txt missing — POST /sources first",
+                404,
+                "source.txt missing — POST /sources first",
             )
         text = src.read_text(encoding="utf-8")
 
@@ -1131,20 +1153,16 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         # Live progress: stream the producer's draft to any open SSE
         # subscriber for this project. Best-effort — a missing or broken
         # progress bus must never fail the decomposition.
+        _emit = None
+        coalescer = None
         try:
-            from progress import (  # type: ignore  # noqa: PLC0415
-                StreamCoalescer,
-                emit as _emit,
-            )
+            import progress as _pg  # type: ignore  # noqa: PLC0415
+
+            _emit = _pg.emit
+            coalescer = _pg.StreamCoalescer()
         except Exception:  # noqa: BLE001
             _emit = None
-            StreamCoalescer = None
-
-        coalescer = (
-            StreamCoalescer()
-            if (_emit is not None and StreamCoalescer is not None)
-            else None
-        )
+            coalescer = None
 
         def _on_decompose_delta(chunk: str) -> None:
             if coalescer is None or _emit is None:
@@ -1152,8 +1170,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             snap = coalescer.push(chunk)
             if snap is not None:
                 _emit(
-                    pid, "decompose_progress", phase="extract_beats",
-                    text=snap, chars=len(snap),
+                    pid,
+                    "decompose_progress",
+                    phase="extract_beats",
+                    text=snap,
+                    chars=len(snap),
                 )
 
         if coalescer is not None and _emit is not None:
@@ -1185,7 +1206,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         except Exception as exc:  # noqa: BLE001
             if _emit is not None:
                 _emit(
-                    pid, "decompose_failed", phase="extract_beats",
+                    pid,
+                    "decompose_failed",
+                    phase="extract_beats",
                     error=str(exc)[:300],
                 )
             logger.exception("[creator] stage_00 v2 extract_beats failed")
@@ -1195,12 +1218,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             tail = coalescer.flush()
             if tail is not None:
                 _emit(
-                    pid, "decompose_progress", phase="extract_beats",
-                    text=tail, chars=len(tail),
+                    pid,
+                    "decompose_progress",
+                    phase="extract_beats",
+                    text=tail,
+                    chars=len(tail),
                 )
             assets = draft.get("assets") or {}
             _emit(
-                pid, "decompose_done", phase="extract_beats",
+                pid,
+                "decompose_done",
+                phase="extract_beats",
                 n_beats=len(draft.get("beats") or []),
                 n_characters=len(assets.get("characters") or []),
                 n_scene_refs=len(assets.get("scene_refs") or []),
@@ -1210,17 +1238,21 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         # Persist. project.yml carries `beats: [...]` and `scenes: []`
         # at this point; /craft will populate scenes later.
         (proj / "project.yml").write_text(
-            draft_to_yaml(draft), encoding="utf-8",
+            draft_to_yaml(draft),
+            encoding="utf-8",
         )
-        _write_meta(pid, {
-            "decomposed_at": _now_iso(),
-            "duration_target_s": body.duration_target_s,
-            "style_hint": body.style_hint,
-            "audience": body.audience,
-            "voice": body.voice,
-            "model": body.model,
-            "target_scenes": body.target_scenes,
-        })
+        _write_meta(
+            pid,
+            {
+                "decomposed_at": _now_iso(),
+                "duration_target_s": body.duration_target_s,
+                "style_hint": body.style_hint,
+                "audience": body.audience,
+                "voice": body.voice,
+                "model": body.model,
+                "target_scenes": body.target_scenes,
+            },
+        )
 
         return {"ok": True, "project_id": pid, "draft": draft}
 
@@ -1259,7 +1291,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         try:
             draft = await craft_scenes(
-                draft, api_key=api_key, model=body.model,
+                draft,
+                api_key=api_key,
+                model=body.model,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("[creator] stage_00 v2 craft_scenes failed")
@@ -1267,10 +1301,13 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         draft["project_id"] = safe_project_id(pid)
         proj_yml.write_text(draft_to_yaml(draft), encoding="utf-8")
-        _write_meta(pid, {
-            "crafted_at": _now_iso(),
-            "n_scenes": len(draft.get("scenes") or []),
-        })
+        _write_meta(
+            pid,
+            {
+                "crafted_at": _now_iso(),
+                "n_scenes": len(draft.get("scenes") or []),
+            },
+        )
 
         return {"ok": True, "project_id": pid, "draft": draft}
 
@@ -1308,7 +1345,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         proj_yml = proj / "project.yml"
         if not proj_yml.is_file():
             raise HTTPException(
-                404, "project.yml missing — decompose+craft first",
+                404,
+                "project.yml missing — decompose+craft first",
             )
 
         from pipeline.stage_02_autofix import (  # noqa: PLC0415
@@ -1354,19 +1392,30 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise HTTPException(400, f"unknown op {body.op!r}")
         if body.kind not in ("character", "prop", "scene_ref"):
             raise HTTPException(400, f"unknown kind {body.kind!r}")
-        if body.op in ("add", "update") and not (body.description or "").strip():
+        if (
+            body.op in ("add", "update")
+            and not (body.description or "").strip()
+        ):
             raise HTTPException(400, "description required for add/update")
-        anchor_id = re.sub(
-            r"[^a-zA-Z0-9]+", "_", body.id.strip(),
-        ).strip("_").lower()
+        anchor_id = (
+            re.sub(
+                r"[^a-zA-Z0-9]+",
+                "_",
+                body.id.strip(),
+            )
+            .strip("_")
+            .lower()
+        )
         if not anchor_id:
             raise HTTPException(400, "id must contain alphanumerics")
 
         draft = _read_project(pid)
         assets = draft.setdefault("assets", {})
         key = (
-            "characters" if body.kind == "character"
-            else "props" if body.kind == "prop"
+            "characters"
+            if body.kind == "character"
+            else "props"
+            if body.kind == "prop"
             else "scene_refs"
         )
         bucket = assets.setdefault(key, []) or []
@@ -1379,22 +1428,27 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         if body.op == "add":
             if idx >= 0:
                 raise HTTPException(
-                    409, f"{body.kind} {anchor_id!r} already exists",
+                    409,
+                    f"{body.kind} {anchor_id!r} already exists",
                 )
-            bucket.append({
-                "id": anchor_id,
-                "description": (body.description or "").strip(),
-            })
+            bucket.append(
+                {
+                    "id": anchor_id,
+                    "description": (body.description or "").strip(),
+                },
+            )
         elif body.op == "update":
             if idx < 0:
                 raise HTTPException(
-                    404, f"{body.kind} {anchor_id!r} not found",
+                    404,
+                    f"{body.kind} {anchor_id!r} not found",
                 )
             bucket[idx]["description"] = (body.description or "").strip()
         elif body.op == "delete":
             if idx < 0:
                 raise HTTPException(
-                    404, f"{body.kind} {anchor_id!r} not found",
+                    404,
+                    f"{body.kind} {anchor_id!r} not found",
                 )
             bucket.pop(idx)
             # If an anchor is deleted, also strip it from every scene
@@ -1402,15 +1456,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             if body.kind == "character":
                 for s in draft.get("scenes", []) or []:
                     uses = s.get("uses_characters") or []
-                    s["uses_characters"] = [
-                        c for c in uses if c != anchor_id
-                    ]
+                    s["uses_characters"] = [c for c in uses if c != anchor_id]
             elif body.kind == "prop":
                 for s in draft.get("scenes", []) or []:
                     uses = s.get("uses_props") or []
-                    s["uses_props"] = [
-                        p for p in uses if p != anchor_id
-                    ]
+                    s["uses_props"] = [p for p in uses if p != anchor_id]
             else:
                 for s in draft.get("scenes", []) or []:
                     if s.get("uses_scene_ref") == anchor_id:
@@ -1441,7 +1491,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise HTTPException(404, f"scene {scene_id!r} not found")
         scene = scenes[idx]
 
-        # Validate uses_characters / uses_props / uses_scene_ref point to anchors
+        # Validate uses_characters / uses_props / uses_scene_ref point
+        # to anchors
         # that actually exist in this draft (typo guard).
         assets = draft.get("assets", {}) or {}
         char_ids = {c.get("id") for c in (assets.get("characters") or [])}
@@ -1536,7 +1587,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             if cand.is_file():
                 media, _ = mimetypes.guess_type(str(cand))
                 return FileResponse(
-                    cand, media_type=media or "application/octet-stream",
+                    cand,
+                    media_type=media or "application/octet-stream",
                 )
         raise HTTPException(404, f"asset not found: {name}")
 
@@ -1556,7 +1608,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise HTTPException(404, f"take not found: {name}")
         media, _ = mimetypes.guess_type(str(cand))
         return FileResponse(
-            cand, media_type=media or "application/octet-stream",
+            cand,
+            media_type=media or "application/octet-stream",
         )
 
     @router.post("/projects/{pid}/takes/select")
@@ -1658,7 +1711,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         # middleware/body-parse hang from in-handler hang.
         logger.info(
             "[run_stage] ENTER pid=%s stage=%s only_scene=%s overwrite=%s",
-            pid, body.stage, body.only_scene, body.overwrite,
+            pid,
+            body.stage,
+            body.only_scene,
+            body.overwrite,
         )
         for h in logging.getLogger().handlers:
             try:
@@ -1666,7 +1722,15 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             except Exception:  # noqa: BLE001
                 pass
         if body.stage not in (
-            "0", "0a", "0b", "0c", "1", "2", "2.5", "3", "4",
+            "0",
+            "0a",
+            "0b",
+            "0c",
+            "1",
+            "2",
+            "2.5",
+            "3",
+            "4",
         ):
             raise HTTPException(400, f"unknown stage: {body.stage}")
         proj = project_dir(pid, create=False)
@@ -1696,7 +1760,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             actually picked; that way a qwen-image project doesn't
             need an OPENAI_API_KEY set, and vice versa.
             """
-            gc = (draft.get("global_config") or {})
+            gc = draft.get("global_config") or {}
             provider = str(gc.get("frame_provider") or "gpt-image-2")
             oa = _resolve_openai_key()
             ds = _resolve_dashscope_key()
@@ -1714,8 +1778,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         async def _run_0a():
             from pipeline.stage_00a_characters import run_stage_00a
+
             return await run_stage_00a(
-                spec, output_dir,
+                spec,
+                output_dir,
                 keys=_stage0_keys_and_validate(),
                 only_character=body.only_character,
                 only_prop=body.only_prop,
@@ -1724,8 +1790,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         async def _run_0b():
             from pipeline.stage_00b_scenes import run_stage_00b
+
             return await run_stage_00b(
-                spec, output_dir,
+                spec,
+                output_dir,
                 keys=_stage0_keys_and_validate(),
                 only_scene_ref=body.only_scene_ref,
                 overwrite=body.overwrite,
@@ -1733,16 +1801,20 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         async def _run_0c():
             from pipeline.stage_00c_style import run_stage_00c
+
             return await run_stage_00c(
-                spec, output_dir,
+                spec,
+                output_dir,
                 keys=_stage0_keys_and_validate(),
                 overwrite=body.overwrite,
             )
 
         async def _run_1():
             from pipeline.stage_01_script import (
-                run_stage_01, NarrationOverrunError,
+                run_stage_01,
+                NarrationOverrunError,
             )
+
             ds = _resolve_dashscope_key()
             if not ds:
                 raise HTTPException(400, "DASHSCOPE_API_KEY missing")
@@ -1752,8 +1824,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             # default so batch runs surface the issue.
             try:
                 return await run_stage_01(
-                    spec, output_dir,
-                    api_key=ds, overwrite=body.overwrite,
+                    spec,
+                    output_dir,
+                    api_key=ds,
+                    overwrite=body.overwrite,
                     allow_overrun=True,
                 )
             except NarrationOverrunError as exc:
@@ -1764,11 +1838,13 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
         async def _run_2():
             from pipeline.stage_02_v15_compose import run_stage_02_v15
+
             # Scenes may pick gpt-image-2 (OpenAI key) or qwen-image
             # (DashScope key) per-scene. Only require the keys that
             # actually-used providers need.
             scenes_to_run = [
-                s for s in (draft.get("scenes") or [])
+                s
+                for s in (draft.get("scenes") or [])
                 if (
                     body.only_scene is None
                     or str(s.get("id")) == body.only_scene
@@ -1783,19 +1859,24 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             ds = _resolve_dashscope_key()
             if "gpt-image-2" in providers_used and not oa:
                 raise HTTPException(
-                    400, "OPENAI_API_KEY missing (required by gpt-image-2)",
+                    400,
+                    "OPENAI_API_KEY missing (required by gpt-image-2)",
                 )
             if "qwen-image" in providers_used and not ds:
                 raise HTTPException(
-                    400, "DASHSCOPE_API_KEY missing (required by qwen-image)",
+                    400,
+                    "DASHSCOPE_API_KEY missing (required by qwen-image)",
                 )
             if body.overwrite:
                 for scene in scenes_to_run:
                     _archive_existing_before_overwrite(
-                        proj, kind="frame", scene=scene,
+                        proj,
+                        kind="frame",
+                        scene=scene,
                     )
             result = await run_stage_02_v15(
-                spec, output_dir,
+                spec,
+                output_dir,
                 keys={"openai": oa, "dashscope": ds},
                 only_scene=body.only_scene,
                 overwrite=body.overwrite,
@@ -1807,13 +1888,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             }
             if generated_ids:
                 _archive_generated_takes(
-                    proj, stage="2", draft=draft,
-                    only_scene=body.only_scene, scene_ids=generated_ids,
+                    proj,
+                    stage="2",
+                    draft=draft,
+                    only_scene=body.only_scene,
+                    scene_ids=generated_ids,
                 )
             return result
 
         async def _run_2_5():
             from pipeline.stage_02_5_validate import run_stage_02_5
+
             ds = _resolve_dashscope_key()
             if not ds:
                 raise HTTPException(
@@ -1822,17 +1907,21 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     "to validate frames",
                 )
             return await run_stage_02_5(
-                spec, output_dir,
-                api_key=ds, only_scene=body.only_scene,
+                spec,
+                output_dir,
+                api_key=ds,
+                only_scene=body.only_scene,
             )
 
         async def _run_3():
             from pipeline.stage_03_shots import run_stage_03
+
             ds = _resolve_dashscope_key()
             if not ds:
                 raise HTTPException(400, "DASHSCOPE_API_KEY missing")
             scenes_to_run = [
-                s for s in (draft.get("scenes") or [])
+                s
+                for s in (draft.get("scenes") or [])
                 if (
                     body.only_scene is None
                     or str(s.get("id")) == body.only_scene
@@ -1842,7 +1931,9 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             if body.overwrite:
                 for scene in scenes_to_run:
                     _archive_existing_before_overwrite(
-                        proj, kind="shot", scene=scene,
+                        proj,
+                        kind="shot",
+                        scene=scene,
                     )
             existed_before = {
                 str(s.get("id")): (
@@ -1851,7 +1942,8 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 for s in scenes_to_run
             }
             produced = await run_stage_03(
-                spec, output_dir,
+                spec,
+                output_dir,
                 api_key=ds,
                 only_scene=body.only_scene,
                 overwrite=body.overwrite,
@@ -1871,8 +1963,11 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             }
             if produced_ids:
                 _archive_generated_takes(
-                    proj, stage="3", draft=draft,
-                    only_scene=body.only_scene, scene_ids=produced_ids,
+                    proj,
+                    stage="3",
+                    draft=draft,
+                    only_scene=body.only_scene,
+                    scene_ids=produced_ids,
                 )
             return produced
 
@@ -1889,14 +1984,15 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     "Homebrew: `brew install ffmpeg`.",
                 )
             final_name = (
-                body.final_name
-                or f"{draft.get('project_id', pid)}_final.mp4"
+                body.final_name or f"{draft.get('project_id', pid)}_final.mp4"
             )
             # Stage 4 is sync; run in a thread so the event loop survives.
             return await asyncio.to_thread(
                 run_stage_04_full,
-                spec, output_dir,
-                final_name=final_name, overwrite=body.overwrite,
+                spec,
+                output_dir,
+                final_name=final_name,
+                overwrite=body.overwrite,
             )
 
         try:
@@ -1931,14 +2027,21 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             raise
         except Exception as exc:  # noqa: BLE001
             logger.exception("[creator] stage %s failed", body.stage)
-            raise HTTPException(500, f"stage {body.stage} failed: {exc}") from exc
+            raise HTTPException(
+                500,
+                f"stage {body.stage} failed: {exc}",
+            ) from exc
 
         # Persist report for audit
         rpt = proj / "_runs.jsonl"
         with rpt.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(
-                {"at": _now_iso(), **report}, default=str,
-            ) + "\n")
+            fh.write(
+                json.dumps(
+                    {"at": _now_iso(), **report},
+                    default=str,
+                )
+                + "\n",
+            )
 
         return {"ok": True, **report}
 
@@ -1949,11 +2052,17 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         proj = creator_root() / safe_project_id(pid)
         proj_yml = proj / "project.yml"
         if not proj_yml.is_file():
-            return {"stage_0_usd": 0, "stage_2_usd": 0, "total_usd": 0,
-                    "breakdown": {
-                        "characters": 0, "props": 0,
-                        "scene_refs": 0, "scenes": 0,
-                    }}
+            return {
+                "stage_0_usd": 0,
+                "stage_2_usd": 0,
+                "total_usd": 0,
+                "breakdown": {
+                    "characters": 0,
+                    "props": 0,
+                    "scene_refs": 0,
+                    "scenes": 0,
+                },
+            }
         draft = _yaml_loads(proj_yml.read_text(encoding="utf-8"))
         n_char = len(draft.get("assets", {}).get("characters", []) or [])
         n_prop = len(draft.get("assets", {}).get("props", []) or [])
