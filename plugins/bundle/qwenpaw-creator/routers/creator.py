@@ -1140,19 +1140,26 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
             _emit = None
             StreamCoalescer = None
 
-        on_delta = None
-        coalescer = None
-        if _emit is not None and StreamCoalescer is not None:
-            coalescer = StreamCoalescer()
+        coalescer = (
+            StreamCoalescer()
+            if (_emit is not None and StreamCoalescer is not None)
+            else None
+        )
+
+        def _on_decompose_delta(chunk: str) -> None:
+            if coalescer is None or _emit is None:
+                return
+            snap = coalescer.push(chunk)
+            if snap is not None:
+                _emit(
+                    pid, "decompose_progress", phase="extract_beats",
+                    text=snap, chars=len(snap),
+                )
+
+        if coalescer is not None and _emit is not None:
             _emit(pid, "decompose_start", phase="extract_beats")
 
-            def on_delta(chunk: str) -> None:
-                snap = coalescer.push(chunk)
-                if snap is not None:
-                    _emit(
-                        pid, "decompose_progress", phase="extract_beats",
-                        text=snap, chars=len(snap),
-                    )
+        delta_cb = _on_decompose_delta if coalescer is not None else None
 
         try:
             draft = await extract_beats(
@@ -1173,7 +1180,7 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 target_scenes=body.target_scenes,
                 frame_provider=body.frame_provider,
                 video_provider=body.video_provider,
-                on_delta=on_delta,
+                on_delta=delta_cb,
             )
         except Exception as exc:  # noqa: BLE001
             if _emit is not None:

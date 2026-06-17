@@ -25,6 +25,9 @@ for _p in (_PLUGIN, _PLUGIN / "skills" / "storybook-video" / "pipeline"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+# Imports follow the sys.path setup above (the plugin dirs aren't an
+# installed package), so they intentionally aren't at module top.
+# pylint: disable=wrong-import-position,protected-access
 from progress import StreamCoalescer  # noqa: E402
 import stage_00_script as s00  # noqa: E402
 
@@ -83,7 +86,7 @@ def test_delta_stream_reassembles_to_valid_json():
     # would, then confirm joining the deltas reproduces the object.
     obj = {"project_id": "p", "beats": [{"name": "a"}, {"name": "b"}]}
     full = json.dumps(obj)
-    pieces = [full[i:i + 5] for i in range(0, len(full), 5)]
+    pieces = [full[i : i + 5] for i in range(0, len(full), 5)]
     lines = [
         "data: " + json.dumps({"choices": [{"delta": {"content": p}}]})
         for p in pieces
@@ -98,9 +101,9 @@ def test_delta_stream_reassembles_to_valid_json():
 
 def test_coalescer_buffers_until_threshold():
     c = StreamCoalescer(min_chars=10)
-    assert c.push("1234") is None          # 4 chars buffered
-    assert c.push("5678") is None          # 8 chars buffered
-    snap = c.push("9abc")                  # crosses 10 → flush
+    assert c.push("1234") is None  # 4 chars buffered
+    assert c.push("5678") is None  # 8 chars buffered
+    snap = c.push("9abc")  # crosses 10 → flush
     assert snap == "123456789abc"
     assert c.text == "123456789abc"
 
@@ -115,20 +118,20 @@ def test_coalescer_snapshot_is_full_text_not_delta():
 
 def test_coalescer_newline_forces_flush_under_threshold():
     c = StreamCoalescer(min_chars=1000)
-    assert c.push("hi\n") == "hi\n"        # newline boundary flushes
+    assert c.push("hi\n") == "hi\n"  # newline boundary flushes
 
 
 def test_coalescer_flush_returns_unflushed_tail_once():
     c = StreamCoalescer(min_chars=1000)
-    assert c.push("abc") is None           # below threshold, buffered
-    assert c.flush() == "abc"              # tail emitted
-    assert c.flush() is None               # nothing new since
+    assert c.push("abc") is None  # below threshold, buffered
+    assert c.flush() == "abc"  # tail emitted
+    assert c.flush() is None  # nothing new since
 
 
 def test_coalescer_flush_noop_when_everything_emitted():
     c = StreamCoalescer(min_chars=2)
-    assert c.push("xy") == "xy"            # emitted via threshold
-    assert c.flush() is None              # nothing pending
+    assert c.push("xy") == "xy"  # emitted via threshold
+    assert c.flush() is None  # nothing pending
 
 
 def test_coalescer_ignores_empty_pushes():

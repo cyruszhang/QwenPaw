@@ -63,6 +63,7 @@ class StreamCoalescer:
     def text(self) -> str:
         return self._text
 
+
 # pid → set of subscriber queues
 _SUBSCRIBERS: dict[str, set[asyncio.Queue]] = {}
 
@@ -90,11 +91,16 @@ def emit(pid: str, kind: str, **payload) -> None:
             q.put_nowait(event)
         except asyncio.QueueFull:
             logger.warning(
-                "[progress] dropped %s event for %s (queue full)", kind, pid,
+                "[progress] dropped %s event for %s (queue full)",
+                kind,
+                pid,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "[progress] dropped %s event for %s: %s", kind, pid, exc,
+                "[progress] dropped %s event for %s: %s",
+                kind,
+                pid,
+                exc,
             )
             dead.append(q)
     for q in dead:
