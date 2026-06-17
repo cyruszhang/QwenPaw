@@ -9,6 +9,12 @@ import { pathToFileURL } from "url";
 
 const harnessUrl = pathToFileURL(path.join(__dirname, "harness.html")).href;
 
+// Screenshots land in test/screenshots/ (committed) so they ride along in
+// the PR for visual review — a reviewer sees what the panel actually
+// looks like, not just that the assertions passed. Every run regenerates
+// them; commit the refreshed set when opening/updating a PR.
+const shot = (name: string) => path.join(__dirname, "screenshots", name);
+
 const DRAFT = {
   project_id: "demo",
   global_config: {},
@@ -106,6 +112,7 @@ test("panel boots in the mock host and lists projects without errors", async ({
   // The bundle registered its route and rendered the real UI.
   await expect(page.locator("#harness-error")).toHaveCount(0);
   await expect(page.getByText("Demo project")).toBeVisible();
+  await page.screenshot({ path: shot("01-project-list.png") });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
@@ -123,6 +130,7 @@ test("selecting a project renders the scene workspace without errors", async ({
   // from the loaded draft (2 scenes) are rendered.
   await expect(page.getByText("Meta settings")).toBeVisible();
   await expect(page.getByText(/2 scenes/)).toBeVisible();
+  await page.screenshot({ path: shot("02-workspace.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
@@ -147,5 +155,6 @@ test("director chat applies an instruction and shows the changelog", async ({
   // The transcript shows the summary + a changed-scene chip ("00 open").
   await expect(page.getByText(/Set scene 00 at dusk/)).toBeVisible();
   await expect(page.getByText("00 open")).toBeVisible();
+  await page.screenshot({ path: shot("03-director-chat.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
