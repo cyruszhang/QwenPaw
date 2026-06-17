@@ -1128,6 +1128,32 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         from pipeline.stage_00_v2 import extract_beats
         from pipeline.stage_00_script import draft_to_yaml
 
+        # Live progress: stream the producer's draft to any open SSE
+        # subscriber for this project. Best-effort — a missing or broken
+        # progress bus must never fail the decomposition.
+        try:
+            from progress import (  # type: ignore  # noqa: PLC0415
+                StreamCoalescer,
+                emit as _emit,
+            )
+        except Exception:  # noqa: BLE001
+            _emit = None
+            StreamCoalescer = None
+
+        on_delta = None
+        coalescer = None
+        if _emit is not None and StreamCoalescer is not None:
+            coalescer = StreamCoalescer()
+            _emit(pid, "decompose_start", phase="extract_beats")
+
+            def on_delta(chunk: str) -> None:
+                snap = coalescer.push(chunk)
+                if snap is not None:
+                    _emit(
+                        pid, "decompose_progress", phase="extract_beats",
+                        text=snap, chars=len(snap),
+                    )
+
         try:
             draft = await extract_beats(
                 text=text,
@@ -1147,10 +1173,31 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 target_scenes=body.target_scenes,
                 frame_provider=body.frame_provider,
                 video_provider=body.video_provider,
+                on_delta=on_delta,
             )
         except Exception as exc:  # noqa: BLE001
+            if _emit is not None:
+                _emit(
+                    pid, "decompose_failed", phase="extract_beats",
+                    error=str(exc)[:300],
+                )
             logger.exception("[creator] stage_00 v2 extract_beats failed")
             raise HTTPException(500, f"decompose failed: {exc}") from exc
+
+        if _emit is not None and coalescer is not None:
+            tail = coalescer.flush()
+            if tail is not None:
+                _emit(
+                    pid, "decompose_progress", phase="extract_beats",
+                    text=tail, chars=len(tail),
+                )
+            assets = draft.get("assets") or {}
+            _emit(
+                pid, "decompose_done", phase="extract_beats",
+                n_beats=len(draft.get("beats") or []),
+                n_characters=len(assets.get("characters") or []),
+                n_scene_refs=len(assets.get("scene_refs") or []),
+            )
 
         draft["project_id"] = safe_project_id(pid)
         # Persist. project.yml carries `beats: [...]` and `scenes: []`

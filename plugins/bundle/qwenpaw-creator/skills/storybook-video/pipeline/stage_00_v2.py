@@ -37,7 +37,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from pipeline.stage_00_script import (  # noqa: E402
     _DEFAULT_MODEL,
@@ -403,12 +403,17 @@ async def extract_beats(
     target_scenes: Optional[int] = None,
     frame_provider: Optional[str] = None,
     video_provider: Optional[str] = None,
+    on_delta: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """Pass 1: produce a draft with anchors + beat sheet (scenes:[] empty).
 
     Returns a draft dict shaped like a ProjectSpec YAML, except
     ``scenes`` is empty and a new top-level ``beats`` array carries
     the beat sheet for the UI to render + edit before Pass 2.
+
+    When ``on_delta`` is supplied the underlying LLM call streams and
+    each incremental content chunk is forwarded to it, so the caller
+    (the ``/decompose`` route) can broadcast live progress over SSE.
     """
     catalog = _load_style_catalog_names()
     system, user = _build_pass1_prompt(
@@ -433,6 +438,7 @@ async def extract_beats(
     draft = await _call_llm_decompose(
         system=system, user=user,
         model=model, api_key=api_key, timeout_s=timeout_s,
+        on_delta=on_delta,
     )
 
     # Normalize IDs (character / scene_ref ids → snake_case;

@@ -32,7 +32,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +324,56 @@ def _build_decompose_prompt(
     return system, user
 
 
+def _strip_json_fences(content: str) -> str:
+    """Strip markdown code fences the model may wrap JSON in."""
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\n", "", content)
+        content = re.sub(r"\n```\s*$", "", content)
+    return content
+
+
+def _parse_llm_json(content: str) -> dict:
+    """Strip fences and parse the model's JSON content, raising on junk."""
+    content = _strip_json_fences(content)
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"LLM returned non-JSON: {exc}\n---\n{content[:800]}",
+        ) from exc
+
+
+def _sse_delta_content(line: str) -> Optional[str]:
+    """Extract the incremental text from one DashScope SSE ``data:`` line.
+
+    DashScope's OpenAI-compatible streaming endpoint emits lines like
+    ``data: {"choices":[{"delta":{"content":"foo"}}]}`` and terminates
+    with ``data: [DONE]``. Returns the delta's ``content`` string, or
+    ``None`` for non-content lines (``[DONE]``, blanks, role-only
+    deltas, comments). Pure + side-effect-free so it can be unit-tested
+    without a network round-trip.
+    """
+    if not line:
+        return None
+    line = line.strip()
+    if not line.startswith("data:"):
+        return None
+    data = line[len("data:"):].strip()
+    if not data or data == "[DONE]":
+        return None
+    try:
+        obj = json.loads(data)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    try:
+        delta = obj["choices"][0].get("delta") or {}
+    except (KeyError, IndexError, TypeError):
+        return None
+    content = delta.get("content")
+    return content if isinstance(content, str) and content else None
+
+
 async def _call_llm_decompose(
     *,
     system: str,
@@ -331,9 +381,18 @@ async def _call_llm_decompose(
     model: str,
     api_key: str,
     timeout_s: float,
+    on_delta: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """POST to DashScope's OpenAI-compatible /chat/completions endpoint
     and return the parsed JSON response from the model.
+
+    When ``on_delta`` is provided the call streams: each incremental
+    content chunk is passed to ``on_delta(chunk)`` as it arrives (for
+    live progress), and the accumulated text is parsed once the stream
+    completes. ``on_delta`` exceptions are swallowed — a flaky progress
+    sink must never fail the decomposition. With ``on_delta=None`` the
+    call is a single blocking request (unchanged behaviour; this is what
+    the Pass-2 per-beat fan-out uses).
 
     Raises on transport errors or unparseable JSON.
     """
@@ -353,28 +412,56 @@ async def _call_llm_decompose(
         "temperature": 0.4,
         "response_format": {"type": "json_object"},
     }
+
+    if on_delta is None:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"LLM decompose call failed: "
+                f"{resp.status_code} {resp.text[:500]}",
+            )
+        body = resp.json()
+        try:
+            content = body["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as exc:
+            raise RuntimeError(
+                f"unexpected LLM response shape: {body}",
+            ) from exc
+        return _parse_llm_json(content)
+
+    # Streaming path: accumulate content deltas, forwarding each to the
+    # progress sink as it arrives.
+    payload["stream"] = True
+    chunks: list[str] = []
+
+    def _safe_emit(text: str) -> None:
+        try:
+            on_delta(text)
+        except Exception:  # noqa: BLE001 — progress must never break gen
+            logger.debug("[stage 00] on_delta sink raised; ignoring",
+                         exc_info=True)
+
     async with httpx.AsyncClient(timeout=timeout_s) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-    if resp.status_code != 200:
-        raise RuntimeError(
-            f"LLM decompose call failed: {resp.status_code} {resp.text[:500]}",
-        )
-    body = resp.json()
-    try:
-        content = body["choices"][0]["message"]["content"]
-    except (KeyError, IndexError) as exc:
-        raise RuntimeError(f"unexpected LLM response shape: {body}") from exc
-    # Strip possible markdown fences just in case the model misbehaves.
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?\n", "", content)
-        content = re.sub(r"\n```\s*$", "", content)
-    try:
-        return json.loads(content)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"LLM returned non-JSON: {exc}\n---\n{content[:800]}",
-        ) from exc
+        async with client.stream(
+            "POST", url, json=payload, headers=headers,
+        ) as resp:
+            if resp.status_code != 200:
+                body = await resp.aread()
+                raise RuntimeError(
+                    f"LLM decompose stream failed: "
+                    f"{resp.status_code} {body[:500]!r}",
+                )
+            async for line in resp.aiter_lines():
+                piece = _sse_delta_content(line)
+                if piece:
+                    chunks.append(piece)
+                    _safe_emit(piece)
+
+    content = "".join(chunks)
+    if not content.strip():
+        raise RuntimeError("LLM decompose stream produced no content")
+    return _parse_llm_json(content)
 
 
 # ── Post-processing ──────────────────────────────────────────────────

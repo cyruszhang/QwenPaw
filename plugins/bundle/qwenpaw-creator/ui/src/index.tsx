@@ -1053,6 +1053,12 @@ function ProjectPane({
   const [liveProgress, setLiveProgress] = React.useState<
     Record<string, { state: string; stage?: string; elapsed_s?: number }>
   >({});
+  // Live Pass-1 decompose stream — the producer's raw draft text as the
+  // LLM generates it, pushed over SSE (decompose_start / _progress /
+  // _done). Lets the user watch the beat sheet being written instead of
+  // staring at a spinner. Cleared once the structured beats render.
+  const [decomposeStream, setDecomposeStream] = React.useState("");
+  const [decomposeStreaming, setDecomposeStreaming] = React.useState(false);
 
   // Decompose-step form
   const [duration, setDuration] = React.useState(60);
@@ -1155,6 +1161,18 @@ function ProjectPane({
           // Drop running markers when the whole stage finishes.
           setLiveProgress({});
           reload();
+        } else if (ev.kind === "decompose_start") {
+          setDecomposeStreaming(true);
+          setDecomposeStream("");
+        } else if (ev.kind === "decompose_progress") {
+          // Each event carries the FULL accumulated draft text (the
+          // backend coalesces deltas into drop-robust snapshots), so a
+          // plain assignment always converges on the latest state.
+          if (typeof ev.text === "string") setDecomposeStream(ev.text);
+        } else if (
+          ev.kind === "decompose_done" || ev.kind === "decompose_failed"
+        ) {
+          setDecomposeStreaming(false);
         }
       } catch {
         /* ignore malformed event */
@@ -1174,6 +1192,10 @@ function ProjectPane({
     setActiveStage("decompose");
     setRunError(null);
     setTabBadge(1, 0);
+    // Show the live panel immediately — don't wait for the first SSE
+    // event, which can race the EventSource (re)connect.
+    setDecomposeStreaming(true);
+    setDecomposeStream("");
     try {
       const r = await apiJson("POST", `/creator/projects/${pid}/decompose`, {
         duration_target_s: duration,
@@ -1217,6 +1239,7 @@ function ProjectPane({
     } finally {
       setBusy(false);
       setActiveStage(null);
+      setDecomposeStreaming(false);
     }
   };
 
@@ -1682,6 +1705,13 @@ function ProjectPane({
           style: { margin: "0 0 16px" },
         })
       : null,
+
+    // Live Pass-1 stream — watch the producer draft the beat sheet.
+    React.createElement(LiveDecomposePanel, {
+      show: decomposeStreaming || (busy && activeStage === "decompose"),
+      text: decomposeStream,
+      streaming: decomposeStreaming,
+    }),
 
     // Step 1: Decompose form (only if no draft yet)
     !hasDraft
@@ -3803,6 +3833,66 @@ function DecomposeForm({
 }
 
 // ── beat sheet view: HITL gate between decompose (Pass 1) and craft (Pass 2) ──
+
+/**
+ * Live Pass-1 decompose stream. While the producer LLM drafts the beat
+ * sheet, the backend streams the raw draft-in-progress over SSE
+ * (decompose_progress events each carry the FULL accumulated text). We
+ * render it growing in a scrolling mono panel — the user watches the
+ * work happen instead of staring at an opaque spinner. Auto-scrolls to
+ * the tail as text arrives.
+ */
+function LiveDecomposePanel({ show, text, streaming }: any) {
+  const preRef = React.useRef<any>(null);
+  React.useEffect(() => {
+    const el = preRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  if (!show) return null;
+  const chars = (text || "").length;
+  return React.createElement(
+    Card,
+    {
+      size: "small",
+      style: { margin: "0 0 16px", borderRadius: 8, background: "#0b1021" },
+      bodyStyle: { padding: 14 },
+    },
+    React.createElement(
+      Space,
+      { style: { marginBottom: 8 } },
+      React.createElement(Spin, { size: "small" }),
+      React.createElement(
+        AntText,
+        { style: { color: "#cdd3e1" }, strong: true },
+        streaming
+          ? "Producer is drafting the beat sheet…"
+          : "Finishing up…",
+      ),
+      chars
+        ? React.createElement(Tag, { color: "blue" }, `${chars} chars`)
+        : null,
+    ),
+    React.createElement(
+      "pre",
+      {
+        ref: preRef,
+        style: {
+          margin: 0,
+          maxHeight: 220,
+          overflow: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          fontFamily:
+            "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: "#9fb0d0",
+        },
+      },
+      text || "Waiting for the model to start streaming…",
+    ),
+  );
+}
 
 function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
   const beats: any[] = draft.beats || [];
