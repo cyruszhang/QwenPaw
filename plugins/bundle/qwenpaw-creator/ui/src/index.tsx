@@ -1086,6 +1086,9 @@ function ProjectPane({
   const [project, setProject] = React.useState<any>(null);
   const [forecast, setForecast] = React.useState<CostForecast | null>(null);
   const [projStatus, setProjStatus] = React.useState<any>(null);
+  // "The Reel" Studio view (new fluid UX) vs the classic stage accordion.
+  // Studio is the default; the classic panel stays one click away.
+  const [studioMode, setStudioMode] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [activeStage, setActiveStage] = React.useState<string | null>(null);
   const [pendingSceneRun, setPendingSceneRun] = React.useState<{
@@ -1882,47 +1885,85 @@ function ProjectPane({
 
     // Step 2+: Draft viewer + ref/frame galleries
     hasDraft && (draft.scenes || []).length > 0
-      ? React.createElement(DraftPanel, {
-          pid,
-          draft,
-          styles,
-          projStatus,
-          busy,
-          activeStage,
-          pendingSceneRun,
-          forecast,
-          status,
-          onRunStage,
-          onRunStageAllParallel,
-          onAutofix,
-          onDirector,
-          onSaveDraft,
-          onPatchScene,
-          onSelectTake,
-          onReload: reload,
-          onAddAnchor: (kind: AnchorKind) =>
-            setAnchorEditor({
-              open: true,
-              mode: "add",
-              kind,
-              id: "",
-              description: "",
+      ? React.createElement(
+          "div",
+          null,
+          React.createElement(
+            Space,
+            { size: 4, style: { marginBottom: 12 } },
+            React.createElement(Button, {
+              size: "small",
+              type: studioMode ? "primary" : "default",
+              onClick: () => setStudioMode(true),
+              children: "✨ Studio",
             }),
-          onEditAnchor: (kind: AnchorKind, a: any) =>
-            setAnchorEditor({
-              open: true,
-              mode: "update",
-              kind,
-              id: a.id,
-              description: a.description || "",
+            React.createElement(Button, {
+              size: "small",
+              type: studioMode ? "default" : "primary",
+              onClick: () => setStudioMode(false),
+              children: "Classic",
             }),
-          onDeleteAnchor,
-          onEditScene: (sceneId: string) => {
-            const sc = (draft.scenes || []).find((s: any) => s.id === sceneId);
-            if (sc) setSceneEditor(sc);
-          },
-          liveProgress,
-        })
+          ),
+          studioMode
+            ? React.createElement(ReelView, {
+                pid,
+                draft,
+                projStatus,
+                liveProgress,
+                forecast,
+                busy,
+                activeStage,
+                pendingSceneRun,
+                onRunOne: (sid: string) =>
+                  onRunStage("2", { only_scene: sid, overwrite: true }),
+                onRunStageAllParallel,
+                onDirector,
+                onSwitchClassic: () => setStudioMode(false),
+              })
+            : React.createElement(DraftPanel, {
+                pid,
+                draft,
+                styles,
+                projStatus,
+                busy,
+                activeStage,
+                pendingSceneRun,
+                forecast,
+                status,
+                onRunStage,
+                onRunStageAllParallel,
+                onAutofix,
+                onDirector,
+                onSaveDraft,
+                onPatchScene,
+                onSelectTake,
+                onReload: reload,
+                onAddAnchor: (kind: AnchorKind) =>
+                  setAnchorEditor({
+                    open: true,
+                    mode: "add",
+                    kind,
+                    id: "",
+                    description: "",
+                  }),
+                onEditAnchor: (kind: AnchorKind, a: any) =>
+                  setAnchorEditor({
+                    open: true,
+                    mode: "update",
+                    kind,
+                    id: a.id,
+                    description: a.description || "",
+                  }),
+                onDeleteAnchor,
+                onEditScene: (sceneId: string) => {
+                  const sc = (draft.scenes || []).find(
+                    (s: any) => s.id === sceneId,
+                  );
+                  if (sc) setSceneEditor(sc);
+                },
+                liveProgress,
+              }),
+        )
       : null,
 
     // Anchor add/edit modal
@@ -4960,6 +5001,499 @@ function DirectorChat({ draft, onDirector }: any) {
           ),
         )
       : null,
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// "The Reel" — the Studio view. A self-assembling horizontal film strip
+// that replaces the stage-by-stage accordion. Each scene is a living
+// tile that climbs a maturity ladder (scripted → framed → in motion) as
+// the existing SSE pipeline events land; you refine by TALKING to the
+// Director bar, which patches the spec and auto-re-rolls only the
+// affected scenes. Rides entirely on existing endpoints + the SSE bus.
+// ═══════════════════════════════════════════════════════════════════
+
+function MaturityLadder({ framed, moving, running }: any) {
+  const rungs = [
+    { on: true, label: "scripted" },
+    { on: framed, label: "framed" },
+    { on: moving, label: "in motion" },
+  ];
+  return React.createElement(
+    "div",
+    { style: { display: "flex", gap: 3, marginTop: 7 } },
+    ...rungs.map((r, i) =>
+      React.createElement("div", {
+        key: i,
+        title: r.label,
+        style: {
+          flex: 1,
+          height: 3,
+          borderRadius: 2,
+          background: r.on ? "#8b6dff" : "rgba(255,255,255,0.13)",
+          boxShadow: running && r.on ? "0 0 7px #8b6dff" : "none",
+          transition: "background .4s, box-shadow .4s",
+        },
+      }),
+    ),
+  );
+}
+
+function SceneTile({
+  pid,
+  scene,
+  frameAsset,
+  shotAsset,
+  live,
+  selected,
+  busyHere,
+  onSelect,
+  onReroll,
+}: any) {
+  const framed = Boolean(frameAsset);
+  const moving = Boolean(shotAsset);
+  const running = busyHere || live?.state === "running";
+  const failed = live?.state === "failed";
+  const frameName = `${scene.id}_${scene.name}_frame.png`;
+  const thumb = framed ? refUrl(pid, frameName, frameAsset?.size) : null;
+  return React.createElement(
+    "div",
+    {
+      onClick: () => onSelect(scene.id),
+      style: {
+        flex: "0 0 176px",
+        cursor: "pointer",
+        borderRadius: 10,
+        overflow: "hidden",
+        border: selected
+          ? "2px solid #8b6dff"
+          : "2px solid rgba(255,255,255,0.06)",
+        background: "#161a27",
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          position: "relative",
+          width: "100%",
+          height: 112,
+          background: thumb
+            ? "#000"
+            : "linear-gradient(135deg,#222a40,#12141f)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        },
+      },
+      thumb
+        ? React.createElement("img", {
+            src: thumb,
+            style: {
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              filter: running ? "saturate(.45) blur(1px)" : "none",
+              transition: "filter .6s",
+            },
+          })
+        : React.createElement(
+            "div",
+            {
+              style: {
+                color: "#7d88a6",
+                fontSize: 10,
+                lineHeight: 1.4,
+                padding: 10,
+                textAlign: "center",
+              },
+            },
+            String(scene.scene_description || scene.name || "").slice(0, 90),
+          ),
+      moving
+        ? React.createElement(
+            Tag,
+            {
+              color: "blue",
+              style: {
+                position: "absolute",
+                top: 6,
+                left: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "▶ clip",
+          )
+        : null,
+      running
+        ? React.createElement(
+            Tag,
+            {
+              color: "processing",
+              style: {
+                position: "absolute",
+                top: 6,
+                right: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "● working",
+          )
+        : null,
+      failed
+        ? React.createElement(
+            Tag,
+            {
+              color: "red",
+              style: {
+                position: "absolute",
+                top: 6,
+                right: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "failed",
+          )
+        : null,
+    ),
+    React.createElement(
+      "div",
+      { style: { padding: "7px 9px 9px" } },
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 6,
+          },
+        },
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#dfe4f1",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            },
+          },
+          `${scene.id} · ${scene.name}`,
+        ),
+        React.createElement(
+          AntText,
+          { style: { color: "#6f7a96", fontSize: 10 } },
+          `${scene.duration || 8}s`,
+        ),
+      ),
+      React.createElement(MaturityLadder, { framed, moving, running }),
+      React.createElement(
+        Tooltip,
+        { title: "Re-shoot this scene" },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          loading: running,
+          icon: React.createElement(ReloadOutlined),
+          onClick: (e: any) => {
+            e.stopPropagation();
+            onReroll(scene.id);
+          },
+          style: { color: "#9aa6c4", padding: "0 4px", marginTop: 4 },
+          children: framed ? "Re-shoot" : "Shoot",
+        }),
+      ),
+    ),
+  );
+}
+
+function ReelView({
+  pid,
+  draft,
+  projStatus,
+  liveProgress,
+  forecast,
+  busy,
+  activeStage,
+  pendingSceneRun,
+  onRunOne,
+  onRunStageAllParallel,
+  onDirector,
+  onSwitchClassic,
+}: any) {
+  const scenes: any[] = draft.scenes || [];
+  const [selectedId, setSelectedId] = React.useState<string>(
+    scenes[0]?.id ?? "",
+  );
+  const [note, setNote] = React.useState("");
+  const [directing, setDirecting] = React.useState(false);
+  const [log, setLog] = React.useState<any[]>([]);
+
+  const frames = new Map<string, any>(
+    (projStatus?.stages?.["2"]?.frames ?? []).map((r: any) => [r.name, r]),
+  );
+  const shots = new Map<string, any>(
+    (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
+  );
+  const assetFor = (s: any) => ({
+    frame: frames.get(`${s.id}_${s.name}_frame.png`),
+    shot: shots.get(`${s.id}_${s.name}_raw.mp4`),
+  });
+
+  const nFramed = scenes.filter((s) => assetFor(s).frame).length;
+  const nMoving = scenes.filter((s) => assetFor(s).shot).length;
+  const live = liveProgress || {};
+
+  const selected = scenes.find((s) => s.id === selectedId) || scenes[0];
+  const selAsset = selected ? assetFor(selected) : { frame: null, shot: null };
+
+  const direct = async () => {
+    const msg = note.trim();
+    if (!msg || directing) return;
+    setDirecting(true);
+    try {
+      const r = await onDirector(msg);
+      const changes = r?.changes || [];
+      setLog((p) => [...p, { msg, summary: r?.summary || "", changes }]);
+      setNote("");
+      // Auto-chain the re-roll the user used to do by hand.
+      for (const c of changes) {
+        if (c.scene_id) onRunOne(c.scene_id);
+      }
+      antMessage.success(
+        changes.length
+          ? `Re-shooting ${changes.length} scene${
+              changes.length > 1 ? "s" : ""
+            }…`
+          : "No scenes changed.",
+      );
+    } catch (e: any) {
+      antMessage.error(`Director failed: ${compactApiError(e)}`);
+    } finally {
+      setDirecting(false);
+    }
+  };
+
+  return React.createElement(
+    "div",
+    {
+      style: {
+        background: "#0d1018",
+        borderRadius: 12,
+        padding: 18,
+        color: "#dfe4f1",
+      },
+    },
+    // ── header: title + progress + cost + roll-all + classic toggle ──
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 14,
+        },
+      },
+      React.createElement(
+        Space,
+        { size: 10 },
+        React.createElement(
+          "span",
+          { style: { fontSize: 18, fontWeight: 700 } },
+          "🎬 The Reel",
+        ),
+        React.createElement(
+          AntText,
+          { style: { color: "#8b96b4", fontSize: 12 } },
+          `${nMoving}/${scenes.length} in motion · ${nFramed}/${scenes.length} framed`,
+        ),
+        forecast
+          ? React.createElement(
+              Tag,
+              { color: "gold", style: { margin: 0 } },
+              `≈ $${forecast.total_usd}`,
+            )
+          : null,
+      ),
+      React.createElement(
+        Space,
+        { size: 8 },
+        React.createElement(Button, {
+          type: "primary",
+          ghost: true,
+          loading: busy && activeStage === "2",
+          onClick: () => onRunStageAllParallel?.("2", false),
+          children: "Roll all frames",
+        }),
+        React.createElement(Button, {
+          type: "text",
+          size: "small",
+          onClick: onSwitchClassic,
+          style: { color: "#8b96b4" },
+          children: "Classic view ↗",
+        }),
+      ),
+    ),
+    // ── hero: the selected scene, big ──
+    selected
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              borderRadius: 10,
+              overflow: "hidden",
+              background: "#000",
+              marginBottom: 14,
+              maxHeight: 360,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            },
+          },
+          selAsset.shot
+            ? React.createElement("video", {
+                src: refUrl(pid, `${selected.id}_${selected.name}_raw.mp4`),
+                controls: true,
+                style: { width: "100%", maxHeight: 360 },
+              })
+            : selAsset.frame
+            ? React.createElement("img", {
+                src: refUrl(
+                  pid,
+                  `${selected.id}_${selected.name}_frame.png`,
+                  selAsset.frame?.size,
+                ),
+                style: { width: "100%", maxHeight: 360, objectFit: "contain" },
+              })
+            : React.createElement(
+                "div",
+                {
+                  style: {
+                    height: 200,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#7d88a6",
+                    padding: 20,
+                    textAlign: "center",
+                  },
+                },
+                String(
+                  selected.scene_description || "Not shot yet — re-shoot it.",
+                ),
+              ),
+        )
+      : null,
+    // ── the strip ──
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          gap: 10,
+          overflowX: "auto",
+          paddingBottom: 8,
+        },
+      },
+      ...scenes.map((s) => {
+        const a = assetFor(s);
+        const busyHere =
+          pendingSceneRun?.sceneId === s.id || live[s.id]?.state === "running";
+        return React.createElement(SceneTile, {
+          key: s.id,
+          pid,
+          scene: s,
+          frameAsset: a.frame,
+          shotAsset: a.shot,
+          live: live[s.id],
+          busyHere,
+          selected: s.id === selectedId,
+          onSelect: setSelectedId,
+          onReroll: onRunOne,
+        });
+      }),
+    ),
+    // ── director bar ──
+    log.length
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              marginTop: 12,
+              maxHeight: 90,
+              overflow: "auto",
+              fontSize: 12,
+            },
+          },
+          ...log
+            .slice(-3)
+            .map((e: any, i: number) =>
+              React.createElement(
+                "div",
+                { key: i, style: { marginBottom: 4 } },
+                React.createElement(
+                  AntText,
+                  { style: { color: "#8b6dff" } },
+                  "› ",
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#aeb6cc" } },
+                  `${e.msg} — `,
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#6f7a96" } },
+                  e.summary || "(no change)",
+                ),
+              ),
+            ),
+        )
+      : null,
+    React.createElement(
+      "div",
+      { style: { display: "flex", gap: 8, marginTop: 12 } },
+      React.createElement(Input, {
+        value: note,
+        onChange: (e: any) => setNote(e.target.value),
+        onPressEnter: () => void direct(),
+        placeholder:
+          'Direct the film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
+        disabled: directing,
+        style: {
+          background: "#161a27",
+          borderColor: "#2a3148",
+          color: "#dfe4f1",
+        },
+      }),
+      React.createElement(Button, {
+        type: "primary",
+        loading: directing,
+        disabled: !note.trim(),
+        onClick: () => void direct(),
+        children: "Direct",
+      }),
+    ),
+    React.createElement(
+      AntText,
+      {
+        style: {
+          color: "#5b647d",
+          fontSize: 10,
+          display: "block",
+          marginTop: 6,
+        },
+      },
+      "Talk to the film. It patches the script and re-shoots only the scenes you changed.",
+    ),
   );
 }
 
