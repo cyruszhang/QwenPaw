@@ -6,34 +6,50 @@ and downstream verticals (Yearbook, Wedding-book, Corporate-annual,
 etc.). See `/Users/yilei.z/dev/QwenPawDocs/qwenpaw-creator/CREATOR-STACK.md`
 and `DEVELOPER-API.md` for the full design.
 
-## Status: v0.2 — console panel + Stage 00 decompose
+## Status: v0.3 — two-pass decompose + VLM auto-fix + live progress
 
 | Layer | State |
 |---|---|
 | Bundle plugin shell (this dir) | ✅ |
 | `storybook-video` skill (skills/) | ✅ |
-| **Stage 00 — LLM script decomposition** | ✅ via DashScope qwen-max |
-| **HTTP routes (`/api/creator/*`)** | ✅ — sources, decompose, projects, stages |
-| **Console panel UI (Vite/React)** | ✅ at `/plugin/qwenpaw-creator/storybook` |
+| **Stage 00 — two-pass LLM decomposition** | ✅ Pass 1 beat sheet → HITL gate → Pass 2 per-beat craft (parallel), via DashScope qwen-max |
+| **Story-constraint auto-extraction (Pass 1)** | ✅ — pulls hard constraints from the source with evidence anchors |
+| **HTTP routes (`/api/creator/*`)** | ✅ — sources, decompose, craft, autofix, stages, takes, styles, cost-forecast |
+| **Live progress (SSE)** | ✅ — `GET /projects/{pid}/events` streams stage progress to the panel |
+| **Console panel UI (Vite/React)** | ✅ at `/plugin/qwenpaw-creator/storybook` (collapsible overview + project list, editable beat-sheet view) |
+| Stage 0a/0b/0c ref generation (`gpt-image-2`, parallelized) | ✅ panel-driven, HITL review |
+| **Stage 02 compose + VLM validate + auto-fix loop** | ✅ — `qwen-vl` checks each frame; indeterminate checks skip auto-fix |
+| **Takes — alternate generations + select** | ✅ — `POST /projects/{pid}/takes/select` |
+| **Cost forecast** | ✅ — `GET /projects/{pid}/cost-forecast` |
 | Stage 3 (per-scene I2V — Wan / HappyHorse / Seedance) | ✅ panel-driven |
 | Stage 4 (ffmpeg assembly) | ✅ panel-driven |
-| Stage-specialist agents (Asset/Script/Shots) | ❌ v0.3+ |
-| Cloudpaw `proposal_choice` integration | ❌ v0.3+ |
+| Stage-specialist agents (Asset/Script/Shots) | ❌ v0.4+ |
+| Cloudpaw `proposal_choice` integration | ❌ v0.4+ |
 
 The console panel walks a user through:
 
-1. **Source** — drag-drop a `.txt`/`.md`/`.pdf`/`.docx` or paste text.
-2. **Decompose** — LLM identifies characters, recurring settings, and
-   slices the source into 5–8 storyboard scenes. Emits a v15
-   ProjectSpec YAML into `<working_dir>/creator/<project_id>/project.yml`.
-3. **Generate refs** — Stage 0a (characters) + 0b (settings) + 0c
-   (style) via `gpt-image-2`. HITL review thumbnails in the panel.
-4. **Compose frames** — Stage 02 via `/v1/images/edits` with the
-   locked refs as multi-image conditioning. HITL review thumbnails.
-5. **Animate** — Stage 03 dispatches each scene to its chosen I2V
+1. **Source** — drag-drop a `.txt`/`.md`/`.pdf`/`.docx` or paste text;
+   pick the LLM + frame/video providers on this step.
+2. **Decompose (Pass 1)** — LLM extracts hard story constraints (with
+   evidence anchors), identifies characters and recurring settings, and
+   drafts a **beat sheet** of 5–8 beats.
+3. **Beat-sheet gate (HITL)** — review and edit the beats/fields in the
+   panel before committing. Pass 2 then crafts one scene per beat in
+   parallel and emits a v15 ProjectSpec YAML into
+   `<working_dir>/creator/<project_id>/project.yml`.
+4. **Generate refs** — Stage 0a (characters) + 0b (settings) + 0c
+   (style) via `gpt-image-2`, parallelized. HITL review thumbnails.
+5. **Compose frames** — Stage 02 via `/v1/images/edits` with the locked
+   refs as multi-image conditioning, then a `qwen-vl` **validation +
+   auto-fix loop** flags and re-rolls off-spec frames. HITL review
+   thumbnails; pick among **takes**.
+6. **Animate** — Stage 03 dispatches each scene to its chosen I2V
    provider (Wan 2.7 / HappyHorse / Seedance). HITL review shots.
-6. **Assemble** — Stage 04 runs ffmpeg (audio mix + uniform scale +
+7. **Assemble** — Stage 04 runs ffmpeg (audio mix + uniform scale +
    concat) to produce the final MP4.
+
+> **Note:** `plugin.json` still pins `version: 0.2.0` / a v0.2 description.
+> Bump it alongside the next release cut.
 
 ## Required env vars
 
@@ -54,9 +70,13 @@ plugins/bundle/qwenpaw-creator/
 ├── routers/
 │   ├── __init__.py
 │   └── creator.py             # FastAPI APIRouter (POST /sources/...,
-│                              #   POST /projects/{pid}/decompose,
+│                              #   POST /projects/{pid}/decompose + /craft,
+│                              #   POST /projects/{pid}/autofix,
 │                              #   POST /projects/{pid}/stage,
-│                              #   GET  /projects/{pid}/refs/{name}, ...)
+│                              #   GET  /projects/{pid}/events  (SSE),
+│                              #   POST /projects/{pid}/takes/select,
+│                              #   GET  /projects/{pid}/cost-forecast, ...)
+├── progress.py               # SSE progress bus shared by the stages
 ├── ui/
 │   ├── package.json
 │   ├── vite.config.ts
@@ -71,12 +91,17 @@ plugins/bundle/qwenpaw-creator/
         ├── spec.py            # ProjectSpec dataclasses
         ├── styles/styles.yml  # 12 curated style presets
         └── pipeline/
-            ├── stage_00_script.py       # NEW: LLM script decomposition
+            ├── stage_00_script.py       # Pass-1 beat-sheet decomposition
+            ├── stage_00_v2.py           # two-pass decompose orchestrator
             ├── stage_00a_characters.py  # gpt-image-2 character refs
             ├── stage_00b_scenes.py      # gpt-image-2 scene refs
             ├── stage_00c_style.py       # style ref resolution
             ├── stage_01_script.py       # CosyVoice TTS
+            ├── stage_02_assets.py       # asset resolution
             ├── stage_02_v15_compose.py  # multi-ref edit composition
+            ├── stage_02_5_validate.py   # qwen-vl frame validation
+            ├── stage_02_autofix.py      # VLM-driven re-roll loop
+            ├── stage_02_select.py       # take selection
             ├── stage_03_shots.py        # per-scene I2V dispatcher
             └── stage_04_assemble.py     # ffmpeg + Pillow assembly
 ```
