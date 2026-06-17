@@ -32,10 +32,10 @@ _RETRIABLE_NETWORK_EXCEPTIONS = (
 # network problem" — matched by class name to avoid importing every
 # transport library at the top level.
 _RETRIABLE_NAMES = {
-    "ConnectionError",       # requests.ConnectionError, urllib3.ConnectionError
+    "ConnectionError",  # requests.ConnectionError, urllib3.ConnectionError
     "ConnectTimeout",
     "ReadTimeout",
-    "ProtocolError",         # urllib3.exceptions.ProtocolError
+    "ProtocolError",  # urllib3.exceptions.ProtocolError
     "RemoteDisconnected",
     "IncompleteRead",
     "ChunkedEncodingError",
@@ -58,8 +58,9 @@ def _is_retriable_network_error(exc: BaseException) -> bool:
         cause = exc.__cause__ or exc.__context__
         if cause is exc:
             break
-        exc = cause   # type: ignore[assignment]
+        exc = cause  # type: ignore[assignment]
     return False
+
 
 # Thread lock to protect dashscope global base_http_api_url setting
 _DASHSCOPE_LOCK = threading.Lock()
@@ -264,7 +265,7 @@ def _call_video_synthesis(
                     **kwargs,
                 )
             return rsp
-        except Exception as exc:   # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             last_exc = exc
             if not _is_retriable_network_error(exc):
                 # Real error — propagate immediately
@@ -275,7 +276,7 @@ def _call_video_synthesis(
                     f"attempts; giving up: {exc!r}",
                 )
                 raise
-            sleep_s = backoff_base_s * (2 ** attempt)
+            sleep_s = backoff_base_s * (2**attempt)
             logger.warning(
                 f"VideoSynthesis transient network error "
                 f"(attempt {attempt + 1}/{max_retries + 1}); "
@@ -407,7 +408,7 @@ async def text_to_video_wan(
             f"duration={duration}s",
         )
 
-        kwargs = {
+        kwargs: dict = {
             "resolution": resolution,
             "ratio": ratio,
             "duration": duration,

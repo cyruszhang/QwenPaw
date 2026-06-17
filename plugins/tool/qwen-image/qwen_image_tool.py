@@ -660,7 +660,7 @@ async def edit_image_qwen(
             )
 
         # Build message content: images first, then prompt text
-        content = []
+        content: List[dict] = []
         for img_input in reference_images:
             try:
                 resolved = _resolve_image_url(img_input)

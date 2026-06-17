@@ -29,12 +29,14 @@ def _load_autofix_module():
 def test_real_failures_ignores_indeterminate_checks():
     autofix = _load_autofix_module()
 
-    failures = autofix.real_failures({
-        "failures": [
-            {"rule": "mast visible", "indeterminate": False},
-            {"rule": "validator 403", "indeterminate": True},
-        ],
-    })
+    failures = autofix.real_failures(
+        {
+            "failures": [
+                {"rule": "mast visible", "indeterminate": False},
+                {"rule": "validator 403", "indeterminate": True},
+            ],
+        },
+    )
 
     assert failures == [{"rule": "mast visible", "indeterminate": False}]
 

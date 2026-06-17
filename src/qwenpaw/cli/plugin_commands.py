@@ -542,7 +542,12 @@ def _build_frontend_if_needed(source_path: Path, manifest: dict) -> None:
     if not (ui_dir / "node_modules").exists():
         click.echo("   Running `npm install` (one-time)...")
         try:
-            r = subprocess.run(["npm", "install"], cwd=ui_dir, timeout=600)
+            r = subprocess.run(
+                ["npm", "install"],
+                cwd=ui_dir,
+                timeout=600,
+                check=False,
+            )
         except subprocess.TimeoutExpired:
             click.echo("❌ npm install timed out (>10 min).", err=True)
             return
@@ -552,7 +557,12 @@ def _build_frontend_if_needed(source_path: Path, manifest: dict) -> None:
 
     click.echo("   Running `npm run build`...")
     try:
-        r = subprocess.run(["npm", "run", "build"], cwd=ui_dir, timeout=300)
+        r = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=ui_dir,
+            timeout=300,
+            check=False,
+        )
     except subprocess.TimeoutExpired:
         click.echo("❌ npm run build timed out (>5 min).", err=True)
         return
@@ -563,7 +573,9 @@ def _build_frontend_if_needed(source_path: Path, manifest: dict) -> None:
 
 
 def _install_required_plugins(
-    source_path: Path, manifest: dict, force: bool,
+    source_path: Path,
+    manifest: dict,
+    force: bool,
 ) -> None:
     """Recursively install any sibling plugins declared in plugin.json.
 
@@ -652,10 +664,13 @@ def install(source: str, force: bool):
                 with open(_manifest_path, encoding="utf-8") as f:
                     _manifest_preflight = json.load(f)
                 _install_required_plugins(
-                    _sp_preflight, _manifest_preflight, force,
+                    _sp_preflight,
+                    _manifest_preflight,
+                    force,
                 )
                 _build_frontend_if_needed(
-                    _sp_preflight, _manifest_preflight,
+                    _sp_preflight,
+                    _manifest_preflight,
                 )
         except Exception as exc:  # noqa: BLE001
             click.echo(
@@ -769,9 +784,13 @@ def install(source: str, force: bool):
         # Skip build/dev artifacts that runtime doesn't need — keeps
         # the installed copy small (ui/node_modules alone is 150+ MB).
         shutil.copytree(
-            source_path, target_dir,
+            source_path,
+            target_dir,
             ignore=shutil.ignore_patterns(
-                "node_modules", "__pycache__", ".vite", "*.pyc",
+                "node_modules",
+                "__pycache__",
+                ".vite",
+                "*.pyc",
             ),
         )
     except Exception as e:

@@ -6,7 +6,7 @@ Three functions exposed to the agent toolkit, all hitting DashScope's
 (the same one Wan 2.7 uses) with the ``happyhorse-1.0-*`` model ids:
 
   - ``happyhorse-1.0-t2v`` — text-to-video
-  - ``happyhorse-1.0-i2v`` — image-to-video (drop-in for ``image_to_video_wan``)
+  - ``happyhorse-1.0-i2v`` — image-to-video (drop-in for image_to_video_wan)
   - ``happyhorse-1.0-r2v`` — reference-to-video
 
 The signatures mirror the Wan tool's where possible so the Creator
@@ -37,8 +37,10 @@ _DEFAULT_TIMEOUT = 600.0
 _VALID_RESOLUTIONS = {"720P", "1080P"}
 _VALID_RATIOS = {"16:9", "9:16", "1:1", "4:3", "3:4"}
 _IMAGE_MIME_TYPES = {
-    ".png": "image/png", ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 # The DashScope SDK's ``VideoSynthesis.call`` only forwards a fixed
@@ -54,11 +56,17 @@ _POLL_INTERVAL_S = 8.0
 
 # Same retry classes as wan27 — TCP RESET / read timeout on long polls.
 _RETRIABLE_NETWORK_EXCEPTIONS = (
-    ConnectionError, ConnectionResetError, TimeoutError,
+    ConnectionError,
+    ConnectionResetError,
+    TimeoutError,
 )
 _RETRIABLE_NAMES = {
-    "ConnectionError", "ConnectTimeout", "ReadTimeout",
-    "ProtocolError", "RemoteDisconnected", "IncompleteRead",
+    "ConnectionError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "ProtocolError",
+    "RemoteDisconnected",
+    "IncompleteRead",
     "ChunkedEncodingError",
 }
 
@@ -87,7 +95,11 @@ def _extract_config(tool_config: dict) -> tuple[str, str, float]:
     api_key = tool_config.get("api_key", "")
     endpoint = tool_config.get("endpoint", "") or _DEFAULT_ENDPOINT
     raw = tool_config.get("timeout")
-    timeout = float(raw) if (raw is not None and float(raw) > 0) else _DEFAULT_TIMEOUT
+    timeout = (
+        float(raw)
+        if (raw is not None and float(raw) > 0)
+        else _DEFAULT_TIMEOUT
+    )
     return api_key, endpoint, timeout
 
 
@@ -127,7 +139,10 @@ def _resolve_image_url(path_or_url: str) -> str:
 
 
 async def _download_video(
-    video_url: str, save_dir: Path, prefix: str, timeout: float,
+    video_url: str,
+    save_dir: Path,
+    prefix: str,
+    timeout: float,
 ) -> Path:
     save_dir.mkdir(parents=True, exist_ok=True)
     ts = int(time.time() * 1000)
@@ -147,8 +162,14 @@ async def _download_video(
 
 
 def _call_video_synthesis(
-    api_key: str, endpoint: str, model: str, prompt: str,
-    *, max_retries: int = 3, backoff_base_s: float = 5.0, **kwargs,
+    api_key: str,
+    endpoint: str,
+    model: str,
+    prompt: str,
+    *,
+    max_retries: int = 3,
+    backoff_base_s: float = 5.0,
+    **kwargs,
 ):
     """Call DashScope VideoSynthesis SDK with thread-safe endpoint
     setup + transient-network retry. Mirrors the wan27 helper.
@@ -162,7 +183,10 @@ def _call_video_synthesis(
             with _DASHSCOPE_LOCK:
                 dashscope.base_http_api_url = endpoint
                 rsp = VideoSynthesis.call(
-                    api_key=api_key, model=model, prompt=prompt, **kwargs,
+                    api_key=api_key,
+                    model=model,
+                    prompt=prompt,
+                    **kwargs,
                 )
             return rsp
         except Exception as exc:  # noqa: BLE001
@@ -175,7 +199,7 @@ def _call_video_synthesis(
                     f"{attempt + 1} attempts: {exc!r}",
                 )
                 raise
-            sleep_s = backoff_base_s * (2 ** attempt)
+            sleep_s = backoff_base_s * (2**attempt)
             logger.warning(
                 f"happyhorse transient network error "
                 f"(attempt {attempt + 1}/{max_retries + 1}); "
@@ -202,9 +226,12 @@ def _check_for_task_error(rsp) -> Optional[str]:
     msg = getattr(out, "message", None) if out else None
 
     if status and status != 200:
-        return (
-            f"DashScope {status}: {getattr(rsp, 'message', None) or getattr(rsp, 'code', None) or 'unknown error'}"
+        detail = (
+            getattr(rsp, "message", None)
+            or getattr(rsp, "code", None)
+            or "unknown error"
         )
+        return f"DashScope {status}: {detail}"
     if task_status in ("FAILED", "FAILURE", "ERROR"):
         return f"task failed: code={code!r} message={msg!r}"
     if code and code != "Success":
@@ -218,19 +245,21 @@ def _error_response(msg: str) -> ToolResponse:
 
 
 def _ok_response(local_path: Path) -> ToolResponse:
-    return ToolResponse(content=[
-        VideoBlock(
-            type="video",
-            source={"type": "url", "url": str(local_path)},
-        ),
-        TextBlock(
-            type="text",
-            text=(
-                f"Generated video saved to {local_path}\n"
-                f"Saved to: {local_path}"
+    return ToolResponse(
+        content=[
+            VideoBlock(
+                type="video",
+                source={"type": "url", "url": str(local_path)},
             ),
-        ),
-    ])
+            TextBlock(
+                type="text",
+                text=(
+                    f"Generated video saved to {local_path}\n"
+                    f"Saved to: {local_path}"
+                ),
+            ),
+        ],
+    )
 
 
 def _save_dir() -> Path:
@@ -241,7 +270,10 @@ def _save_dir() -> Path:
 
 
 async def _submit_video_task(
-    api_key: str, model: str, input_block: dict, parameters: dict,
+    api_key: str,
+    model: str,
+    input_block: dict,
+    parameters: dict,
 ) -> str:
     """Async-submit a video task; return task_id."""
     payload = {"model": model, "input": input_block, "parameters": parameters}
@@ -267,7 +299,12 @@ async def _submit_video_task(
     return task_id
 
 
-async def _poll_video_task(api_key: str, task_id: str, *, deadline: float) -> str:
+async def _poll_video_task(
+    api_key: str,
+    task_id: str,
+    *,
+    deadline: float,
+) -> str:
     """Poll the tasks endpoint until SUCCEEDED → returns the video URL.
     Raises on FAILED / timeout.
     """
@@ -313,14 +350,18 @@ async def _poll_video_task(api_key: str, task_id: str, *, deadline: float) -> st
 
 
 async def _run(
-    *, tool_name: str, model: str,
-    input_block: dict, parameters: dict, prefix: str,
+    *,
+    tool_name: str,
+    model: str,
+    input_block: dict,
+    parameters: dict,
+    prefix: str,
     api_key: Optional[str],
 ) -> ToolResponse:
     resolved = _resolve_tool_config(tool_name, api_key)
     if resolved is None:
         return _error_response(
-            "Tool not configured. Set your DashScope API key in the tool settings.",
+            "Tool not configured. Set your DashScope API key in the tool settings.",  # noqa: E501
         )
     key, _endpoint, timeout = resolved
     if not key:
@@ -354,7 +395,8 @@ async def text_to_video_happyhorse(
     """Generate a video from a text prompt with HappyHorse 1.0 t2v."""
     if resolution not in _VALID_RESOLUTIONS:
         return _error_response(
-            f"resolution must be one of {sorted(_VALID_RESOLUTIONS)}; got {resolution!r}",
+            f"resolution must be one of {sorted(_VALID_RESOLUTIONS)}; "
+            f"got {resolution!r}",
         )
     if ratio not in _VALID_RATIOS:
         return _error_response(
@@ -366,17 +408,21 @@ async def text_to_video_happyhorse(
     if negative_prompt:
         input_block["negative_prompt"] = negative_prompt
     parameters = {
-        "resolution": resolution, "ratio": ratio,
-        "duration": duration, "prompt_extend": prompt_extend,
+        "resolution": resolution,
+        "ratio": ratio,
+        "duration": duration,
+        "prompt_extend": prompt_extend,
     }
     logger.info(
-        f"happyhorse t2v: resolution={resolution} ratio={ratio} duration={duration}s",
+        f"happyhorse t2v: resolution={resolution} ratio={ratio} duration={duration}s",  # noqa: E501
     )
     return await _run(
         tool_name="text_to_video_happyhorse",
         model="happyhorse-1.0-t2v",
-        input_block=input_block, parameters=parameters,
-        prefix="happyhorse_t2v", api_key=api_key,
+        input_block=input_block,
+        parameters=parameters,
+        prefix="happyhorse_t2v",
+        api_key=api_key,
     )
 
 
@@ -397,7 +443,8 @@ async def image_to_video_happyhorse(
     """
     if resolution not in _VALID_RESOLUTIONS:
         return _error_response(
-            f"resolution must be one of {sorted(_VALID_RESOLUTIONS)}; got {resolution!r}",
+            f"resolution must be one of {sorted(_VALID_RESOLUTIONS)}; "
+            f"got {resolution!r}",
         )
     if duration < 2 or duration > 15:
         return _error_response("duration must be in [2, 15]")
@@ -412,8 +459,10 @@ async def image_to_video_happyhorse(
         "media": [{"type": "first_frame", "url": img_url}],
     }
     parameters = {
-        "resolution": resolution, "ratio": ratio,
-        "duration": duration, "prompt_extend": prompt_extend,
+        "resolution": resolution,
+        "ratio": ratio,
+        "duration": duration,
+        "prompt_extend": prompt_extend,
     }
     logger.info(
         f"happyhorse i2v: resolution={resolution} duration={duration}s "
@@ -422,8 +471,10 @@ async def image_to_video_happyhorse(
     return await _run(
         tool_name="image_to_video_happyhorse",
         model="happyhorse-1.0-i2v",
-        input_block=input_block, parameters=parameters,
-        prefix="happyhorse_i2v", api_key=api_key,
+        input_block=input_block,
+        parameters=parameters,
+        prefix="happyhorse_i2v",
+        api_key=api_key,
     )
 
 
@@ -445,8 +496,10 @@ async def reference_to_video_happyhorse(
         return _error_response(f"ref_images_url: {exc}")
     input_block = {"prompt": prompt, "ref_images_url": resolved_imgs}
     parameters = {
-        "resolution": resolution, "ratio": ratio,
-        "duration": duration, "prompt_extend": prompt_extend,
+        "resolution": resolution,
+        "ratio": ratio,
+        "duration": duration,
+        "prompt_extend": prompt_extend,
     }
     logger.info(
         f"happyhorse r2v: {len(resolved_imgs)} refs, "
@@ -455,6 +508,8 @@ async def reference_to_video_happyhorse(
     return await _run(
         tool_name="reference_to_video_happyhorse",
         model="happyhorse-1.0-r2v",
-        input_block=input_block, parameters=parameters,
-        prefix="happyhorse_r2v", api_key=api_key,
+        input_block=input_block,
+        parameters=parameters,
+        prefix="happyhorse_r2v",
+        api_key=api_key,
     )

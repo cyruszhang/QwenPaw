@@ -166,9 +166,8 @@ function compactApiError(error: any): string {
   const taskMatch = detail.match(/task failed:\s*(\{.*\})\s*$/s);
   if (taskMatch) {
     const outer = parseMaybeJson(taskMatch[1]);
-    const nested = typeof outer?.message === "string"
-      ? parseMaybeJson(outer.message)
-      : null;
+    const nested =
+      typeof outer?.message === "string" ? parseMaybeJson(outer.message) : null;
     const provider = nested?.error;
     if (provider?.message) {
       const code = provider.code || outer?.code;
@@ -206,7 +205,8 @@ class CreatorErrorBoundary extends (React.Component as any) {
         "div",
         { style: { padding: 24, maxWidth: 1100, margin: "0 auto" } },
         React.createElement(Alert, {
-          type: "error", showIcon: true,
+          type: "error",
+          showIcon: true,
           message: "Storybook Creator panel crashed",
           description: React.createElement(
             "div",
@@ -216,14 +216,19 @@ class CreatorErrorBoundary extends (React.Component as any) {
               "pre",
               {
                 style: {
-                  marginTop: 8, padding: 8, background: "#fafafa",
-                  fontSize: 11, maxHeight: 240, overflow: "auto",
+                  marginTop: 8,
+                  padding: 8,
+                  background: "#fafafa",
+                  fontSize: 11,
+                  maxHeight: 240,
+                  overflow: "auto",
                 },
               },
               (error.stack || "") + "\n\n" + (info?.componentStack || ""),
             ),
             React.createElement(Button, {
-              type: "primary", style: { marginTop: 8 },
+              type: "primary",
+              style: { marginTop: 8 },
               onClick: () => this.setState({ error: null, info: null }),
               children: "Try render again",
             }),
@@ -289,9 +294,9 @@ function notify(
   // Native notification — only when tab is backgrounded AND permission is granted.
   try {
     if (
-      document.visibilityState !== "visible"
-      && "Notification" in window
-      && Notification.permission === "granted"
+      document.visibilityState !== "visible" &&
+      "Notification" in window &&
+      Notification.permission === "granted"
     ) {
       const n = new Notification(title, { body, tag: opts.tag });
       n.onclick = () => {
@@ -364,9 +369,10 @@ function refUrl(
   // -per-origin limit, causing /stage POSTs to stall waiting for a slot.
   // Stable version → browser caches the asset → connection pool stays
   // available for the real RPCs.
-  const v = version === "" || version == null
-    ? ""
-    : `?v=${encodeURIComponent(String(version))}`;
+  const v =
+    version === "" || version == null
+      ? ""
+      : `?v=${encodeURIComponent(String(version))}`;
   return getApiUrl(`/creator/projects/${pid}/refs/${name}${v}`);
 }
 
@@ -375,9 +381,10 @@ function takeUrl(
   name: string,
   version: string | number = "",
 ): string {
-  const v = version === "" || version == null
-    ? ""
-    : `?v=${encodeURIComponent(String(version))}`;
+  const v =
+    version === "" || version == null
+      ? ""
+      : `?v=${encodeURIComponent(String(version))}`;
   return getApiUrl(`/creator/projects/${pid}/takes/${name}${v}`);
 }
 
@@ -431,9 +438,7 @@ function CreatorPage(): any {
   const reloadProjects = React.useCallback(async () => {
     setLoadingProjects(true);
     try {
-      const r = await apiGet<{ projects: ProjectEntry[] }>(
-        "/creator/projects",
-      );
+      const r = await apiGet<{ projects: ProjectEntry[] }>("/creator/projects");
       setProjects(r.projects ?? []);
     } catch (e: any) {
       antMessage.error(`Project list failed: ${e.message ?? e}`);
@@ -523,15 +528,17 @@ function CreatorPage(): any {
           onRename: async (p: ProjectEntry) => {
             const next = window.prompt(
               `Rename "${p.id}" — pick a new id.\n` +
-              "Chinese titles auto-romanize via pinyin " +
-              "(e.g. 老人与海 → lao_ren_yu_hai).",
+                "Chinese titles auto-romanize via pinyin " +
+                "(e.g. 老人与海 → lao_ren_yu_hai).",
               p.id,
             );
             if (!next || next === p.id) return;
             try {
-              const r = await apiJson("POST",
+              const r = await apiJson(
+                "POST",
                 `/creator/projects/${p.id}/rename`,
-                { new_id: next.trim() });
+                { new_id: next.trim() },
+              );
               antMessage.success(`Renamed → ${r.id}`);
               if (selectedPid === p.id) setSelectedPid(r.id);
               reloadProjects();
@@ -564,7 +571,7 @@ function CreatorPage(): any {
                 setSelectedPid(pid);
                 reloadProjects();
               },
-          }),
+            }),
       ),
     ),
   );
@@ -648,9 +655,10 @@ function ProjectSidebar({
     /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(
       selectedLabel,
     );
-  const railLabel = selectedLabelHasCjk && selectedLabel.length > 9
-    ? `${selectedLabel.slice(0, 8)}…`
-    : selectedLabel;
+  const railLabel =
+    selectedLabelHasCjk && selectedLabel.length > 9
+      ? `${selectedLabel.slice(0, 8)}…`
+      : selectedLabel;
 
   if (collapsed) {
     return React.createElement(
@@ -670,7 +678,11 @@ function ProjectSidebar({
         },
         React.createElement(
           Tooltip,
-          { title: collapseLocked ? "Widen the window to show projects" : "Show projects" },
+          {
+            title: collapseLocked
+              ? "Widen the window to show projects"
+              : "Show projects",
+          },
           React.createElement(Button, {
             size: "small",
             type: "text",
@@ -781,48 +793,51 @@ function ProjectSidebar({
     loading
       ? React.createElement(Spin)
       : projects.length === 0
-        ? React.createElement(Empty, { description: "No projects yet" })
-        : React.createElement(List, {
-            size: "small",
-            dataSource: projects,
-            renderItem: (p: ProjectEntry) =>
-              React.createElement(
-                List.Item,
-                {
-                  key: p.id,
-                  style: {
-                    cursor: "pointer",
-                    background: p.id === selectedPid ? "#e6f4ff" : undefined,
-                    padding: "8px 12px",
-                    borderRadius: 6,
-                  },
-                  onClick: () => onSelect(p.id),
-                  actions: [
-                    React.createElement(
-                      Tooltip,
-                      { title: "Rename project id (e.g. untitled_xxx → meaningful name)" },
-                      React.createElement(Button, {
-                        size: "small",
-                        type: "text",
-                        icon: React.createElement(EditOutlined),
-                        onClick: (e: any) => {
-                          e.stopPropagation();
-                          onRename?.(p);
-                        },
-                      }),
-                    ),
-                  ],
+      ? React.createElement(Empty, { description: "No projects yet" })
+      : React.createElement(List, {
+          size: "small",
+          dataSource: projects,
+          renderItem: (p: ProjectEntry) =>
+            React.createElement(
+              List.Item,
+              {
+                key: p.id,
+                style: {
+                  cursor: "pointer",
+                  background: p.id === selectedPid ? "#e6f4ff" : undefined,
+                  padding: "8px 12px",
+                  borderRadius: 6,
                 },
-                React.createElement(List.Item.Meta, {
-                  title: React.createElement(AntText, { strong: true }, p.title),
-                  description: React.createElement(
-                    AntText,
-                    { type: "secondary", style: { fontSize: 12 } },
-                    `${p.scene_count} scenes · ${p.id}`,
+                onClick: () => onSelect(p.id),
+                actions: [
+                  React.createElement(
+                    Tooltip,
+                    {
+                      title:
+                        "Rename project id (e.g. untitled_xxx → meaningful name)",
+                    },
+                    React.createElement(Button, {
+                      size: "small",
+                      type: "text",
+                      icon: React.createElement(EditOutlined),
+                      onClick: (e: any) => {
+                        e.stopPropagation();
+                        onRename?.(p);
+                      },
+                    }),
                   ),
-                }),
-              ),
-          }),
+                ],
+              },
+              React.createElement(List.Item.Meta, {
+                title: React.createElement(AntText, { strong: true }, p.title),
+                description: React.createElement(
+                  AntText,
+                  { type: "secondary", style: { fontSize: 12 } },
+                  `${p.scene_count} scenes · ${p.id}`,
+                ),
+              }),
+            ),
+        }),
   );
 }
 
@@ -842,7 +857,9 @@ function NewProjectPane({ styles, status, onCreated }: any) {
 
   const onPasteSubmit = async () => {
     if (text.trim().length < 30) {
-      antMessage.warning("Source text seems too short — paste at least a paragraph");
+      antMessage.warning(
+        "Source text seems too short — paste at least a paragraph",
+      );
       return;
     }
     setBusy(true);
@@ -908,15 +925,28 @@ function NewProjectPane({ styles, status, onCreated }: any) {
           background: "#fcfcfd",
         },
       },
-      React.createElement(Step, { title: "Source", icon: React.createElement(CloudUploadOutlined) }),
-      React.createElement(Step, { title: "Storyboard", icon: React.createElement(ScissorOutlined) }),
-      React.createElement(Step, { title: "Anchors", icon: React.createElement(PictureOutlined) }),
-      React.createElement(Step, { title: "Frames", icon: React.createElement(PlayCircleOutlined) }),
+      React.createElement(Step, {
+        title: "Source",
+        icon: React.createElement(CloudUploadOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Storyboard",
+        icon: React.createElement(ScissorOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Anchors",
+        icon: React.createElement(PictureOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Frames",
+        icon: React.createElement(PlayCircleOutlined),
+      }),
     ),
     status && !status.has_dashscope
       ? React.createElement(Alert, {
           type: "warning",
-          message: "DASHSCOPE_API_KEY missing — needed for Stage 00 decomposition (qwen-max). Set it under Environment Variables and refresh.",
+          message:
+            "DASHSCOPE_API_KEY missing — needed for Stage 00 decomposition (qwen-max). Set it under Environment Variables and refresh.",
           style: { marginBottom: 16 },
           showIcon: true,
         })
@@ -924,48 +954,59 @@ function NewProjectPane({ styles, status, onCreated }: any) {
     React.createElement(
       "div",
       { style: { display: "flex", gap: 12, marginBottom: 12 } },
-      React.createElement(
-        Button,
-        {
-          type: tab === "paste" ? "primary" : "default",
-          onClick: () => setTab("paste"),
-          children: "Paste text",
-        },
-      ),
-      React.createElement(
-        Button,
-        {
-          type: tab === "upload" ? "primary" : "default",
-          onClick: () => setTab("upload"),
-          children: "Upload file (.txt/.md/.pdf/.docx)",
-        },
-      ),
+      React.createElement(Button, {
+        type: tab === "paste" ? "primary" : "default",
+        onClick: () => setTab("paste"),
+        children: "Paste text",
+      }),
+      React.createElement(Button, {
+        type: tab === "upload" ? "primary" : "default",
+        onClick: () => setTab("upload"),
+        children: "Upload file (.txt/.md/.pdf/.docx)",
+      }),
     ),
-    React.createElement(Form, { layout: "vertical" },
-      React.createElement(Form.Item, { label: "Title (optional)" },
+    React.createElement(
+      Form,
+      { layout: "vertical" },
+      React.createElement(
+        Form.Item,
+        { label: "Title (optional)" },
         React.createElement(Input, {
           placeholder: "Old Man and the Sea",
           value: title,
           onChange: (e: any) => setTitle(e.target.value),
         }),
       ),
-      React.createElement(Row, { gutter: 16 },
-        React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, { label: "Image model" },
+      React.createElement(
+        Row,
+        { gutter: 16 },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Image model" },
             React.createElement(Select, {
               value: frameProvider,
               onChange: setFrameProvider,
               style: { width: "100%" },
               options: [
-                { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+                {
+                  value: "gpt-image-2-dashscope",
+                  label: "gpt-image-2 (dashscope)",
+                },
                 { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
                 { value: "qwen-image", label: "qwen-image-2.0-pro" },
               ],
             }),
           ),
         ),
-        React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, { label: "Video model" },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Video model" },
             React.createElement(Select, {
               value: videoProvider,
               onChange: setVideoProvider,
@@ -980,15 +1021,20 @@ function NewProjectPane({ styles, status, onCreated }: any) {
         ),
       ),
       tab === "paste"
-        ? React.createElement(Form.Item, { label: "Story / script / prompt", required: true },
+        ? React.createElement(
+            Form.Item,
+            { label: "Story / script / prompt", required: true },
             React.createElement(TextArea, {
               rows: 14,
               value: text,
               onChange: (e: any) => setText(e.target.value),
-              placeholder: "Paste the full story, script, or narrative prompt here. The LLM will identify characters, scenes, and recurring settings, then split it into 5-8 storyboard panels.",
+              placeholder:
+                "Paste the full story, script, or narrative prompt here. The LLM will identify characters, scenes, and recurring settings, then split it into 5-8 storyboard panels.",
             }),
           )
-        : React.createElement(Form.Item, { label: "File", required: true },
+        : React.createElement(
+            Form.Item,
+            { label: "File", required: true },
             React.createElement(
               Upload,
               {
@@ -1000,10 +1046,16 @@ function NewProjectPane({ styles, status, onCreated }: any) {
                 maxCount: 1,
                 accept: ".txt,.md,.pdf,.docx",
               },
-              React.createElement(Button, { icon: React.createElement(CloudUploadOutlined) }, "Pick file"),
+              React.createElement(
+                Button,
+                { icon: React.createElement(CloudUploadOutlined) },
+                "Pick file",
+              ),
             ),
           ),
-      React.createElement(Form.Item, null,
+      React.createElement(
+        Form.Item,
+        null,
         React.createElement(Button, {
           type: "primary",
           loading: busy,
@@ -1024,7 +1076,12 @@ function NewProjectPane({ styles, status, onCreated }: any) {
 // ── project pane: workflow per loaded project ────────────────────────
 
 function ProjectPane({
-  pid, styles, status, onStageRowsChange, onChange, onDeleted,
+  pid,
+  styles,
+  status,
+  onStageRowsChange,
+  onChange,
+  onDeleted,
 }: any) {
   const [project, setProject] = React.useState<any>(null);
   const [forecast, setForecast] = React.useState<CostForecast | null>(null);
@@ -1053,10 +1110,18 @@ function ProjectPane({
   const [liveProgress, setLiveProgress] = React.useState<
     Record<string, { state: string; stage?: string; elapsed_s?: number }>
   >({});
+  // Live Pass-1 decompose stream — the producer's raw draft text as the
+  // LLM generates it, pushed over SSE (decompose_start / _progress /
+  // _done). Lets the user watch the beat sheet being written instead of
+  // staring at a spinner. Cleared once the structured beats render.
+  const [decomposeStream, setDecomposeStream] = React.useState("");
+  const [decomposeStreaming, setDecomposeStreaming] = React.useState(false);
 
   // Decompose-step form
   const [duration, setDuration] = React.useState(60);
-  const [styleHint, setStyleHint] = React.useState<string | undefined>(undefined);
+  const [styleHint, setStyleHint] = React.useState<string | undefined>(
+    undefined,
+  );
   const [audience, setAudience] = React.useState("general / family");
   const [voice, setVoice] = React.useState("longshu_v2");
   const [era, setEra] = React.useState("");
@@ -1141,7 +1206,9 @@ function ProjectPane({
           setLiveProgress((p) => ({
             ...p,
             [ev.scene_id]: {
-              state: "done", stage: ev.stage, elapsed_s: ev.elapsed_s,
+              state: "done",
+              stage: ev.stage,
+              elapsed_s: ev.elapsed_s,
             },
           }));
           // The disk has a new file — refresh status to render the thumbnail.
@@ -1155,6 +1222,19 @@ function ProjectPane({
           // Drop running markers when the whole stage finishes.
           setLiveProgress({});
           reload();
+        } else if (ev.kind === "decompose_start") {
+          setDecomposeStreaming(true);
+          setDecomposeStream("");
+        } else if (ev.kind === "decompose_progress") {
+          // Each event carries the FULL accumulated draft text (the
+          // backend coalesces deltas into drop-robust snapshots), so a
+          // plain assignment always converges on the latest state.
+          if (typeof ev.text === "string") setDecomposeStream(ev.text);
+        } else if (
+          ev.kind === "decompose_done" ||
+          ev.kind === "decompose_failed"
+        ) {
+          setDecomposeStreaming(false);
         }
       } catch {
         /* ignore malformed event */
@@ -1164,7 +1244,11 @@ function ProjectPane({
       // Browser auto-reconnects on its own; nothing to do.
     };
     return () => {
-      try { es?.close(); } catch { /* ignore */ }
+      try {
+        es?.close();
+      } catch {
+        /* ignore */
+      }
     };
   }, [pid, reload]);
 
@@ -1174,6 +1258,10 @@ function ProjectPane({
     setActiveStage("decompose");
     setRunError(null);
     setTabBadge(1, 0);
+    // Show the live panel immediately — don't wait for the first SSE
+    // event, which can race the EventSource (re)connect.
+    setDecomposeStreaming(true);
+    setDecomposeStream("");
     try {
       const r = await apiJson("POST", `/creator/projects/${pid}/decompose`, {
         duration_target_s: duration,
@@ -1200,7 +1288,7 @@ function ProjectPane({
       notify(
         "Decompose done",
         `Draft ready — ${
-          (r.draft?.scenes?.length || 0)
+          r.draft?.scenes?.length || 0
         } scenes. Review before generating refs.`,
         { tag: "decompose", level: "success" },
       );
@@ -1208,15 +1296,15 @@ function ProjectPane({
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: "Decompose failed", message: msg });
-      notify(
-        "Decompose failed",
-        msg.slice(0, 200),
-        { tag: "decompose-err", level: "error" },
-      );
+      notify("Decompose failed", msg.slice(0, 200), {
+        tag: "decompose-err",
+        level: "error",
+      });
       setTabBadge(0, 0);
     } finally {
       setBusy(false);
       setActiveStage(null);
+      setDecomposeStreaming(false);
     }
   };
 
@@ -1240,18 +1328,17 @@ function ProjectPane({
       await reload();
       notify(
         "Craft done",
-        `Scenes generated — ${(r.draft?.scenes?.length || 0)} scenes ready.`,
+        `Scenes generated — ${r.draft?.scenes?.length || 0} scenes ready.`,
         { tag: "craft", level: "success" },
       );
       setTabBadge(0, 1);
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: "Craft failed", message: msg });
-      notify(
-        "Craft failed",
-        msg.slice(0, 200),
-        { tag: "craft-err", level: "error" },
-      );
+      notify("Craft failed", msg.slice(0, 200), {
+        tag: "craft-err",
+        level: "error",
+      });
       setTabBadge(0, 0);
     } finally {
       setBusy(false);
@@ -1272,10 +1359,9 @@ function ProjectPane({
     setRunError(null);
     setTabBadge(1, 0);
     try {
-      const r = await apiJson(
-        "POST", `/creator/projects/${pid}/autofix`,
-        { max_iters: maxIters },
-      );
+      const r = await apiJson("POST", `/creator/projects/${pid}/autofix`, {
+        max_iters: maxIters,
+      });
       const last = (r.iterations || []).slice(-1)[0] || {};
       const checked = last.scenes_checked || 0;
       const passed = last.scenes_passed || 0;
@@ -1283,9 +1369,9 @@ function ProjectPane({
       await reload();
       notify(
         "Auto-fix done",
-        `After ${(r.iterations || []).length} iter(s): `
-          + `${passed}/${checked} scenes pass`
-          + (failed > 0 ? ` (${failed} still failing)` : ""),
+        `After ${(r.iterations || []).length} iter(s): ` +
+          `${passed}/${checked} scenes pass` +
+          (failed > 0 ? ` (${failed} still failing)` : ""),
         {
           tag: "autofix",
           level: failed > 0 ? "warning" : "success",
@@ -1295,11 +1381,10 @@ function ProjectPane({
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: "Auto-fix failed", message: msg });
-      notify(
-        "Auto-fix failed",
-        msg.slice(0, 200),
-        { tag: "autofix-err", level: "error" },
-      );
+      notify("Auto-fix failed", msg.slice(0, 200), {
+        tag: "autofix-err",
+        level: "error",
+      });
       setTabBadge(0, 0);
     } finally {
       setBusy(false);
@@ -1329,7 +1414,8 @@ function ProjectPane({
     setActiveStage(stage);
     setRunError(null);
     setTabBadge(scenes.length, 0);
-    let done = 0, failed = 0;
+    let done = 0,
+      failed = 0;
     const failureMessages: string[] = [];
     try {
       for (let i = 0; i < scenes.length; i += conc) {
@@ -1358,21 +1444,24 @@ function ProjectPane({
       if (failed > 0) {
         const unique = Array.from(new Set(failureMessages)).slice(0, 8);
         setRunError({
-          title: `Stage ${stage} completed with ${failed} failure${failed === 1 ? "" : "s"}`,
+          title: `Stage ${stage} completed with ${failed} failure${
+            failed === 1 ? "" : "s"
+          }`,
           message: unique.join("\n\n"),
         });
       }
-      notify(
-        `Stage ${stage} done`,
-        `${done} succeeded, ${failed} failed.`,
-        { tag: `stage-${stage}`, level: failed > 0 ? "warning" : "success" },
-      );
+      notify(`Stage ${stage} done`, `${done} succeeded, ${failed} failed.`, {
+        tag: `stage-${stage}`,
+        level: failed > 0 ? "warning" : "success",
+      });
       setTabBadge(0, done);
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: `Stage ${stage} crashed`, message: msg });
-      notify(`Stage ${stage} crashed`, msg.slice(0, 200),
-        { tag: `stage-${stage}-err`, level: "error" });
+      notify(`Stage ${stage} crashed`, msg.slice(0, 200), {
+        tag: `stage-${stage}-err`,
+        level: "error",
+      });
       setTabBadge(0, 0);
     } finally {
       setBusy(false);
@@ -1409,20 +1498,18 @@ function ProjectPane({
       console.log("[creator] stage report", r);
       await reload();
       const sceneHint = extra?.only_scene ? ` (scene ${extra.only_scene})` : "";
-      notify(
-        `${label} done${sceneHint}`,
-        "Click to review and continue.",
-        { tag: `stage-${stage}`, level: "success" },
-      );
+      notify(`${label} done${sceneHint}`, "Click to review and continue.", {
+        tag: `stage-${stage}`,
+        level: "success",
+      });
       setTabBadge(0, 1);
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: `${label} failed`, message: msg });
-      notify(
-        `${label} failed`,
-        msg.slice(0, 200),
-        { tag: `stage-${stage}-err`, level: "error" },
-      );
+      notify(`${label} failed`, msg.slice(0, 200), {
+        tag: `stage-${stage}-err`,
+        level: "error",
+      });
       setTabBadge(0, 0);
     } finally {
       setBusy(false);
@@ -1453,11 +1540,17 @@ function ProjectPane({
   ) => {
     try {
       const r = await apiJson("PATCH", `/creator/projects/${pid}/anchors`, {
-        op, kind, id, description,
+        op,
+        kind,
+        id,
+        description,
       });
       antMessage.success(
-        op === "delete" ? `Removed ${kind} ${id}` :
-        op === "add" ? `Added ${kind} ${id}` : `Updated ${kind} ${id}`,
+        op === "delete"
+          ? `Removed ${kind} ${id}`
+          : op === "add"
+          ? `Added ${kind} ${id}`
+          : `Updated ${kind} ${id}`,
       );
       setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
       onChange?.();
@@ -1482,11 +1575,7 @@ function ProjectPane({
     opts: { quiet?: boolean; reload?: boolean; updateProject?: boolean } = {},
   ) => {
     const applyPatch = async (payload: any) =>
-      apiJson(
-        "PATCH",
-        `/creator/projects/${pid}/scenes/${sceneId}`,
-        payload,
-      );
+      apiJson("PATCH", `/creator/projects/${pid}/scenes/${sceneId}`, payload);
     try {
       let r: any;
       try {
@@ -1497,17 +1586,20 @@ function ProjectPane({
         const legacyPatch = { ...patch };
         let removedLegacyField = false;
         if (
-          extraForbidden
-          && Object.prototype.hasOwnProperty.call(legacyPatch, "video_regen_notes")
-          && msg.includes("video_regen_notes")
+          extraForbidden &&
+          Object.prototype.hasOwnProperty.call(
+            legacyPatch,
+            "video_regen_notes",
+          ) &&
+          msg.includes("video_regen_notes")
         ) {
           delete legacyPatch.video_regen_notes;
           removedLegacyField = true;
         }
         if (
-          extraForbidden
-          && Object.prototype.hasOwnProperty.call(legacyPatch, "uses_props")
-          && msg.includes("uses_props")
+          extraForbidden &&
+          Object.prototype.hasOwnProperty.call(legacyPatch, "uses_props") &&
+          msg.includes("uses_props")
         ) {
           delete legacyPatch.uses_props;
           removedLegacyField = true;
@@ -1587,9 +1679,7 @@ function ProjectPane({
   // it has scenes (Pass 2 craft). Either is enough to leave the
   // initial Decompose form behind and show the next stage
   // (BeatSheetView if only beats, DraftPanel if scenes are crafted).
-  const hasDraft = Boolean(
-    draft?.beats?.length || draft?.scenes?.length,
-  );
+  const hasDraft = Boolean(draft?.beats?.length || draft?.scenes?.length);
 
   // Current step computation
   let currentStep = 1; // source done
@@ -1613,7 +1703,11 @@ function ProjectPane({
       title: React.createElement(
         Space,
         null,
-        React.createElement(AntText, { strong: true }, project?.meta?.title ?? pid),
+        React.createElement(
+          AntText,
+          { strong: true },
+          project?.meta?.title ?? pid,
+        ),
         React.createElement(
           Tooltip,
           { title: "Project folder id" },
@@ -1627,9 +1721,21 @@ function ProjectPane({
           ? React.createElement(
               Tooltip,
               {
-                title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${forecast.breakdown.characters} chars + ${forecast.breakdown.props ?? 0} props + ${forecast.breakdown.scene_refs} settings + style). Stage 2 frames ≈ $${forecast.stage_2_usd} (${forecast.breakdown.scenes} scenes). Stage 3 I2V ≈ $${forecast.stage_3_usd} (${forecast.breakdown.scenes} clips).`,
+                title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${
+                  forecast.breakdown.characters
+                } chars + ${forecast.breakdown.props ?? 0} props + ${
+                  forecast.breakdown.scene_refs
+                } settings + style). Stage 2 frames ≈ $${
+                  forecast.stage_2_usd
+                } (${forecast.breakdown.scenes} scenes). Stage 3 I2V ≈ $${
+                  forecast.stage_3_usd
+                } (${forecast.breakdown.scenes} clips).`,
               },
-              React.createElement(Tag, { color: "gold" }, `≈ $${forecast.total_usd}`),
+              React.createElement(
+                Tag,
+                { color: "gold" },
+                `≈ $${forecast.total_usd}`,
+              ),
             )
           : null,
         React.createElement(Button, {
@@ -1654,10 +1760,22 @@ function ProjectPane({
           background: "#fcfcfd",
         },
       },
-      React.createElement(Step, { title: "Source", icon: React.createElement(CloudUploadOutlined) }),
-      React.createElement(Step, { title: "Storyboard", icon: React.createElement(ScissorOutlined) }),
-      React.createElement(Step, { title: "Anchors", icon: React.createElement(PictureOutlined) }),
-      React.createElement(Step, { title: "Frames", icon: React.createElement(PlayCircleOutlined) }),
+      React.createElement(Step, {
+        title: "Source",
+        icon: React.createElement(CloudUploadOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Storyboard",
+        icon: React.createElement(ScissorOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Anchors",
+        icon: React.createElement(PictureOutlined),
+      }),
+      React.createElement(Step, {
+        title: "Frames",
+        icon: React.createElement(PlayCircleOutlined),
+      }),
     ),
 
     runError
@@ -1683,33 +1801,57 @@ function ProjectPane({
         })
       : null,
 
+    // Live Pass-1 stream — watch the producer draft the beat sheet.
+    React.createElement(LiveDecomposePanel, {
+      show: decomposeStreaming || (busy && activeStage === "decompose"),
+      text: decomposeStream,
+      streaming: decomposeStreaming,
+    }),
+
     // Step 1: Decompose form (only if no draft yet)
     !hasDraft
       ? React.createElement(DecomposeForm, {
-          duration, setDuration,
-          styleHint, setStyleHint,
-          audience, setAudience,
-          voice, setVoice,
-          era, setEra,
-          country, setCountry,
-          genre, setGenre,
-          tone, setTone,
-          storyAnchor, setStoryAnchor,
-          styleDirectives, setStyleDirectives,
-          worldBible, setWorldBible,
-          frameProvider, setFrameProvider,
-          videoProvider, setVideoProvider,
-          targetScenes, setTargetScenes,
-          styles, busy, activeStage, status,
+          duration,
+          setDuration,
+          styleHint,
+          setStyleHint,
+          audience,
+          setAudience,
+          voice,
+          setVoice,
+          era,
+          setEra,
+          country,
+          setCountry,
+          genre,
+          setGenre,
+          tone,
+          setTone,
+          storyAnchor,
+          setStoryAnchor,
+          styleDirectives,
+          setStyleDirectives,
+          worldBible,
+          setWorldBible,
+          frameProvider,
+          setFrameProvider,
+          videoProvider,
+          setVideoProvider,
+          targetScenes,
+          setTargetScenes,
+          styles,
+          busy,
+          activeStage,
+          status,
           onSubmit: onDecompose,
         })
       : null,
 
     // Step 1.5: Beat sheet review (Pass 1 done, Pass 2 not yet run).
     // Crafted projects skip this branch because draft.scenes is populated.
-    hasDraft
-      && (draft.beats || []).length > 0
-      && (draft.scenes || []).length === 0
+    hasDraft &&
+      (draft.beats || []).length > 0 &&
+      (draft.scenes || []).length === 0
       ? React.createElement(BeatSheetView, {
           draft,
           busy,
@@ -1739,18 +1881,23 @@ function ProjectPane({
           onReload: reload,
           onAddAnchor: (kind: AnchorKind) =>
             setAnchorEditor({
-              open: true, mode: "add", kind, id: "", description: "",
+              open: true,
+              mode: "add",
+              kind,
+              id: "",
+              description: "",
             }),
           onEditAnchor: (kind: AnchorKind, a: any) =>
             setAnchorEditor({
-              open: true, mode: "update", kind,
-              id: a.id, description: a.description || "",
+              open: true,
+              mode: "update",
+              kind,
+              id: a.id,
+              description: a.description || "",
             }),
           onDeleteAnchor,
           onEditScene: (sceneId: string) => {
-            const sc = (draft.scenes || []).find(
-              (s: any) => s.id === sceneId,
-            );
+            const sc = (draft.scenes || []).find((s: any) => s.id === sceneId);
             if (sc) setSceneEditor(sc);
           },
           liveProgress,
@@ -1764,7 +1911,10 @@ function ProjectPane({
           onCancel: () => setAnchorEditor(null),
           onSubmit: async (id: string, description: string) => {
             await onPatchAnchor(
-              anchorEditor.mode, anchorEditor.kind, id, description,
+              anchorEditor.mode,
+              anchorEditor.kind,
+              id,
+              description,
             );
             setAnchorEditor(null);
           },
@@ -1793,14 +1943,10 @@ function ProjectPane({
 
 // ── scene edit modal ────────────────────────────────────────────────
 
-function SceneEditModal({
-  scene, draft, onCancel, onSubmit, onAutoSave,
-}: any) {
+function SceneEditModal({ scene, draft, onCancel, onSubmit, onAutoSave }: any) {
   const [name, setName] = React.useState(scene.name ?? "");
   const [duration, setDuration] = React.useState(scene.duration ?? 10);
-  const [hasNarration, setHasNarration] = React.useState(
-    !!scene.has_narration,
-  );
+  const [hasNarration, setHasNarration] = React.useState(!!scene.has_narration);
   const [standalone, setStandalone] = React.useState(!!scene.standalone);
   const [usesStyle, setUsesStyle] = React.useState(
     scene.uses_style === undefined ? true : !!scene.uses_style,
@@ -1821,12 +1967,8 @@ function SceneEditModal({
     scene.motion_prompt ?? "",
   );
   const [narration, setNarration] = React.useState(scene.narration ?? "");
-  const [nCandidates, setNCandidates] = React.useState(
-    scene.n_candidates ?? 1,
-  );
-  const [regenNotes, setRegenNotes] = React.useState(
-    scene.regen_notes ?? "",
-  );
+  const [nCandidates, setNCandidates] = React.useState(scene.n_candidates ?? 1);
+  const [regenNotes, setRegenNotes] = React.useState(scene.regen_notes ?? "");
   const [videoRegenNotes, setVideoRegenNotes] = React.useState(
     scene.video_regen_notes ?? "",
   );
@@ -1839,13 +1981,16 @@ function SceneEditModal({
   const [submitting, setSubmitting] = React.useState(false);
 
   const charOptions = (draft.assets?.characters ?? []).map((c: any) => ({
-    value: c.id, label: c.id,
+    value: c.id,
+    label: c.id,
   }));
   const propOptions = (draft.assets?.props ?? []).map((p: any) => ({
-    value: p.id, label: p.id,
+    value: p.id,
+    label: p.id,
   }));
   const refOptions = (draft.assets?.scene_refs ?? []).map((r: any) => ({
-    value: r.id, label: r.id,
+    value: r.id,
+    label: r.id,
   }));
   const itemStyle = { marginBottom: 14 };
   const compactItemStyle = { marginBottom: 10 };
@@ -1876,10 +2021,22 @@ function SceneEditModal({
     }
     return patch;
   }, [
-    name, duration, hasNarration, standalone, usesStyle, usesCharacters,
+    name,
+    duration,
+    hasNarration,
+    standalone,
+    usesStyle,
+    usesCharacters,
     usesProps,
-    usesSceneRef, sceneDescription, motionPrompt, narration, nCandidates,
-    regenNotes, videoRegenNotes, videoProvider, frameProvider,
+    usesSceneRef,
+    sceneDescription,
+    motionPrompt,
+    narration,
+    nCandidates,
+    regenNotes,
+    videoRegenNotes,
+    videoProvider,
+    frameProvider,
     scene.video_regen_notes,
   ]);
 
@@ -1946,14 +2103,22 @@ function SceneEditModal({
         paddingTop: 8,
       },
     },
-    React.createElement(Form, {
-      layout: "vertical",
-      size: "middle",
-      style: { overflowX: "hidden" },
-    },
-      React.createElement(Row, { gutter: [16, 4] },
-        React.createElement(Col, { span: 14 },
-          React.createElement(Form.Item, { label: "Name", style: itemStyle },
+    React.createElement(
+      Form,
+      {
+        layout: "vertical",
+        size: "middle",
+        style: { overflowX: "hidden" },
+      },
+      React.createElement(
+        Row,
+        { gutter: [16, 4] },
+        React.createElement(
+          Col,
+          { span: 14 },
+          React.createElement(
+            Form.Item,
+            { label: "Name", style: itemStyle },
             React.createElement(Input, {
               value: name,
               onChange: (e: any) => setName(e.target.value),
@@ -1961,20 +2126,32 @@ function SceneEditModal({
             }),
           ),
         ),
-        React.createElement(Col, { span: 5 },
-          React.createElement(Form.Item, { label: "Duration", style: itemStyle },
+        React.createElement(
+          Col,
+          { span: 5 },
+          React.createElement(
+            Form.Item,
+            { label: "Duration", style: itemStyle },
             React.createElement(InputNumber, {
               addonAfter: "s",
-              min: 2, max: 60, value: duration,
+              min: 2,
+              max: 60,
+              value: duration,
               onChange: (v: any) => setDuration(v ?? 10),
               style: { width: "100%" },
             }),
           ),
         ),
-        React.createElement(Col, { span: 5 },
-          React.createElement(Form.Item, { label: "Takes", style: itemStyle },
+        React.createElement(
+          Col,
+          { span: 5 },
+          React.createElement(
+            Form.Item,
+            { label: "Takes", style: itemStyle },
             React.createElement(InputNumber, {
-              min: 1, max: 4, value: nCandidates,
+              min: 1,
+              max: 4,
+              value: nCandidates,
               onChange: (v: any) => setNCandidates(v ?? 1),
               style: { width: "100%" },
             }),
@@ -1982,13 +2159,19 @@ function SceneEditModal({
         ),
       ),
 
-      React.createElement(Row, { gutter: [16, 0], style: { marginBottom: 12 } },
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, {
-            label: "Title card",
-            extra: "Standalone shot; skips Stage 0/2 conditioning.",
-            style: switchItemStyle,
-          },
+      React.createElement(
+        Row,
+        { gutter: [16, 0], style: { marginBottom: 12 } },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            {
+              label: "Title card",
+              extra: "Standalone shot; skips Stage 0/2 conditioning.",
+              style: switchItemStyle,
+            },
             React.createElement(antd.Switch, {
               size: "small",
               checked: standalone,
@@ -1996,30 +2179,46 @@ function SceneEditModal({
             }),
           ),
         ),
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, { label: "Narration", style: switchItemStyle },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            { label: "Narration", style: switchItemStyle },
             React.createElement(antd.Switch, {
               size: "small",
-              checked: hasNarration, onChange: setHasNarration,
+              checked: hasNarration,
+              onChange: setHasNarration,
             }),
           ),
         ),
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, { label: "Style anchor", style: switchItemStyle },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            { label: "Style anchor", style: switchItemStyle },
             React.createElement(antd.Switch, {
               size: "small",
-              checked: usesStyle, onChange: setUsesStyle,
+              checked: usesStyle,
+              onChange: setUsesStyle,
             }),
           ),
         ),
       ),
 
-      React.createElement(Row, { gutter: [16, 4] },
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, {
-            label: `Characters (${charOptions.length} available)`,
-            style: itemStyle,
-          },
+      React.createElement(
+        Row,
+        { gutter: [16, 4] },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            {
+              label: `Characters (${charOptions.length} available)`,
+              style: itemStyle,
+            },
             React.createElement(Select, {
               mode: "multiple",
               value: usesCharacters,
@@ -2033,11 +2232,15 @@ function SceneEditModal({
             }),
           ),
         ),
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, {
-            label: `Props (${propOptions.length} available)`,
-            style: itemStyle,
-          },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            {
+              label: `Props (${propOptions.length} available)`,
+              style: itemStyle,
+            },
             React.createElement(Select, {
               mode: "multiple",
               value: usesProps,
@@ -2051,11 +2254,15 @@ function SceneEditModal({
             }),
           ),
         ),
-        React.createElement(Col, { span: 8 },
-          React.createElement(Form.Item, {
-            label: `Setting (1 of ${refOptions.length})`,
-            style: itemStyle,
-          },
+        React.createElement(
+          Col,
+          { span: 8 },
+          React.createElement(
+            Form.Item,
+            {
+              label: `Setting (1 of ${refOptions.length})`,
+              style: itemStyle,
+            },
             React.createElement(Select, {
               value: usesSceneRef,
               onChange: setUsesSceneRef,
@@ -2068,23 +2275,27 @@ function SceneEditModal({
         ),
       ),
 
-      React.createElement(Form.Item, {
-        label: "Scene description",
-        extra: "Visual scaffold for Stage 2 frame composition.",
-        required: true,
-        style: itemStyle,
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Scene description",
+          extra: "Visual scaffold for Stage 2 frame composition.",
+          required: true,
+          style: itemStyle,
+        },
         React.createElement(TextArea, {
           rows: 4,
           value: sceneDescription,
           onChange: (e: any) => setSceneDescription(e.target.value),
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "Motion prompt",
-        extra: "Action and camera direction for the Stage 3 video model.",
-        style: itemStyle,
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Motion prompt",
+          extra: "Action and camera direction for the Stage 3 video model.",
+          style: itemStyle,
+        },
         React.createElement(TextArea, {
           rows: 3,
           value: motionPrompt,
@@ -2092,11 +2303,15 @@ function SceneEditModal({
         }),
       ),
       hasNarration
-        ? React.createElement(Form.Item, {
-            label: "Narration text",
-            extra: `≤ ${(duration - 1) * 18} chars (roughly — CosyVoice longshu_v2 at 1.0x). Stage 1 will warn if it overruns.`,
-            style: itemStyle,
-          },
+        ? React.createElement(
+            Form.Item,
+            {
+              label: "Narration text",
+              extra: `≤ ${
+                (duration - 1) * 18
+              } chars (roughly — CosyVoice longshu_v2 at 1.0x). Stage 1 will warn if it overruns.`,
+              style: itemStyle,
+            },
             React.createElement(TextArea, {
               rows: 3,
               value: narration,
@@ -2104,53 +2319,74 @@ function SceneEditModal({
             }),
           )
         : null,
-      React.createElement(Form.Item, {
-        label: "Frame regeneration notes",
-        extra: "Optional correction applied on the next Stage 2 frame regeneration.",
-        style: itemStyle,
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Frame regeneration notes",
+          extra:
+            "Optional correction applied on the next Stage 2 frame regeneration.",
+          style: itemStyle,
+        },
         React.createElement(TextArea, {
           rows: 2,
           value: regenNotes,
           onChange: (e: any) => setRegenNotes(e.target.value),
-          placeholder: "marlin should be about the same length as the skiff, not larger",
+          placeholder:
+            "marlin should be about the same length as the skiff, not larger",
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "Video regeneration notes",
-        extra: "Optional correction applied on the next Stage 3 video regeneration.",
-        style: itemStyle,
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Video regeneration notes",
+          extra:
+            "Optional correction applied on the next Stage 3 video regeneration.",
+          style: itemStyle,
+        },
         React.createElement(TextArea, {
           rows: 2,
           value: videoRegenNotes,
           onChange: (e: any) => setVideoRegenNotes(e.target.value),
-          placeholder: "slower camera push, less flapping, keep the subject centered",
+          placeholder:
+            "slower camera push, less flapping, keep the subject centered",
         }),
       ),
-      React.createElement(Row, { gutter: [16, 0] },
-        React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, {
-            label: "Image model",
-            style: compactItemStyle,
-          },
+      React.createElement(
+        Row,
+        { gutter: [16, 0] },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            {
+              label: "Image model",
+              style: compactItemStyle,
+            },
             React.createElement(Select, {
               value: frameProvider,
               onChange: setFrameProvider,
               style: { width: "100%" },
               options: [
-                { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+                {
+                  value: "gpt-image-2-dashscope",
+                  label: "gpt-image-2 (dashscope)",
+                },
                 { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
                 { value: "qwen-image", label: "qwen-image-2.0-pro" },
               ],
             }),
           ),
         ),
-        React.createElement(Col, { span: 12 },
-          React.createElement(Form.Item, {
-            label: "Video model",
-            style: compactItemStyle,
-          },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            {
+              label: "Video model",
+              style: compactItemStyle,
+            },
             React.createElement(Select, {
               value: videoProvider,
               onChange: setVideoProvider,
@@ -2175,9 +2411,12 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
   const [description, setDescription] = React.useState(editor.description);
   const [submitting, setSubmitting] = React.useState(false);
   const isEdit = editor.mode === "update";
-  const kindLabel = editor.kind === "character"
-    ? "character"
-    : editor.kind === "prop" ? "prop" : "setting";
+  const kindLabel =
+    editor.kind === "character"
+      ? "character"
+      : editor.kind === "prop"
+      ? "prop"
+      : "setting";
   return React.createElement(
     Modal,
     {
@@ -2205,39 +2444,51 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
       },
       width: 640,
     },
-    React.createElement(Form, { layout: "vertical" },
-      React.createElement(Form.Item, {
-        label: "ID",
-        extra: editor.kind === "character"
-          ? `short snake_case, e.g. "marlin", "old_man"`
-          : editor.kind === "prop"
-            ? `short snake_case, e.g. "brass_scale", "red_book"`
-            : `short snake_case, e.g. "high_sea", "dock"`,
-      },
+    React.createElement(
+      Form,
+      { layout: "vertical" },
+      React.createElement(
+        Form.Item,
+        {
+          label: "ID",
+          extra:
+            editor.kind === "character"
+              ? `short snake_case, e.g. "marlin", "old_man"`
+              : editor.kind === "prop"
+              ? `short snake_case, e.g. "brass_scale", "red_book"`
+              : `short snake_case, e.g. "high_sea", "dock"`,
+        },
         React.createElement(Input, {
           value: id,
           disabled: isEdit,
           onChange: (e: any) => setId(e.target.value),
-          placeholder: editor.kind === "character"
-            ? "marlin"
-            : editor.kind === "prop" ? "brass_scale" : "high_sea",
+          placeholder:
+            editor.kind === "character"
+              ? "marlin"
+              : editor.kind === "prop"
+              ? "brass_scale"
+              : "high_sea",
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "Description",
-        extra: editor.kind === "character"
-          ? "Verbatim physical description. Include every load-bearing detail; Stage 0 renders a multi-angle reference sheet."
-          : editor.kind === "prop"
-            ? "Portable key object / 道具. Include material, color, scale, markings, wear, and distinctive details."
-            : "Environmental setting only — no characters, no key props beyond the setting.",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Description",
+          extra:
+            editor.kind === "character"
+              ? "Verbatim physical description. Include every load-bearing detail; Stage 0 renders a multi-angle reference sheet."
+              : editor.kind === "prop"
+              ? "Portable key object / 道具. Include material, color, scale, markings, wear, and distinctive details."
+              : "Environmental setting only — no characters, no key props beyond the setting.",
+        },
         React.createElement(TextArea, {
           rows: 8,
           value: description,
           onChange: (e: any) => setDescription(e.target.value),
-          placeholder: editor.kind === "character"
-            ? "A great Atlantic marlin fish, roughly 4 metres long, iridescent blue-purple along its upper body shading to silver belly, a long pointed spear-like bill, a tall sail-like dorsal fin running along its back, a sharp crescent-shaped tail fin. Reference sheet on empty pale background, soft watercolor natural-history study, not a scene."
-            : editor.kind === "prop"
+          placeholder:
+            editor.kind === "character"
+              ? "A great Atlantic marlin fish, roughly 4 metres long, iridescent blue-purple along its upper body shading to silver belly, a long pointed spear-like bill, a tall sail-like dorsal fin running along its back, a sharp crescent-shaped tail fin. Reference sheet on empty pale background, soft watercolor natural-history study, not a scene."
+              : editor.kind === "prop"
               ? "An old brass balance scale with two shallow round pans hanging from dark cords, a scratched central beam, tarnished gold metal, tiny dents along the pan rims, compact enough for a small bird to use. Multi-angle prop reference sheet, not a scene."
               : "A small Cuban fishing village dock at sunset, weathered wooden planks of the pier, shoreline with low scrubby vegetation, distant village lights starting to glow, warm amber-rose sky. Wide cinematic landscape view, soft watercolor landscape painting, no characters, no key props.",
         }),
@@ -2255,7 +2506,14 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
  * - Has an `id` so the right-rail can scroll to it.
  */
 function StageSection({
-  id, stageLabel, summary, costUsd, extra, open, onToggle, children,
+  id,
+  stageLabel,
+  summary,
+  costUsd,
+  extra,
+  open,
+  onToggle,
+  children,
 }: any) {
   // Open/closed is controlled by the parent (DraftPanel) so multiple
   // sections behave like an accordion — only one open at a time.
@@ -2308,10 +2566,15 @@ function StageSection({
           },
           open ? "▼" : "▶",
         ),
-        React.createElement(AntText, { strong: true, style: { whiteSpace: "nowrap" } }, stageLabel),
+        React.createElement(
+          AntText,
+          { strong: true, style: { whiteSpace: "nowrap" } },
+          stageLabel,
+        ),
         costUsd != null
           ? React.createElement(
-              Tag, { color: "gold", style: { fontSize: 11, marginInlineEnd: 0 } },
+              Tag,
+              { color: "gold", style: { fontSize: 11, marginInlineEnd: 0 } },
               `≈ $${costUsd}`,
             )
           : null,
@@ -2337,7 +2600,11 @@ function StageSection({
   );
 }
 
-function buildStageRows(draft: any, projStatus: any, activeStage: string | null) {
+function buildStageRows(
+  draft: any,
+  projStatus: any,
+  activeStage: string | null,
+) {
   return [
     {
       id: "stage-meta",
@@ -2353,10 +2620,11 @@ function buildStageRows(draft: any, projStatus: any, activeStage: string | null)
       short: "A",
       active: activeStage?.startsWith("0"),
       done: (projStatus?.stages?.["0"]?.refs ?? []).length,
-      total: (draft.assets?.characters ?? []).length
-             + (draft.assets?.props ?? []).length
-             + (draft.assets?.scene_refs ?? []).length
-             + (draft.assets?.style ? 1 : 0),
+      total:
+        (draft.assets?.characters ?? []).length +
+        (draft.assets?.props ?? []).length +
+        (draft.assets?.scene_refs ?? []).length +
+        (draft.assets?.style ? 1 : 0),
     },
     {
       id: "stage-1",
@@ -2452,18 +2720,15 @@ function StageRail({ rows, inline = false }: any) {
                 lineHeight: 1,
               },
             },
-            React.createElement(
-              "span",
-              {
-                style: {
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  background: done ? "#52c41a" : r.active ? "#1677ff" : "#d9d9d9",
-                  display: "block",
-                },
+            React.createElement("span", {
+              style: {
+                width: 6,
+                height: 6,
+                borderRadius: 999,
+                background: done ? "#52c41a" : r.active ? "#1677ff" : "#d9d9d9",
+                display: "block",
               },
-            ),
+            }),
             React.createElement("span", null, r.short || r.label.slice(0, 1)),
           ),
         );
@@ -2508,7 +2773,10 @@ function StageRail({ rows, inline = false }: any) {
             null,
             React.createElement(
               AntText,
-              { strong: true, style: { display: "block", fontSize: 12, marginBottom: 6 } },
+              {
+                strong: true,
+                style: { display: "block", fontSize: 12, marginBottom: 6 },
+              },
               "Stages",
             ),
             ...rows.map((r: any) =>
@@ -2539,7 +2807,10 @@ function StageRail({ rows, inline = false }: any) {
                   "span",
                   {
                     style: {
-                      color: r.done === r.total && r.total > 0 ? "#52c41a" : "#bfbfbf",
+                      color:
+                        r.done === r.total && r.total > 0
+                          ? "#52c41a"
+                          : "#bfbfbf",
                       fontSize: 10,
                       lineHeight: 1,
                     },
@@ -2561,7 +2832,12 @@ function StageRail({ rows, inline = false }: any) {
                 r.total > 0
                   ? React.createElement(
                       "span",
-                      { style: { color: "#999", fontVariantNumeric: "tabular-nums" } },
+                      {
+                        style: {
+                          color: "#999",
+                          fontVariantNumeric: "tabular-nums",
+                        },
+                      },
                       `${r.done}/${r.total}`,
                     )
                   : null,
@@ -2594,8 +2870,7 @@ function SettingsCard({ draft, onSaveDraft }: any) {
   const [storyAnchor, setStoryAnchor] = React.useState(gc.story_anchor || "");
   const [worldBible, setWorldBible] = React.useState(gc.world_bible || "");
   const [directives, setDirectives] = React.useState(
-    Array.isArray(gc.style_directives)
-      ? gc.style_directives.join("\n") : "",
+    Array.isArray(gc.style_directives) ? gc.style_directives.join("\n") : "",
   );
   const [concurrency, setConcurrency] = React.useState<number>(
     Number(gc.concurrency) || 5,
@@ -2630,9 +2905,18 @@ function SettingsCard({ draft, onSaveDraft }: any) {
     next.global_config.story_anchor = storyAnchor.trim();
     next.global_config.world_bible = worldBible.trim();
     next.global_config.style_directives = directives
-      .split("\n").map((s) => s.trim()).filter(Boolean);
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
     next.global_config.concurrency = Math.max(1, Math.min(5, concurrency));
-    for (const k of ["era", "country", "genre", "tone", "story_anchor", "world_bible"]) {
+    for (const k of [
+      "era",
+      "country",
+      "genre",
+      "tone",
+      "story_anchor",
+      "world_bible",
+    ]) {
       if (!next.global_config[k]) delete next.global_config[k];
     }
     if (next.global_config.style_directives.length === 0) {
@@ -2640,8 +2924,15 @@ function SettingsCard({ draft, onSaveDraft }: any) {
     }
     return next;
   }, [
-    draft, era, country, genre, tone, storyAnchor,
-    worldBible, directives, concurrency,
+    draft,
+    era,
+    country,
+    genre,
+    tone,
+    storyAnchor,
+    worldBible,
+    directives,
+    concurrency,
   ]);
 
   const save = async (quiet = false) => {
@@ -2667,21 +2958,26 @@ function SettingsCard({ draft, onSaveDraft }: any) {
       return undefined;
     }
     if (signature === lastSavedSettingsRef.current) return undefined;
-    const timer = window.setTimeout(() => { void save(true); }, 700);
+    const timer = window.setTimeout(() => {
+      void save(true);
+    }, 700);
     return () => window.clearTimeout(timer);
   }, [buildNextDraft]);
 
-  const summary = [
-    era && `era=${era}`,
-    country && `country=${country}`,
-    genre && `genre=${genre}`,
-    tone && `tone=${tone}`,
-    storyAnchor && "anchor: ✓",
-    worldBible && "world: ✓",
-    directives.trim() &&
-      `${directives.split("\n").filter(Boolean).length} directive(s)`,
-    `concurrency: ${concurrency}`,
-  ].filter(Boolean).join(" · ") || "no story constraints — LLM auto-applied";
+  const summary =
+    [
+      era && `era=${era}`,
+      country && `country=${country}`,
+      genre && `genre=${genre}`,
+      tone && `tone=${tone}`,
+      storyAnchor && "anchor: ✓",
+      worldBible && "world: ✓",
+      directives.trim() &&
+        `${directives.split("\n").filter(Boolean).length} directive(s)`,
+      `concurrency: ${concurrency}`,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "no story constraints — LLM auto-applied";
 
   return React.createElement(
     Card,
@@ -2746,16 +3042,19 @@ function SettingsCard({ draft, onSaveDraft }: any) {
           `· ${summary}`,
         ),
       ),
-      extra: open && saving
-        ? React.createElement(
-            AntText,
-            { type: "secondary", style: { fontSize: 12 } },
-            "Autosaving...",
-          )
-        : null,
+      extra:
+        open && saving
+          ? React.createElement(
+              AntText,
+              { type: "secondary", style: { fontSize: 12 } },
+              "Autosaving...",
+            )
+          : null,
     },
     open
-      ? React.createElement(Form, { layout: "vertical", style: { marginTop: 4 } },
+      ? React.createElement(
+          Form,
+          { layout: "vertical", style: { marginTop: 4 } },
           (() => {
             // Evidence quotes from Pass 1: when LLM inferred a
             // constraint, it cites the source. We render it below
@@ -2765,37 +3064,56 @@ function SettingsCard({ draft, onSaveDraft }: any) {
               const quote = ev[key];
               if (!quote) return baseHint;
               return React.createElement(
-                "div", null,
+                "div",
+                null,
                 React.createElement(
                   AntText,
-                  { type: "secondary", style: { fontSize: 11, fontStyle: "italic" } },
+                  {
+                    type: "secondary",
+                    style: { fontSize: 11, fontStyle: "italic" },
+                  },
                   `🔍 inferred from source: "${quote}"`,
                 ),
-                baseHint ? React.createElement(
-                  "div",
-                  { style: { fontSize: 11, marginTop: 2 } },
-                  baseHint,
-                ) : null,
+                baseHint
+                  ? React.createElement(
+                      "div",
+                      { style: { fontSize: 11, marginTop: 2 } },
+                      baseHint,
+                    )
+                  : null,
               );
             };
-            return React.createElement(React.Fragment, null,
-              React.createElement(Row, { gutter: 12 },
-                React.createElement(Col, { span: 6 },
-                  React.createElement(Form.Item, {
-                    label: "Era",
-                    extra: evidenceExtra("era"),
-                  },
+            return React.createElement(
+              React.Fragment,
+              null,
+              React.createElement(
+                Row,
+                { gutter: 12 },
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    Form.Item,
+                    {
+                      label: "Era",
+                      extra: evidenceExtra("era"),
+                    },
                     React.createElement(Input, {
-                      value: era, onChange: (e: any) => setEra(e.target.value),
+                      value: era,
+                      onChange: (e: any) => setEra(e.target.value),
                       placeholder: "1940s",
                     }),
                   ),
                 ),
-                React.createElement(Col, { span: 6 },
-                  React.createElement(Form.Item, {
-                    label: "Country",
-                    extra: evidenceExtra("country"),
-                  },
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    Form.Item,
+                    {
+                      label: "Country",
+                      extra: evidenceExtra("country"),
+                    },
                     React.createElement(Input, {
                       value: country,
                       onChange: (e: any) => setCountry(e.target.value),
@@ -2803,22 +3121,30 @@ function SettingsCard({ draft, onSaveDraft }: any) {
                     }),
                   ),
                 ),
-                React.createElement(Col, { span: 6 },
-                  React.createElement(Form.Item, {
-                    label: "Genre",
-                    extra: evidenceExtra("genre"),
-                  },
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    Form.Item,
+                    {
+                      label: "Genre",
+                      extra: evidenceExtra("genre"),
+                    },
                     React.createElement(Input, {
                       value: genre,
                       onChange: (e: any) => setGenre(e.target.value),
                     }),
                   ),
                 ),
-                React.createElement(Col, { span: 6 },
-                  React.createElement(Form.Item, {
-                    label: "Tone",
-                    extra: evidenceExtra("tone"),
-                  },
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    Form.Item,
+                    {
+                      label: "Tone",
+                      extra: evidenceExtra("tone"),
+                    },
                     React.createElement(Input, {
                       value: tone,
                       onChange: (e: any) => setTone(e.target.value),
@@ -2826,56 +3152,70 @@ function SettingsCard({ draft, onSaveDraft }: any) {
                   ),
                 ),
               ),
-              React.createElement(Form.Item, {
-                label: "Story anchor",
-                extra: evidenceExtra(
-                  "story_anchor",
-                  "Narrative context propagated to every scene. Short (≤50 words).",
-                ),
-              },
+              React.createElement(
+                Form.Item,
+                {
+                  label: "Story anchor",
+                  extra: evidenceExtra(
+                    "story_anchor",
+                    "Narrative context propagated to every scene. Short (≤50 words).",
+                  ),
+                },
                 React.createElement(TextArea, {
                   value: storyAnchor,
                   onChange: (e: any) => setStoryAnchor(e.target.value),
                   rows: 2,
-                  placeholder: "A weathered Cuban fisherman's quiet test of endurance against the sea — dignified persistence, not defeat.",
+                  placeholder:
+                    "A weathered Cuban fisherman's quiet test of endurance against the sea — dignified persistence, not defeat.",
                 }),
               ),
-              React.createElement(Form.Item, {
-                label: "World bible (recurring set-design facts)",
-                extra: evidenceExtra(
-                  "world_bible",
-                  "Invariants that should hold across every scene's setting + style. Stops scene-to-scene drift. 30-80 words.",
-                ),
-              },
+              React.createElement(
+                Form.Item,
+                {
+                  label: "World bible (recurring set-design facts)",
+                  extra: evidenceExtra(
+                    "world_bible",
+                    "Invariants that should hold across every scene's setting + style. Stops scene-to-scene drift. 30-80 words.",
+                  ),
+                },
                 React.createElement(TextArea, {
                   value: worldBible,
                   onChange: (e: any) => setWorldBible(e.target.value),
                   rows: 3,
-                  placeholder: "Set design: wooden cottage-style fence; chalk-lettered wooden signs (NO blackboards); morning sun upper-right; cottagecore palette — pastel greens, soft creams.",
+                  placeholder:
+                    "Set design: wooden cottage-style fence; chalk-lettered wooden signs (NO blackboards); morning sun upper-right; cottagecore palette — pastel greens, soft creams.",
                 }),
               ),
-              React.createElement(Form.Item, {
-                label: "Style directives (one per line, ≤5)",
-                extra: evidenceExtra(
-                  "style_directives",
-                  "Layered on every scene's compose prompt. Things like palette, physics rules, continuity.",
-                ),
-              },
+              React.createElement(
+                Form.Item,
+                {
+                  label: "Style directives (one per line, ≤5)",
+                  extra: evidenceExtra(
+                    "style_directives",
+                    "Layered on every scene's compose prompt. Things like palette, physics rules, continuity.",
+                  ),
+                },
                 React.createElement(TextArea, {
                   value: directives,
                   onChange: (e: any) => setDirectives(e.target.value),
                   rows: 3,
-                  placeholder: "warm amber-rose palette\nreal-world physics, no floating objects",
+                  placeholder:
+                    "warm amber-rose palette\nreal-world physics, no floating objects",
                 }),
               ),
             );
           })(),
-          React.createElement(Form.Item, {
-            label: "Parallel concurrency (Stage 2 + 3 'Run all')",
-            extra: "Number of scenes to fire in parallel. 1 = sequential (current default). 3-5 = fast but watch for DashScope rate limits.",
-          },
+          React.createElement(
+            Form.Item,
+            {
+              label: "Parallel concurrency (Stage 2 + 3 'Run all')",
+              extra:
+                "Number of scenes to fire in parallel. 1 = sequential (current default). 3-5 = fast but watch for DashScope rate limits.",
+            },
             React.createElement(InputNumber, {
-              min: 1, max: 5, value: concurrency,
+              min: 1,
+              max: 5,
+              value: concurrency,
               onChange: (v: any) => setConcurrency(Number(v) || 5),
               style: { width: 100 },
             }),
@@ -2909,7 +3249,9 @@ function slugStateId(value: string): string {
 }
 
 function humanizeStateId(value: string): string {
-  return String(value || "").replace(/_/g, " ").trim();
+  return String(value || "")
+    .replace(/_/g, " ")
+    .trim();
 }
 
 function stateRecordId(state: any): string {
@@ -2924,14 +3266,18 @@ function normalizeStateRecord(state: any): any {
     return { id, title, content: title };
   }
   const title = String(state?.title || state?.id || "").trim();
-  const content = String(state?.content || state?.title || state?.id || "").trim();
+  const content = String(
+    state?.content || state?.title || state?.id || "",
+  ).trim();
   const id = slugStateId(state?.id || title || content);
   return { id, title: title || humanizeStateId(id), content };
 }
 
 function stateRecordLabel(state: any): string {
   const rec = normalizeStateRecord(state);
-  return rec.title && rec.title !== rec.id ? `${rec.title} (${rec.id})` : rec.id;
+  return rec.title && rec.title !== rec.id
+    ? `${rec.title} (${rec.id})`
+    : rec.id;
 }
 
 function sceneIdOf(scene: any): string {
@@ -2940,7 +3286,9 @@ function sceneIdOf(scene: any): string {
 
 function sceneLabel(scene: any): string {
   const id = sceneIdOf(scene);
-  const title = String(scene?.title || scene?.name || scene?.summary || "").trim();
+  const title = String(
+    scene?.title || scene?.name || scene?.summary || "",
+  ).trim();
   return title ? `${id} — ${title}` : id;
 }
 
@@ -2953,7 +3301,9 @@ function humanizeId(value: string): string {
 }
 
 function compactText(value: string, max = 76): string {
-  const text = String(value || "").replace(/\s+/g, " ").trim();
+  const text = String(value || "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trim()}...`;
 }
@@ -2970,7 +3320,9 @@ function activeStatesForChange(
     if (ch?.entity !== entity) return;
     if (!ch?.at_scene || String(ch.at_scene) > String(atScene)) return;
     if (ch.reset) active.clear();
-    (ch.remove || []).forEach((state: any) => active.delete(stateRecordId(state)));
+    (ch.remove || []).forEach((state: any) =>
+      active.delete(stateRecordId(state)),
+    );
     (ch.add || []).forEach((state: any) => {
       const rec = normalizeStateRecord(state);
       if (rec.id) active.set(rec.id, rec);
@@ -3005,9 +3357,12 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
     setSaving(true);
     try {
       const draft2 = JSON.parse(JSON.stringify(draft));
-      draft2.state_changes = next.filter((c) =>
-        c && c.entity && c.at_scene
-        && ((c.add && c.add.length) || (c.remove && c.remove.length) || c.reset),
+      draft2.state_changes = next.filter(
+        (c) =>
+          c &&
+          c.entity &&
+          c.at_scene &&
+          ((c.add && c.add.length) || (c.remove && c.remove.length) || c.reset),
       );
       await onSaveDraft(draft2, { quiet: true, reload: !quiet });
       if (!quiet) antMessage.success("State ledger saved.");
@@ -3094,7 +3449,8 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
           open ? "▼" : "▶",
         ),
         React.createElement(AntText, { strong: true }, "State timeline"),
-        React.createElement(AntText,
+        React.createElement(
+          AntText,
           {
             type: "secondary",
             style: {
@@ -3105,75 +3461,117 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
               minWidth: 0,
             },
           },
-          `· ${summary}`),
+          `· ${summary}`,
+        ),
       ),
       extra: open
         ? React.createElement(Button, {
-            type: "dashed", size: "small",
+            type: "dashed",
+            size: "small",
             icon: React.createElement(PlusOutlined),
-            onClick: () => setEditing({
-              entity: entities[0]?.id || "", at_scene: sceneIdOf(scenes[0]),
-              add: [{ id: "", title: "", content: "" }],
-              remove: [], reset: false, note: "",
-            }),
+            onClick: () =>
+              setEditing({
+                entity: entities[0]?.id || "",
+                at_scene: sceneIdOf(scenes[0]),
+                add: [{ id: "", title: "", content: "" }],
+                remove: [],
+                reset: false,
+                note: "",
+              }),
             children: "Add change",
           })
         : null,
     },
     open
-      ? React.createElement("div", null,
+      ? React.createElement(
+          "div",
+          null,
           entities.length === 0
             ? React.createElement(Empty, {
-                description: "No characters or settings yet — add some under Stage 0.",
+                description:
+                  "No characters or settings yet — add some under Stage 0.",
               })
             : null,
           ...groupedByEntity.map(({ entity, changes }) =>
             React.createElement(
               "div",
               { key: entity.id, style: { marginBottom: 12 } },
-              React.createElement(AntText, { strong: true, style: { fontSize: 12 } },
+              React.createElement(
+                AntText,
+                { strong: true, style: { fontSize: 12 } },
                 `${
                   entity.kind === "character"
                     ? "character"
-                    : entity.kind === "prop" ? "prop" : "setting"
-                }: ${entity.id}`),
+                    : entity.kind === "prop"
+                    ? "prop"
+                    : "setting"
+                }: ${entity.id}`,
+              ),
               changes.length === 0
-                ? React.createElement(AntText,
-                    { type: "secondary", style: { fontSize: 11, display: "block" } },
-                    "  (canonical throughout — no state changes)")
-                : React.createElement("div", null,
+                ? React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: { fontSize: 11, display: "block" },
+                    },
+                    "  (canonical throughout — no state changes)",
+                  )
+                : React.createElement(
+                    "div",
+                    null,
                     ...changes.map((c) => {
                       const origIdx = ledger.indexOf(c);
                       const labelParts = [
                         c.reset && "↺ RESET",
-                        c.remove?.length && `− ${c.remove.map(stateRecordId).join(", ")}`,
-                        c.add?.length && `+ ${c.add.map(stateRecordLabel).join(", ")}`,
-                      ].filter(Boolean).join("  |  ");
+                        c.remove?.length &&
+                          `− ${c.remove.map(stateRecordId).join(", ")}`,
+                        c.add?.length &&
+                          `+ ${c.add.map(stateRecordLabel).join(", ")}`,
+                      ]
+                        .filter(Boolean)
+                        .join("  |  ");
                       return React.createElement(
                         "div",
                         {
                           key: origIdx,
                           style: {
-                            padding: "4px 8px", marginTop: 2,
-                            border: "1px solid #eee", borderRadius: 4,
-                            display: "flex", alignItems: "center", gap: 8,
+                            padding: "4px 8px",
+                            marginTop: 2,
+                            border: "1px solid #eee",
+                            borderRadius: 4,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
                           },
                         },
-                        React.createElement(Tag, { color: "blue" }, `@${c.at_scene}`),
-                        React.createElement(AntText, { style: { fontSize: 12, flex: 1 } },
-                          labelParts || "(empty change)"),
+                        React.createElement(
+                          Tag,
+                          { color: "blue" },
+                          `@${c.at_scene}`,
+                        ),
+                        React.createElement(
+                          AntText,
+                          { style: { fontSize: 12, flex: 1 } },
+                          labelParts || "(empty change)",
+                        ),
                         c.note
-                          ? React.createElement(AntText,
+                          ? React.createElement(
+                              AntText,
                               { type: "secondary", style: { fontSize: 11 } },
-                              `— ${c.note}`)
+                              `— ${c.note}`,
+                            )
                           : null,
                         React.createElement(Button, {
-                          size: "small", type: "text",
+                          size: "small",
+                          type: "text",
                           icon: React.createElement(EditOutlined),
-                          onClick: () => setEditing({ ...c, _origIdx: origIdx }),
+                          onClick: () =>
+                            setEditing({ ...c, _origIdx: origIdx }),
                         }),
                         React.createElement(Button, {
-                          size: "small", type: "text", danger: true,
+                          size: "small",
+                          type: "text",
+                          danger: true,
                           icon: React.createElement(DeleteOutlined),
                           onClick: () => deleteChange(origIdx),
                         }),
@@ -3186,7 +3584,11 @@ function StateTimelineCard({ draft, onSaveDraft }: any) {
       : null,
     editing
       ? React.createElement(StateChangeEditor, {
-          change: editing, entities, scenes, ledger, saving,
+          change: editing,
+          entities,
+          scenes,
+          ledger,
+          saving,
           onCancel: () => setEditing(null),
           onSubmit: upsertChange,
           onAutoSubmit: (changePatch: any) => upsertChange(changePatch, false),
@@ -3218,10 +3620,12 @@ function StateChangeEditor({
   );
   const [reset, setReset] = React.useState(!!change.reset);
   const [note, setNote] = React.useState(change.note || "");
-  const sceneOptions = scenes.map((scene: any) => ({
-    value: sceneIdOf(scene),
-    label: sceneLabel(scene),
-  })).filter((option: any) => option.value);
+  const sceneOptions = scenes
+    .map((scene: any) => ({
+      value: sceneIdOf(scene),
+      label: sceneLabel(scene),
+    }))
+    .filter((option: any) => option.value);
   const activeStates = activeStatesForChange(
     ledger || [],
     entity,
@@ -3230,7 +3634,11 @@ function StateChangeEditor({
   );
   const removeOptions = [
     ...activeStates,
-    ...removeStates.map((id) => ({ id, title: humanizeStateId(id), content: "" })),
+    ...removeStates.map((id) => ({
+      id,
+      title: humanizeStateId(id),
+      content: "",
+    })),
   ]
     .filter((state: any) => state?.id)
     .reduce((acc: any[], state: any) => {
@@ -3240,9 +3648,10 @@ function StateChangeEditor({
     .sort((a: any, b: any) => a.id.localeCompare(b.id))
     .map((state: any) => ({
       value: state.id,
-      label: state.title && state.title !== state.id
-        ? `${state.title} (${state.id})`
-        : state.id,
+      label:
+        state.title && state.title !== state.id
+          ? `${state.title} (${state.id})`
+          : state.id,
     }));
   const updateAddState = (idx: number, patch: any) =>
     setAddStates((states: any[]) =>
@@ -3276,10 +3685,7 @@ function StateChangeEditor({
       reset,
       note: note.trim(),
     };
-  }, [
-    addStates, atScene, change._origIdx, entity, note,
-    removeStates, reset,
-  ]);
+  }, [addStates, atScene, change._origIdx, entity, note, removeStates, reset]);
   React.useEffect(() => {
     lastAutoSaveRef.current = JSON.stringify(buildChange());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -3327,12 +3733,21 @@ function StateChangeEditor({
       okText: "Done",
       width: 560,
     },
-    React.createElement(Form, { layout: "vertical" },
-      React.createElement(Row, { gutter: 12 },
-        React.createElement(Col, { span: 14 },
-          React.createElement(Form.Item, { label: "Entity (character or setting)" },
+    React.createElement(
+      Form,
+      { layout: "vertical" },
+      React.createElement(
+        Row,
+        { gutter: 12 },
+        React.createElement(
+          Col,
+          { span: 14 },
+          React.createElement(
+            Form.Item,
+            { label: "Entity (character or setting)" },
             React.createElement(Select, {
-              value: entity, onChange: setEntity,
+              value: entity,
+              onChange: setEntity,
               style: { width: "100%" },
               options: entities.map((e: any) => ({
                 value: e.id,
@@ -3341,10 +3756,14 @@ function StateChangeEditor({
             }),
           ),
         ),
-        React.createElement(Col, { span: 10 },
-          React.createElement(Form.Item, {
-            label: "At scene",
-          },
+        React.createElement(
+          Col,
+          { span: 10 },
+          React.createElement(
+            Form.Item,
+            {
+              label: "At scene",
+            },
             React.createElement(Select, {
               value: atScene,
               onChange: setAtScene,
@@ -3357,10 +3776,13 @@ function StateChangeEditor({
           ),
         ),
       ),
-      React.createElement(Form.Item, {
-        label: "Add states",
-        extra: "Title becomes the concise state id; content is used in Stage 2 prompting.",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Add states",
+          extra:
+            "Title becomes the concise state id; content is used in Stage 2 prompting.",
+        },
         React.createElement(
           "div",
           { style: { display: "grid", gap: 8 } },
@@ -3383,7 +3805,8 @@ function StateChangeEditor({
                   { span: 14 },
                   React.createElement(Input, {
                     value: state.title,
-                    onChange: (e: any) => updateAddState(idx, { title: e.target.value }),
+                    onChange: (e: any) =>
+                      updateAddState(idx, { title: e.target.value }),
                     placeholder: "Title, e.g. distressed hair",
                   }),
                 ),
@@ -3423,8 +3846,10 @@ function StateChangeEditor({
               ),
               React.createElement(TextArea, {
                 value: state.content,
-                onChange: (e: any) => updateAddState(idx, { content: e.target.value }),
-                placeholder: "Content used for generation, e.g. Sparrow's head feathers are ruffled and yellowed, making him look distressed.",
+                onChange: (e: any) =>
+                  updateAddState(idx, { content: e.target.value }),
+                placeholder:
+                  "Content used for generation, e.g. Sparrow's head feathers are ruffled and yellowed, making him look distressed.",
                 rows: 2,
                 style: { marginTop: 8 },
               }),
@@ -3439,12 +3864,14 @@ function StateChangeEditor({
           }),
         ),
       ),
-      React.createElement(Form.Item, {
-        label: "Remove states",
-        extra: activeStates.length
-          ? "Pick from states already active for this entity at this point in the story."
-          : "No prior active states for this entity before this scene.",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label: "Remove states",
+          extra: activeStates.length
+            ? "Pick from states already active for this entity at this point in the story."
+            : "No prior active states for this entity before this scene.",
+        },
         React.createElement(Select, {
           mode: "multiple",
           value: removeStates,
@@ -3455,10 +3882,17 @@ function StateChangeEditor({
           style: { width: "100%" },
         }),
       ),
-      React.createElement(Form.Item, { label: "Reset (clear ALL prior state for this entity)" },
-        React.createElement(antd.Switch, { checked: reset, onChange: setReset }),
+      React.createElement(
+        Form.Item,
+        { label: "Reset (clear ALL prior state for this entity)" },
+        React.createElement(antd.Switch, {
+          checked: reset,
+          onChange: setReset,
+        }),
       ),
-      React.createElement(Form.Item, { label: "Note (why this change happens — for your reference)" },
+      React.createElement(
+        Form.Item,
+        { label: "Note (why this change happens — for your reference)" },
         React.createElement(Input, {
           value: note,
           onChange: (e: any) => setNote(e.target.value),
@@ -3569,21 +4003,38 @@ function StyleSwatchPicker({ styles, value, onChange }: any) {
 // ── decompose form ───────────────────────────────────────────────────
 
 function DecomposeForm({
-  duration, setDuration,
-  styleHint, setStyleHint,
-  audience, setAudience,
-  voice, setVoice,
-  era, setEra,
-  country, setCountry,
-  genre, setGenre,
-  tone, setTone,
-  storyAnchor, setStoryAnchor,
-  styleDirectives, setStyleDirectives,
-  worldBible, setWorldBible,
-  frameProvider, setFrameProvider,
-  videoProvider, setVideoProvider,
-  targetScenes, setTargetScenes,
-  styles, busy, activeStage, status,
+  duration,
+  setDuration,
+  styleHint,
+  setStyleHint,
+  audience,
+  setAudience,
+  voice,
+  setVoice,
+  era,
+  setEra,
+  country,
+  setCountry,
+  genre,
+  setGenre,
+  tone,
+  setTone,
+  storyAnchor,
+  setStoryAnchor,
+  styleDirectives,
+  setStyleDirectives,
+  worldBible,
+  setWorldBible,
+  frameProvider,
+  setFrameProvider,
+  videoProvider,
+  setVideoProvider,
+  targetScenes,
+  setTargetScenes,
+  styles,
+  busy,
+  activeStage,
+  status,
   onSubmit,
 }: any) {
   const styleOptions = (styles ?? []).map((s: StyleEntry) => ({
@@ -3594,9 +4045,15 @@ function DecomposeForm({
   return React.createElement(
     Form,
     { layout: "vertical" },
-    React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 6 },
-        React.createElement(Form.Item, { label: "Target duration (s)" },
+    React.createElement(
+      Row,
+      { gutter: 16 },
+      React.createElement(
+        Col,
+        { span: 6 },
+        React.createElement(
+          Form.Item,
+          { label: "Target duration (s)" },
           React.createElement(InputNumber, {
             min: 20,
             max: 600,
@@ -3606,25 +4063,35 @@ function DecomposeForm({
           }),
         ),
       ),
-      React.createElement(Col, { span: 6 },
-        React.createElement(Form.Item, {
-          label: "Beat count (optional)",
-          extra: "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
-        },
+      React.createElement(
+        Col,
+        { span: 6 },
+        React.createElement(
+          Form.Item,
+          {
+            label: "Beat count (optional)",
+            extra:
+              "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
+          },
           React.createElement(InputNumber, {
             min: 3,
             max: 60,
             value: targetScenes ?? null,
-            onChange: (v: any) => setTargetScenes(v == null ? undefined : Number(v)),
+            onChange: (v: any) =>
+              setTargetScenes(v == null ? undefined : Number(v)),
             placeholder: "auto",
             style: { width: "100%" },
           }),
         ),
       ),
-      React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, {
-          label: "Style hint (optional — LLM picks if blank)",
-        },
+      React.createElement(
+        Col,
+        { span: 12 },
+        React.createElement(
+          Form.Item,
+          {
+            label: "Style hint (optional — LLM picks if blank)",
+          },
           React.createElement(Select, {
             allowClear: true,
             placeholder: "Let the LLM pick",
@@ -3643,9 +4110,15 @@ function DecomposeForm({
         ),
       ),
     ),
-    React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, { label: "Audience" },
+    React.createElement(
+      Row,
+      { gutter: 16 },
+      React.createElement(
+        Col,
+        { span: 12 },
+        React.createElement(
+          Form.Item,
+          { label: "Audience" },
           React.createElement(Input, {
             value: audience,
             onChange: (e: any) => setAudience(e.target.value),
@@ -3653,15 +4126,22 @@ function DecomposeForm({
           }),
         ),
       ),
-      React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, { label: "Narration voice (CosyVoice)" },
+      React.createElement(
+        Col,
+        { span: 12 },
+        React.createElement(
+          Form.Item,
+          { label: "Narration voice (CosyVoice)" },
           React.createElement(Select, {
             value: voice,
             onChange: setVoice,
             options: [
               { label: "longshu_v2 (deep male)", value: "longshu_v2" },
               { label: "longwan_v2 (warm male)", value: "longwan_v2" },
-              { label: "longxiaoxia_v2 (warm female)", value: "longxiaoxia_v2" },
+              {
+                label: "longxiaoxia_v2 (warm female)",
+                value: "longxiaoxia_v2",
+              },
               { label: "longxiaochun_v2 (neutral)", value: "longxiaochun_v2" },
             ],
             style: { width: "100%" },
@@ -3670,23 +4150,36 @@ function DecomposeForm({
       ),
     ),
 
-    React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, { label: "Image model" },
+    React.createElement(
+      Row,
+      { gutter: 16 },
+      React.createElement(
+        Col,
+        { span: 12 },
+        React.createElement(
+          Form.Item,
+          { label: "Image model" },
           React.createElement(Select, {
             value: frameProvider,
             onChange: setFrameProvider,
             style: { width: "100%" },
             options: [
-              { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+              {
+                value: "gpt-image-2-dashscope",
+                label: "gpt-image-2 (dashscope)",
+              },
               { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
               { value: "qwen-image", label: "qwen-image-2.0-pro" },
             ],
           }),
         ),
       ),
-      React.createElement(Col, { span: 12 },
-        React.createElement(Form.Item, { label: "Video model" },
+      React.createElement(
+        Col,
+        { span: 12 },
+        React.createElement(
+          Form.Item,
+          { label: "Video model" },
           React.createElement(Select, {
             value: videoProvider,
             onChange: setVideoProvider,
@@ -3706,75 +4199,115 @@ function DecomposeForm({
       Card,
       {
         size: "small",
-        title: React.createElement(AntText, { type: "secondary" },
-          "Story constraints (optional — LLM auto-picks if blank)"),
+        title: React.createElement(
+          AntText,
+          { type: "secondary" },
+          "Story constraints (optional — LLM auto-picks if blank)",
+        ),
         style: { marginBottom: 12, background: "#fafafa" },
         bodyStyle: { padding: 12 },
       },
-      React.createElement(Row, { gutter: 12 },
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Era" },
+      React.createElement(
+        Row,
+        { gutter: 12 },
+        React.createElement(
+          Col,
+          { span: 6 },
+          React.createElement(
+            Form.Item,
+            { label: "Era" },
             React.createElement(Input, {
-              value: era, onChange: (e: any) => setEra(e.target.value),
+              value: era,
+              onChange: (e: any) => setEra(e.target.value),
               placeholder: "1940s",
             }),
           ),
         ),
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Country" },
+        React.createElement(
+          Col,
+          { span: 6 },
+          React.createElement(
+            Form.Item,
+            { label: "Country" },
             React.createElement(Input, {
-              value: country, onChange: (e: any) => setCountry(e.target.value),
+              value: country,
+              onChange: (e: any) => setCountry(e.target.value),
               placeholder: "Cuba",
             }),
           ),
         ),
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Genre" },
+        React.createElement(
+          Col,
+          { span: 6 },
+          React.createElement(
+            Form.Item,
+            { label: "Genre" },
             React.createElement(Input, {
-              value: genre, onChange: (e: any) => setGenre(e.target.value),
+              value: genre,
+              onChange: (e: any) => setGenre(e.target.value),
               placeholder: "tragedy / triumph / coming-of-age",
             }),
           ),
         ),
-        React.createElement(Col, { span: 6 },
-          React.createElement(Form.Item, { label: "Tone" },
+        React.createElement(
+          Col,
+          { span: 6 },
+          React.createElement(
+            Form.Item,
+            { label: "Tone" },
             React.createElement(Input, {
-              value: tone, onChange: (e: any) => setTone(e.target.value),
+              value: tone,
+              onChange: (e: any) => setTone(e.target.value),
               placeholder: "somber / playful / hopeful",
             }),
           ),
         ),
       ),
-      React.createElement(Form.Item, {
-        label: "Story anchor (overall narrative context — propagates to every scene)",
-        extra: "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label:
+            "Story anchor (overall narrative context — propagates to every scene)",
+          extra:
+            "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
+        },
         React.createElement(TextArea, {
           value: storyAnchor,
           onChange: (e: any) => setStoryAnchor(e.target.value),
-          placeholder: "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
+          placeholder:
+            "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
           rows: 2,
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "World bible — recurring set-design facts (applies to every scene)",
-        extra: "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label:
+            "World bible — recurring set-design facts (applies to every scene)",
+          extra:
+            "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
+        },
         React.createElement(TextArea, {
           value: worldBible,
           onChange: (e: any) => setWorldBible(e.target.value),
-          placeholder: "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
+          placeholder:
+            "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
           rows: 3,
         }),
       ),
-      React.createElement(Form.Item, {
-        label: "Style directives (one per line — applied on top of every scene)",
-        extra: "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
-      },
+      React.createElement(
+        Form.Item,
+        {
+          label:
+            "Style directives (one per line — applied on top of every scene)",
+          extra:
+            "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
+        },
         React.createElement(TextArea, {
           value: styleDirectives,
           onChange: (e: any) => setStyleDirectives(e.target.value),
-          placeholder: "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
+          placeholder:
+            "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
           rows: 3,
         }),
       ),
@@ -3783,12 +4316,15 @@ function DecomposeForm({
     status && !status.has_dashscope
       ? React.createElement(Alert, {
           type: "warning",
-          message: "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
+          message:
+            "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
           showIcon: true,
           style: { marginBottom: 12 },
         })
       : null,
-    React.createElement(Form.Item, null,
+    React.createElement(
+      Form.Item,
+      null,
       React.createElement(Button, {
         type: "primary",
         icon: React.createElement(ScissorOutlined),
@@ -3804,6 +4340,64 @@ function DecomposeForm({
 
 // ── beat sheet view: HITL gate between decompose (Pass 1) and craft (Pass 2) ──
 
+/**
+ * Live Pass-1 decompose stream. While the producer LLM drafts the beat
+ * sheet, the backend streams the raw draft-in-progress over SSE
+ * (decompose_progress events each carry the FULL accumulated text). We
+ * render it growing in a scrolling mono panel — the user watches the
+ * work happen instead of staring at an opaque spinner. Auto-scrolls to
+ * the tail as text arrives.
+ */
+function LiveDecomposePanel({ show, text, streaming }: any) {
+  const preRef = React.useRef<any>(null);
+  React.useEffect(() => {
+    const el = preRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [text]);
+  if (!show) return null;
+  const chars = (text || "").length;
+  return React.createElement(
+    Card,
+    {
+      size: "small",
+      style: { margin: "0 0 16px", borderRadius: 8, background: "#0b1021" },
+      bodyStyle: { padding: 14 },
+    },
+    React.createElement(
+      Space,
+      { style: { marginBottom: 8 } },
+      React.createElement(Spin, { size: "small" }),
+      React.createElement(
+        AntText,
+        { style: { color: "#cdd3e1" }, strong: true },
+        streaming ? "Producer is drafting the beat sheet…" : "Finishing up…",
+      ),
+      chars
+        ? React.createElement(Tag, { color: "blue" }, `${chars} chars`)
+        : null,
+    ),
+    React.createElement(
+      "pre",
+      {
+        ref: preRef,
+        style: {
+          margin: 0,
+          maxHeight: 220,
+          overflow: "auto",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          fontFamily:
+            "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+          fontSize: 12,
+          lineHeight: 1.5,
+          color: "#9fb0d0",
+        },
+      },
+      text || "Waiting for the model to start streaming…",
+    ),
+  );
+}
+
 function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
   const beats: any[] = draft.beats || [];
   const chars: any[] = draft.assets?.characters || [];
@@ -3815,10 +4409,14 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
   // Locally-edited beats — copy out so user edits don't mutate the
   // server-returned draft directly. POSTed via onCraft on click.
   const [edited, setEdited] = React.useState<any[]>(beats);
-  React.useEffect(() => { setEdited(beats); }, [draft.beats]);
+  React.useEffect(() => {
+    setEdited(beats);
+  }, [draft.beats]);
 
   const updateBeat = (idx: number, patch: any) => {
-    setEdited((prev) => prev.map((b, i) => i === idx ? { ...b, ...patch } : b));
+    setEdited((prev) =>
+      prev.map((b, i) => (i === idx ? { ...b, ...patch } : b)),
+    );
   };
   const deleteBeat = (idx: number) => {
     setEdited((prev) => prev.filter((_, i) => i !== idx));
@@ -3833,26 +4431,32 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
     });
   };
   const addBeat = () => {
-    setEdited((prev) => [...prev, {
-      name: `new_beat_${prev.length}`,
-      summary: "",
-      chars_used: [],
-      props_used: [],
-      setting_used: null,
-      est_seconds: 8,
-      has_narration: true,
-    }]);
+    setEdited((prev) => [
+      ...prev,
+      {
+        name: `new_beat_${prev.length}`,
+        summary: "",
+        chars_used: [],
+        props_used: [],
+        setting_used: null,
+        est_seconds: 8,
+        has_narration: true,
+      },
+    ]);
   };
 
   const totalSeconds = edited.reduce(
-    (s, b) => s + Number(b.est_seconds || 8), 0,
+    (s, b) => s + Number(b.est_seconds || 8),
+    0,
   );
 
   return React.createElement(
     Card,
     {
       size: "small",
-      title: React.createElement(Space, null,
+      title: React.createElement(
+        Space,
+        null,
         React.createElement(ScissorOutlined),
         "Beat sheet — review before crafting scenes",
       ),
@@ -3864,12 +4468,18 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
         size: "large",
         icon: React.createElement(PlayCircleOutlined),
         onClick: () => onCraft(edited),
-        children: `Craft ${edited.length} scene${edited.length === 1 ? "" : "s"}`,
+        children: `Craft ${edited.length} scene${
+          edited.length === 1 ? "" : "s"
+        }`,
       }),
     },
     // Anchor summary — small, since the next pass will show them in detail.
-    React.createElement(Paragraph, { type: "secondary", style: { fontSize: 12 } },
-      `Anchors locked: ${chars.length} character(s), ${props.length} prop(s), ${scene_refs.length} setting(s), style "${styleId || "?"}". `,
+    React.createElement(
+      Paragraph,
+      { type: "secondary", style: { fontSize: 12 } },
+      `Anchors locked: ${chars.length} character(s), ${props.length} prop(s), ${
+        scene_refs.length
+      } setting(s), style "${styleId || "?"}". `,
       `Total estimated runtime: ${totalSeconds}s across ${edited.length} beat(s).`,
     ),
 
@@ -3878,165 +4488,257 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
       ? React.createElement(Empty, {
           description: "No beats. Add one or re-decompose from the source.",
         })
-      : React.createElement(Space, {
-          direction: "vertical", size: 8, style: { width: "100%" },
-        },
-          ...edited.map((b, idx) => React.createElement(
-            Card,
-            {
-              key: idx,
-              size: "small",
-              bodyStyle: { padding: 12 },
-              style: { background: "#fafafa" },
-              title: React.createElement(
-                Space, { size: 8 },
+      : React.createElement(
+          Space,
+          {
+            direction: "vertical",
+            size: 8,
+            style: { width: "100%" },
+          },
+          ...edited.map((b, idx) =>
+            React.createElement(
+              Card,
+              {
+                key: idx,
+                size: "small",
+                bodyStyle: { padding: 12 },
+                style: { background: "#fafafa" },
+                title: React.createElement(
+                  Space,
+                  { size: 8 },
+                  React.createElement(
+                    AntText,
+                    { strong: true, style: { fontSize: 13 } },
+                    `Beat ${idx + 1}`,
+                  ),
+                  React.createElement(Input, {
+                    size: "small",
+                    value: b.name,
+                    onChange: (e: any) =>
+                      updateBeat(idx, { name: e.target.value }),
+                    placeholder: "beat name (snake_case)",
+                    style: { width: 240 },
+                  }),
+                ),
+                extra: React.createElement(
+                  Space,
+                  { size: 2 },
+                  React.createElement(
+                    Tooltip,
+                    { title: "Move up" },
+                    React.createElement(Button, {
+                      size: "small",
+                      type: "text",
+                      disabled: idx === 0,
+                      icon: React.createElement(
+                        AntText,
+                        { style: { fontSize: 14 } },
+                        "↑",
+                      ),
+                      onClick: () => moveBeat(idx, -1),
+                    }),
+                  ),
+                  React.createElement(
+                    Tooltip,
+                    { title: "Move down" },
+                    React.createElement(Button, {
+                      size: "small",
+                      type: "text",
+                      disabled: idx === edited.length - 1,
+                      icon: React.createElement(
+                        AntText,
+                        { style: { fontSize: 14 } },
+                        "↓",
+                      ),
+                      onClick: () => moveBeat(idx, 1),
+                    }),
+                  ),
+                  React.createElement(
+                    Tooltip,
+                    { title: "Delete beat" },
+                    React.createElement(Button, {
+                      size: "small",
+                      type: "text",
+                      danger: true,
+                      icon: React.createElement(DeleteOutlined),
+                      onClick: () => deleteBeat(idx),
+                    }),
+                  ),
+                ),
+              },
+              // Summary: full-width textarea, the most important field.
+              React.createElement(TextArea, {
+                value: b.summary,
+                onChange: (e: any) =>
+                  updateBeat(idx, { summary: e.target.value }),
+                placeholder:
+                  "1-3 sentence summary of what happens in this beat",
+                autoSize: { minRows: 2, maxRows: 5 },
+                style: { marginBottom: 8 },
+              }),
+              // Anchors + duration in a row beneath the summary.
+              React.createElement(
+                Row,
+                { gutter: 8, align: "middle" },
                 React.createElement(
-                  AntText, { strong: true, style: { fontSize: 13 } },
-                  `Beat ${idx + 1}`,
-                ),
-                React.createElement(Input, {
-                  size: "small",
-                  value: b.name,
-                  onChange: (e: any) => updateBeat(idx, { name: e.target.value }),
-                  placeholder: "beat name (snake_case)",
-                  style: { width: 240 },
-                }),
-              ),
-              extra: React.createElement(
-                Space, { size: 2 },
-                React.createElement(Tooltip, { title: "Move up" },
-                  React.createElement(Button, {
-                    size: "small", type: "text",
-                    disabled: idx === 0,
-                    icon: React.createElement(AntText, { style: { fontSize: 14 } }, "↑"),
-                    onClick: () => moveBeat(idx, -1),
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: {
+                        fontSize: 11,
+                        display: "block",
+                        marginBottom: 2,
+                      },
+                    },
+                    "characters in this beat",
+                  ),
+                  React.createElement(Select, {
+                    mode: "multiple",
+                    allowClear: true,
+                    placeholder: chars.length
+                      ? "select characters"
+                      : "(no characters defined)",
+                    // Defensive: a string value would split into
+                    // letter-tags under mode=multiple; always coerce to
+                    // an array. (Belt-and-suspenders vs the data fix.)
+                    value: Array.isArray(b.chars_used)
+                      ? b.chars_used
+                      : b.chars_used
+                      ? [b.chars_used]
+                      : [],
+                    onChange: (v: any) => updateBeat(idx, { chars_used: v }),
+                    options: chars.map((c: any) => ({
+                      value: c.id,
+                      label: c.id,
+                      title: c.description || c.id,
+                    })),
+                    style: { width: "100%" },
+                    disabled: !chars.length,
                   }),
                 ),
-                React.createElement(Tooltip, { title: "Move down" },
-                  React.createElement(Button, {
-                    size: "small", type: "text",
-                    disabled: idx === edited.length - 1,
-                    icon: React.createElement(AntText, { style: { fontSize: 14 } }, "↓"),
-                    onClick: () => moveBeat(idx, 1),
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: {
+                        fontSize: 11,
+                        display: "block",
+                        marginBottom: 2,
+                      },
+                    },
+                    "props in this beat",
+                  ),
+                  React.createElement(Select, {
+                    mode: "multiple",
+                    allowClear: true,
+                    placeholder: props.length
+                      ? "select props"
+                      : "(no props defined)",
+                    value: Array.isArray(b.props_used)
+                      ? b.props_used
+                      : b.props_used
+                      ? [b.props_used]
+                      : [],
+                    onChange: (v: any) => updateBeat(idx, { props_used: v }),
+                    options: props.map((p: any) => ({
+                      value: p.id,
+                      label: p.id,
+                      title: p.description || p.id,
+                    })),
+                    style: { width: "100%" },
+                    disabled: !props.length,
                   }),
                 ),
-                React.createElement(Tooltip, { title: "Delete beat" },
-                  React.createElement(Button, {
-                    size: "small", type: "text", danger: true,
-                    icon: React.createElement(DeleteOutlined),
-                    onClick: () => deleteBeat(idx),
+                React.createElement(
+                  Col,
+                  { span: 6 },
+                  React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: {
+                        fontSize: 11,
+                        display: "block",
+                        marginBottom: 2,
+                      },
+                    },
+                    "setting",
+                  ),
+                  React.createElement(Select, {
+                    allowClear: true,
+                    placeholder: scene_refs.length
+                      ? "select setting"
+                      : "(no settings defined)",
+                    value: b.setting_used || undefined,
+                    onChange: (v: any) =>
+                      updateBeat(idx, { setting_used: v || null }),
+                    options: scene_refs.map((r: any) => ({
+                      value: r.id,
+                      label: r.id,
+                      title: r.description || r.id,
+                    })),
+                    style: { width: "100%" },
+                    disabled: !scene_refs.length,
                   }),
                 ),
-              ),
-            },
-            // Summary: full-width textarea, the most important field.
-            React.createElement(TextArea, {
-              value: b.summary,
-              onChange: (e: any) => updateBeat(idx, { summary: e.target.value }),
-              placeholder: "1-3 sentence summary of what happens in this beat",
-              autoSize: { minRows: 2, maxRows: 5 },
-              style: { marginBottom: 8 },
-            }),
-            // Anchors + duration in a row beneath the summary.
-            React.createElement(Row, { gutter: 8, align: "middle" },
-              React.createElement(Col, { span: 6 },
-                React.createElement(AntText, {
-                  type: "secondary",
-                  style: { fontSize: 11, display: "block", marginBottom: 2 },
-                }, "characters in this beat"),
-                React.createElement(Select, {
-                  mode: "multiple",
-                  allowClear: true,
-                  placeholder: chars.length
-                    ? "select characters"
-                    : "(no characters defined)",
-                  // Defensive: a string value would split into
-                  // letter-tags under mode=multiple; always coerce to
-                  // an array. (Belt-and-suspenders vs the data fix.)
-                  value: Array.isArray(b.chars_used)
-                    ? b.chars_used
-                    : (b.chars_used ? [b.chars_used] : []),
-                  onChange: (v: any) => updateBeat(idx, { chars_used: v }),
-                  options: chars.map((c: any) => ({
-                    value: c.id,
-                    label: c.id,
-                    title: c.description || c.id,
-                  })),
-                  style: { width: "100%" },
-                  disabled: !chars.length,
-                }),
-              ),
-              React.createElement(Col, { span: 6 },
-                React.createElement(AntText, {
-                  type: "secondary",
-                  style: { fontSize: 11, display: "block", marginBottom: 2 },
-                }, "props in this beat"),
-                React.createElement(Select, {
-                  mode: "multiple",
-                  allowClear: true,
-                  placeholder: props.length
-                    ? "select props"
-                    : "(no props defined)",
-                  value: Array.isArray(b.props_used)
-                    ? b.props_used
-                    : (b.props_used ? [b.props_used] : []),
-                  onChange: (v: any) => updateBeat(idx, { props_used: v }),
-                  options: props.map((p: any) => ({
-                    value: p.id,
-                    label: p.id,
-                    title: p.description || p.id,
-                  })),
-                  style: { width: "100%" },
-                  disabled: !props.length,
-                }),
-              ),
-              React.createElement(Col, { span: 6 },
-                React.createElement(AntText, {
-                  type: "secondary",
-                  style: { fontSize: 11, display: "block", marginBottom: 2 },
-                }, "setting"),
-                React.createElement(Select, {
-                  allowClear: true,
-                  placeholder: scene_refs.length
-                    ? "select setting"
-                    : "(no settings defined)",
-                  value: b.setting_used || undefined,
-                  onChange: (v: any) => updateBeat(idx, { setting_used: v || null }),
-                  options: scene_refs.map((r: any) => ({
-                    value: r.id,
-                    label: r.id,
-                    title: r.description || r.id,
-                  })),
-                  style: { width: "100%" },
-                  disabled: !scene_refs.length,
-                }),
-              ),
-              React.createElement(Col, { span: 3 },
-                React.createElement(AntText, {
-                  type: "secondary",
-                  style: { fontSize: 11, display: "block", marginBottom: 2 },
-                }, "duration (s)"),
-                React.createElement(InputNumber, {
-                  min: 3, max: 30,
-                  value: b.est_seconds,
-                  onChange: (v: any) => updateBeat(idx, { est_seconds: v ?? 8 }),
-                  style: { width: "100%" },
-                }),
-              ),
-              React.createElement(Col, { span: 3 },
-                React.createElement(AntText, {
-                  type: "secondary",
-                  style: { fontSize: 11, display: "block", marginBottom: 2 },
-                }, "narration"),
-                React.createElement(antd.Switch, {
-                  checked: !!b.has_narration,
-                  onChange: (v: any) => updateBeat(idx, { has_narration: !!v }),
-                }),
+                React.createElement(
+                  Col,
+                  { span: 3 },
+                  React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: {
+                        fontSize: 11,
+                        display: "block",
+                        marginBottom: 2,
+                      },
+                    },
+                    "duration (s)",
+                  ),
+                  React.createElement(InputNumber, {
+                    min: 3,
+                    max: 30,
+                    value: b.est_seconds,
+                    onChange: (v: any) =>
+                      updateBeat(idx, { est_seconds: v ?? 8 }),
+                    style: { width: "100%" },
+                  }),
+                ),
+                React.createElement(
+                  Col,
+                  { span: 3 },
+                  React.createElement(
+                    AntText,
+                    {
+                      type: "secondary",
+                      style: {
+                        fontSize: 11,
+                        display: "block",
+                        marginBottom: 2,
+                      },
+                    },
+                    "narration",
+                  ),
+                  React.createElement(antd.Switch, {
+                    checked: !!b.has_narration,
+                    onChange: (v: any) =>
+                      updateBeat(idx, { has_narration: !!v }),
+                  }),
+                ),
               ),
             ),
-          )),
+          ),
         ),
-    React.createElement("div", { style: { marginTop: 12, textAlign: "center" } },
+    React.createElement(
+      "div",
+      { style: { marginTop: 12, textAlign: "center" } },
       React.createElement(Button, {
         size: "small",
         icon: React.createElement(PlusOutlined),
@@ -4044,10 +4746,12 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
         children: "Add beat",
       }),
     ),
-    React.createElement(Paragraph, {
-      type: "secondary",
-      style: { fontSize: 11, marginTop: 16 },
-    },
+    React.createElement(
+      Paragraph,
+      {
+        type: "secondary",
+        style: { fontSize: 11, marginTop: 16 },
+      },
       "Crafting scenes from the beats is one LLM call per project — costs ~$0.05 in tokens. Beats can be re-edited and re-crafted as often as needed; existing per-scene refs/frames stay on disk.",
     ),
   );
@@ -4083,7 +4787,7 @@ function DraftPanel({
   const _defaultOpenStage = React.useMemo<string | null>(() => {
     return "stage-meta";
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);   // compute once on mount; user toggles control thereafter
+  }, []); // compute once on mount; user toggles control thereafter
   const [openStage, setOpenStage] = React.useState<string | null>(
     _defaultOpenStage,
   );
@@ -4105,7 +4809,9 @@ function DraftPanel({
   const metaStyleId = draft.assets?.style?.catalog_id
     ? String(draft.assets.style.catalog_id)
     : "";
-  const metaStyle = (styles ?? []).find((s: StyleEntry) => s.id === metaStyleId);
+  const metaStyle = (styles ?? []).find(
+    (s: StyleEntry) => s.id === metaStyleId,
+  );
   const metaSummary = [
     `${(draft.scenes ?? []).length} scenes`,
     `${(draft.assets?.characters ?? []).length} characters`,
@@ -4125,12 +4831,18 @@ function DraftPanel({
     let cancelled = false;
     setLoadingYaml(true);
     apiGet<{ yaml: string }>(`/creator/projects/${pid}/yaml`)
-      .then((r) => { if (!cancelled) setYamlText(r.yaml ?? ""); })
+      .then((r) => {
+        if (!cancelled) setYamlText(r.yaml ?? "");
+      })
       .catch((e: any) => {
         antMessage.error(`Could not load YAML: ${e.message ?? e}`);
       })
-      .finally(() => { if (!cancelled) setLoadingYaml(false); });
-    return () => { cancelled = true; };
+      .finally(() => {
+        if (!cancelled) setLoadingYaml(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [yamlMode, pid]);
 
   const submitYaml = async (force: boolean): Promise<boolean> => {
@@ -4143,7 +4855,11 @@ function DraftPanel({
       });
       const txt = await res.text();
       let data: any;
-      try { data = txt ? JSON.parse(txt) : null; } catch { data = { raw: txt }; }
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = { raw: txt };
+      }
       if (res.status === 409 && data?.detail?.code === "rename_detected") {
         // Confirm-then-retry-with-force.
         const renames: any[] = data.detail.renames ?? [];
@@ -4155,7 +4871,8 @@ function DraftPanel({
               "div",
               null,
               React.createElement(
-                Paragraph, null,
+                Paragraph,
+                null,
                 "You changed the id/name of these anchors or scenes. The current files will become orphans — Stage 0/2/3 will treat the renamed entities as new and re-generate from scratch.",
               ),
               React.createElement(
@@ -4169,7 +4886,10 @@ function DraftPanel({
                     `${r.from} → ${r.to}`,
                     React.createElement(
                       AntText,
-                      { type: "secondary", style: { display: "block", fontSize: 11 } },
+                      {
+                        type: "secondary",
+                        style: { display: "block", fontSize: 11 },
+                      },
                       `Orphan files: ${(r.orphan_files || []).join(", ")}`,
                     ),
                   ),
@@ -4205,9 +4925,11 @@ function DraftPanel({
       }
       if (!res.ok) {
         const msg =
-          typeof data?.detail === "string" ? data.detail :
-          typeof data?.detail?.message === "string" ? data.detail.message :
-          txt;
+          typeof data?.detail === "string"
+            ? data.detail
+            : typeof data?.detail?.message === "string"
+            ? data.detail.message
+            : txt;
         throw new Error(msg);
       }
       antMessage.success("Saved.");
@@ -4229,13 +4951,15 @@ function DraftPanel({
   return React.createElement(
     "div",
     null,
-    React.createElement(StageSection, {
-      id: "stage-meta",
-      stageLabel: "Meta settings",
-      summary: metaSummary,
-      open: openStage === "stage-meta",
-      onToggle: toggleStage,
-    },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-meta",
+        stageLabel: "Meta settings",
+        summary: metaSummary,
+        open: openStage === "stage-meta",
+        onToggle: toggleStage,
+      },
       React.createElement(DraftSummary, {
         draft,
         styles,
@@ -4249,43 +4973,40 @@ function DraftPanel({
         draft,
         onSaveDraft,
       }),
-      React.createElement(
-        Card,
-        {
-          size: "small",
-          style: {
-            marginTop: 12,
-            borderRadius: 8,
-            overflow: "hidden",
-            borderColor: yamlMode ? "#eadfd4" : "#eeeeee",
-          },
-          headStyle: {
-            minHeight: 46,
-            padding: "0 16px",
-            background: yamlMode ? "#fffaf5" : "#fcfcfd",
-            borderBottom: 0,
-          },
-          bodyStyle: { display: "none", padding: 0 },
-          title: React.createElement(
-            Space,
-            { size: 8 },
-            React.createElement(FileTextOutlined),
-            React.createElement(AntText, { strong: true }, "Project YAML"),
-            React.createElement(
-              AntText,
-              { type: "secondary", style: { fontSize: 12 } },
-              "· raw draft source",
-            ),
-          ),
-          extra: React.createElement(Button, {
-            size: "small",
-            icon: React.createElement(EditOutlined),
-            onClick: () => setYamlMode((v: boolean) => !v),
-            type: yamlMode ? "primary" : "default",
-            children: yamlMode ? "Hide YAML" : "Edit YAML",
-          }),
+      React.createElement(Card, {
+        size: "small",
+        style: {
+          marginTop: 12,
+          borderRadius: 8,
+          overflow: "hidden",
+          borderColor: yamlMode ? "#eadfd4" : "#eeeeee",
         },
-      ),
+        headStyle: {
+          minHeight: 46,
+          padding: "0 16px",
+          background: yamlMode ? "#fffaf5" : "#fcfcfd",
+          borderBottom: 0,
+        },
+        bodyStyle: { display: "none", padding: 0 },
+        title: React.createElement(
+          Space,
+          { size: 8 },
+          React.createElement(FileTextOutlined),
+          React.createElement(AntText, { strong: true }, "Project YAML"),
+          React.createElement(
+            AntText,
+            { type: "secondary", style: { fontSize: 12 } },
+            "· raw draft source",
+          ),
+        ),
+        extra: React.createElement(Button, {
+          size: "small",
+          icon: React.createElement(EditOutlined),
+          onClick: () => setYamlMode((v: boolean) => !v),
+          type: yamlMode ? "primary" : "default",
+          children: yamlMode ? "Hide YAML" : "Edit YAML",
+        }),
+      }),
       yamlMode
         ? React.createElement(
             Card,
@@ -4322,7 +5043,10 @@ function DraftPanel({
                 }),
             React.createElement(
               AntText,
-              { type: "secondary", style: { fontSize: 11, display: "block", marginTop: 4 } },
+              {
+                type: "secondary",
+                style: { fontSize: 11, display: "block", marginTop: 4 },
+              },
               "YAML is the source of truth on disk. Property edits (descriptions, prompts, scene fields) propagate to the next regen. Renaming a character / scene id will warn you — use the per-card pencil icons for safe renames.",
             ),
           )
@@ -4330,61 +5054,63 @@ function DraftPanel({
     ),
 
     // Stage 0 runner + ref gallery — collapsible
-    React.createElement(StageSection, {
-      id: "stage-0",
-      stageLabel: "Anchors",
-      summary: (() => {
-        const chars = (draft.assets?.characters ?? []).length;
-        const props = (draft.assets?.props ?? []).length;
-        const refs = (draft.assets?.scene_refs ?? []).length;
-        const total = chars + props + refs + (draft.assets?.style ? 1 : 0);
-        const done = (projStatus?.stages?.["0"]?.refs ?? []).length;
-        return `${done}/${total} ready`;
-      })(),
-      costUsd: forecast?.stage_0_usd,
-      open: openStage === "stage-0",
-      onToggle: toggleStage,
-      extra: (() => {
-        // Stage 0 respects frame_provider. Three options: gpt-image-2
-        // (OpenAI direct, OPENAI_API_KEY), gpt-image-2-dashscope
-        // (Aliyun eval cluster, DASHSCOPE_API_KEY), qwen-image
-        // (DASHSCOPE_API_KEY). Disable when the relevant key is missing.
-        const fp = (draft.global_config || {}).frame_provider
-          || "gpt-image-2";
-        const needsDashScope = fp === "qwen-image"
-          || fp === "gpt-image-2-dashscope";
-        const keyMissing = needsDashScope
-          ? !status?.has_dashscope
-          : !status?.has_openai;
-        const missingLabel = needsDashScope
-          ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
-          : "OPENAI_API_KEY missing — set it in Environment Variables";
-        return React.createElement(
-          Space, null,
-          React.createElement(
-            Tooltip,
-            { title: keyMissing ? missingLabel : "" },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-0",
+        stageLabel: "Anchors",
+        summary: (() => {
+          const chars = (draft.assets?.characters ?? []).length;
+          const props = (draft.assets?.props ?? []).length;
+          const refs = (draft.assets?.scene_refs ?? []).length;
+          const total = chars + props + refs + (draft.assets?.style ? 1 : 0);
+          const done = (projStatus?.stages?.["0"]?.refs ?? []).length;
+          return `${done}/${total} ready`;
+        })(),
+        costUsd: forecast?.stage_0_usd,
+        open: openStage === "stage-0",
+        onToggle: toggleStage,
+        extra: (() => {
+          // Stage 0 respects frame_provider. Three options: gpt-image-2
+          // (OpenAI direct, OPENAI_API_KEY), gpt-image-2-dashscope
+          // (Aliyun eval cluster, DASHSCOPE_API_KEY), qwen-image
+          // (DASHSCOPE_API_KEY). Disable when the relevant key is missing.
+          const fp =
+            (draft.global_config || {}).frame_provider || "gpt-image-2";
+          const needsDashScope =
+            fp === "qwen-image" || fp === "gpt-image-2-dashscope";
+          const keyMissing = needsDashScope
+            ? !status?.has_dashscope
+            : !status?.has_openai;
+          const missingLabel = needsDashScope
+            ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
+            : "OPENAI_API_KEY missing — set it in Environment Variables";
+          return React.createElement(
+            Space,
+            null,
+            React.createElement(
+              Tooltip,
+              { title: keyMissing ? missingLabel : "" },
+              React.createElement(Button, {
+                type: "primary",
+                loading: busy && activeStage?.startsWith("0"),
+                disabled: keyMissing,
+                onClick: () => onRunStage("0"),
+                children: "Generate anchors",
+              }),
+            ),
             React.createElement(Button, {
-              type: "primary",
-              loading: busy && activeStage?.startsWith("0"),
-              disabled: keyMissing,
-              onClick: () => onRunStage("0"),
-              children: "Generate anchors",
+              size: "small",
+              icon: React.createElement(ReloadOutlined),
+              onClick: onReload,
             }),
-          ),
-          React.createElement(Button, {
-            size: "small",
-            icon: React.createElement(ReloadOutlined),
-            onClick: onReload,
-          }),
-        );
-      })(),
-    },
+          );
+        })(),
+      },
       (() => {
-        const fp = (draft.global_config || {}).frame_provider
-          || "gpt-image-2";
-        const needsDashScope = fp === "qwen-image"
-          || fp === "gpt-image-2-dashscope";
+        const fp = (draft.global_config || {}).frame_provider || "gpt-image-2";
+        const needsDashScope =
+          fp === "qwen-image" || fp === "gpt-image-2-dashscope";
         const keyMissing = needsDashScope
           ? !status?.has_dashscope
           : !status?.has_openai;
@@ -4395,138 +5121,180 @@ function DraftPanel({
           ? React.createElement(Alert, {
               type: "warning",
               message: needLabel,
-              showIcon: true, style: { marginBottom: 12 },
+              showIcon: true,
+              style: { marginBottom: 12 },
             })
           : null;
       })(),
       React.createElement(RefGallery, {
-        pid, draft, styles, projStatus, busy, activeStage,
+        pid,
+        draft,
+        styles,
+        projStatus,
+        busy,
+        activeStage,
         onRunPiece: (kind: string, id: string) =>
           onRunStage(
-            kind === "character" ? "0a" :
-            kind === "prop" ? "0a" :
-            kind === "scene_ref" ? "0b" : "0c",
-            kind === "character" ? { only_character: id, overwrite: true } :
-            kind === "prop" ? { only_prop: id, overwrite: true } :
-            kind === "scene_ref" ? { only_scene_ref: id, overwrite: true } :
-            { overwrite: true },
+            kind === "character"
+              ? "0a"
+              : kind === "prop"
+              ? "0a"
+              : kind === "scene_ref"
+              ? "0b"
+              : "0c",
+            kind === "character"
+              ? { only_character: id, overwrite: true }
+              : kind === "prop"
+              ? { only_prop: id, overwrite: true }
+              : kind === "scene_ref"
+              ? { only_scene_ref: id, overwrite: true }
+              : { overwrite: true },
           ),
-        onAddAnchor, onEditAnchor, onDeleteAnchor,
+        onAddAnchor,
+        onEditAnchor,
+        onDeleteAnchor,
       }),
     ),
 
     // Stage 1 — narration
-    React.createElement(StageSection, {
-      id: "stage-1",
-      stageLabel: "Narration",
-      summary: (() => {
-        const narrated = (draft.scenes ?? []).filter((s: any) => s.has_narration).length;
-        const done = (projStatus?.stages?.["1"]?.audio ?? []).length;
-        return `${done}/${narrated} voiced`;
-      })(),
-      costUsd: 0,
-      open: openStage === "stage-1",
-      onToggle: toggleStage,
-      extra: React.createElement(Button, {
-        type: "primary",
-        loading: busy && activeStage === "1",
-        disabled: !status?.has_dashscope,
-        onClick: () => onRunStage("1"),
-        children: "Create audio",
-      }),
-    },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-1",
+        stageLabel: "Narration",
+        summary: (() => {
+          const narrated = (draft.scenes ?? []).filter(
+            (s: any) => s.has_narration,
+          ).length;
+          const done = (projStatus?.stages?.["1"]?.audio ?? []).length;
+          return `${done}/${narrated} voiced`;
+        })(),
+        costUsd: 0,
+        open: openStage === "stage-1",
+        onToggle: toggleStage,
+        extra: React.createElement(Button, {
+          type: "primary",
+          loading: busy && activeStage === "1",
+          disabled: !status?.has_dashscope,
+          onClick: () => onRunStage("1"),
+          children: "Create audio",
+        }),
+      },
       React.createElement(AudioGallery, {
-        pid, draft, projStatus, busy, activeStage,
+        pid,
+        draft,
+        projStatus,
+        busy,
+        activeStage,
       }),
     ),
 
     // Stage 2 — frames
-    React.createElement(StageSection, {
-      id: "stage-2",
-      stageLabel: "Frames",
-      summary: (() => {
-        const total = (draft.scenes ?? []).length;
-        const done = (projStatus?.stages?.["2"]?.frames ?? []).length;
-        return `${done}/${total} ready`;
-      })(),
-      costUsd: forecast?.stage_2_usd,
-      open: openStage === "stage-2",
-      onToggle: toggleStage,
-      extra: (() => {
-        // Disable the button when the key for the project's actual
-        // frame_provider is missing. gpt-image-2-dashscope and
-        // qwen-image both need a DashScope key; gpt-image-2 (direct)
-        // needs the OpenAI key.
-        const fp = (draft.global_config || {}).frame_provider
-          || "gpt-image-2";
-        const needsDashScope = fp === "qwen-image"
-          || fp === "gpt-image-2-dashscope";
-        const keyMissing = needsDashScope
-          ? !status?.has_dashscope
-          : !status?.has_openai;
-        const missingLabel = needsDashScope
-          ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
-          : "OPENAI_API_KEY missing — set it in Environment Variables";
-        const conc = Math.max(1, Math.min(5,
-          Number((draft.global_config || {}).concurrency) || 5));
-        // Validate / Auto-fix need DashScope (Qwen-VL) regardless of
-        // which image provider was used to compose the frames.
-        const validateDisabled = !status?.has_dashscope;
-        const validateTitle = validateDisabled
-          ? "DASHSCOPE_API_KEY missing — needed for frame checks"
-          : "Review the current frames against scene rules";
-        // Count failing scenes from the saved validation report
-        // (read out of projStatus). Drives the auto-fix label.
-        const vr = projStatus?.stages?.["2.5"]?.report || {};
-        const failingCount = Object.entries(vr)
-          .filter(([k, v]: [string, any]) =>
-            k !== "_summary"
-            && v && v.passed === false
-            && (v.rule_count || 0) > 0)
-          .length;
-        return React.createElement(
-          Space, { size: 6 },
-          React.createElement(Tooltip, {
-            title: keyMissing
-              ? missingLabel
-              : `Create missing frames. Up to ${conc} run in parallel.`,
-          },
-            React.createElement(Button, {
-              type: "primary",
-              loading: busy && activeStage === "2",
-              disabled: keyMissing,
-              onClick: () => onRunStageAllParallel("2", false),
-              children: "Create missing",
-            }),
-          ),
-          React.createElement(Tooltip, { title: validateTitle },
-            React.createElement(Button, {
-              loading: busy && activeStage === "2.5",
-              disabled: validateDisabled,
-              onClick: () => onRunStage("2.5"),
-              children: "Review frames",
-            }),
-          ),
-          React.createElement(Tooltip, {
-            title: failingCount > 0
-              ? `Regenerate ${failingCount} flagged frame(s) with correction notes.`
-              : "Review frames first; flagged frames can be repaired here.",
-          },
-            React.createElement(Button, {
-              loading: busy && activeStage === "autofix",
-              disabled: validateDisabled || failingCount === 0,
-              danger: failingCount > 0,
-              onClick: () => onAutofix?.(2),
-              children: failingCount > 0
-                ? `Repair flagged ${failingCount}`
-                : "Repair flagged",
-            }),
-          ),
-        );
-      })(),
-    },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-2",
+        stageLabel: "Frames",
+        summary: (() => {
+          const total = (draft.scenes ?? []).length;
+          const done = (projStatus?.stages?.["2"]?.frames ?? []).length;
+          return `${done}/${total} ready`;
+        })(),
+        costUsd: forecast?.stage_2_usd,
+        open: openStage === "stage-2",
+        onToggle: toggleStage,
+        extra: (() => {
+          // Disable the button when the key for the project's actual
+          // frame_provider is missing. gpt-image-2-dashscope and
+          // qwen-image both need a DashScope key; gpt-image-2 (direct)
+          // needs the OpenAI key.
+          const fp =
+            (draft.global_config || {}).frame_provider || "gpt-image-2";
+          const needsDashScope =
+            fp === "qwen-image" || fp === "gpt-image-2-dashscope";
+          const keyMissing = needsDashScope
+            ? !status?.has_dashscope
+            : !status?.has_openai;
+          const missingLabel = needsDashScope
+            ? "DASHSCOPE_API_KEY missing — set it in Environment Variables"
+            : "OPENAI_API_KEY missing — set it in Environment Variables";
+          const conc = Math.max(
+            1,
+            Math.min(5, Number((draft.global_config || {}).concurrency) || 5),
+          );
+          // Validate / Auto-fix need DashScope (Qwen-VL) regardless of
+          // which image provider was used to compose the frames.
+          const validateDisabled = !status?.has_dashscope;
+          const validateTitle = validateDisabled
+            ? "DASHSCOPE_API_KEY missing — needed for frame checks"
+            : "Review the current frames against scene rules";
+          // Count failing scenes from the saved validation report
+          // (read out of projStatus). Drives the auto-fix label.
+          const vr = projStatus?.stages?.["2.5"]?.report || {};
+          const failingCount = Object.entries(vr).filter(
+            ([k, v]: [string, any]) =>
+              k !== "_summary" &&
+              v &&
+              v.passed === false &&
+              (v.rule_count || 0) > 0,
+          ).length;
+          return React.createElement(
+            Space,
+            { size: 6 },
+            React.createElement(
+              Tooltip,
+              {
+                title: keyMissing
+                  ? missingLabel
+                  : `Create missing frames. Up to ${conc} run in parallel.`,
+              },
+              React.createElement(Button, {
+                type: "primary",
+                loading: busy && activeStage === "2",
+                disabled: keyMissing,
+                onClick: () => onRunStageAllParallel("2", false),
+                children: "Create missing",
+              }),
+            ),
+            React.createElement(
+              Tooltip,
+              { title: validateTitle },
+              React.createElement(Button, {
+                loading: busy && activeStage === "2.5",
+                disabled: validateDisabled,
+                onClick: () => onRunStage("2.5"),
+                children: "Review frames",
+              }),
+            ),
+            React.createElement(
+              Tooltip,
+              {
+                title:
+                  failingCount > 0
+                    ? `Regenerate ${failingCount} flagged frame(s) with correction notes.`
+                    : "Review frames first; flagged frames can be repaired here.",
+              },
+              React.createElement(Button, {
+                loading: busy && activeStage === "autofix",
+                disabled: validateDisabled || failingCount === 0,
+                danger: failingCount > 0,
+                onClick: () => onAutofix?.(2),
+                children:
+                  failingCount > 0
+                    ? `Repair flagged ${failingCount}`
+                    : "Repair flagged",
+              }),
+            ),
+          );
+        })(),
+      },
       React.createElement(FrameGallery, {
-        pid, draft, projStatus, busy, activeStage, pendingSceneRun,
+        pid,
+        draft,
+        projStatus,
+        busy,
+        activeStage,
+        pendingSceneRun,
         liveProgress,
         onRunOne: (sceneId: string) =>
           onRunStage("2", { only_scene: sceneId, overwrite: true }),
@@ -4537,43 +5305,56 @@ function DraftPanel({
     ),
 
     // Stage 3 — animate
-    React.createElement(StageSection, {
-      id: "stage-3",
-      stageLabel: "Motion",
-      summary: (() => {
-        const total = (draft.scenes ?? []).length;
-        const done = (projStatus?.stages?.["3"]?.shots ?? []).length;
-        return `${done}/${total} moving`;
-      })(),
-      costUsd: forecast?.stage_3_usd,
-      open: openStage === "stage-3",
-      onToggle: toggleStage,
-      extra: React.createElement(Button, {
-        type: "primary",
-        danger: true,
-        loading: busy && activeStage === "3",
-        disabled: !status?.has_dashscope,
-        onClick: () => {
-          const n = draft.scenes?.length || 0;
-          const conc = Math.max(1, Math.min(5,
-            Number((draft.global_config || {}).concurrency) || 5));
-          const wallMin = Math.ceil((n / conc) * 10);
-          Modal.confirm({
-            title: "Animate missing scenes?",
-            content:
-              `Each scene calls the chosen video model (~$0.50, 5-15 min). ` +
-              `${n} scenes at concurrency ${conc} ≈ $${forecast?.stage_3_usd ?? "?"}` +
-              ` and ~${wallMin} min wall-clock. Keep this browser tab open.`,
-            okType: "danger",
-            okText: `Animate missing`,
-            onOk: () => { void onRunStageAllParallel("3", false); },
-          });
-        },
-        children: "Animate missing",
-      }),
-    },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-3",
+        stageLabel: "Motion",
+        summary: (() => {
+          const total = (draft.scenes ?? []).length;
+          const done = (projStatus?.stages?.["3"]?.shots ?? []).length;
+          return `${done}/${total} moving`;
+        })(),
+        costUsd: forecast?.stage_3_usd,
+        open: openStage === "stage-3",
+        onToggle: toggleStage,
+        extra: React.createElement(Button, {
+          type: "primary",
+          danger: true,
+          loading: busy && activeStage === "3",
+          disabled: !status?.has_dashscope,
+          onClick: () => {
+            const n = draft.scenes?.length || 0;
+            const conc = Math.max(
+              1,
+              Math.min(5, Number((draft.global_config || {}).concurrency) || 5),
+            );
+            const wallMin = Math.ceil((n / conc) * 10);
+            Modal.confirm({
+              title: "Animate missing scenes?",
+              content:
+                `Each scene calls the chosen video model (~$0.50, 5-15 min). ` +
+                `${n} scenes at concurrency ${conc} ≈ $${
+                  forecast?.stage_3_usd ?? "?"
+                }` +
+                ` and ~${wallMin} min wall-clock. Keep this browser tab open.`,
+              okType: "danger",
+              okText: `Animate missing`,
+              onOk: () => {
+                void onRunStageAllParallel("3", false);
+              },
+            });
+          },
+          children: "Animate missing",
+        }),
+      },
       React.createElement(ShotGallery, {
-        pid, draft, projStatus, busy, activeStage, pendingSceneRun,
+        pid,
+        draft,
+        projStatus,
+        busy,
+        activeStage,
+        pendingSceneRun,
         liveProgress,
         onRunOne: (sceneId: string) =>
           onRunStage("3", { only_scene: sceneId, overwrite: true }),
@@ -4584,25 +5365,31 @@ function DraftPanel({
     ),
 
     // Stage 4 — final MP4
-    React.createElement(StageSection, {
-      id: "stage-4",
-      stageLabel: "Final film",
-      summary: (() => {
-        const final = (projStatus?.stages?.["4"]?.final ?? []).length;
-        return final > 0 ? "ready" : "not assembled";
-      })(),
-      costUsd: 0,
-      open: openStage === "stage-4",
-      onToggle: toggleStage,
-      extra: React.createElement(Button, {
-        type: "primary",
-        loading: busy && activeStage === "4",
-        onClick: () => onRunStage("4"),
-        children: "Assemble film",
-      }),
-    },
+    React.createElement(
+      StageSection,
+      {
+        id: "stage-4",
+        stageLabel: "Final film",
+        summary: (() => {
+          const final = (projStatus?.stages?.["4"]?.final ?? []).length;
+          return final > 0 ? "ready" : "not assembled";
+        })(),
+        costUsd: 0,
+        open: openStage === "stage-4",
+        onToggle: toggleStage,
+        extra: React.createElement(Button, {
+          type: "primary",
+          loading: busy && activeStage === "4",
+          onClick: () => onRunStage("4"),
+          children: "Assemble film",
+        }),
+      },
       React.createElement(FinalGallery, {
-        pid, draft, projStatus, busy, activeStage,
+        pid,
+        draft,
+        projStatus,
+        busy,
+        activeStage,
       }),
     ),
 
@@ -4618,9 +5405,7 @@ function DraftPanel({
 
 // ── draft summary panel ──────────────────────────────────────────────
 
-function DraftSummary({
-  draft, styles, onSaveDraft,
-}: any) {
+function DraftSummary({ draft, styles, onSaveDraft }: any) {
   const chars: any[] = draft.assets?.characters ?? [];
   const props: any[] = draft.assets?.props ?? [];
   const refs: any[] = draft.assets?.scene_refs ?? [];
@@ -4629,10 +5414,10 @@ function DraftSummary({
   const styleId = styleAsset?.catalog_id;
   const catalogStyle = (styles ?? []).find((s: StyleEntry) => s.id === styleId);
   const styleDescription = String(
-    styleAsset?.description
-    || catalogStyle?.description
-    || styleAsset?.positive_template
-    || "",
+    styleAsset?.description ||
+      catalogStyle?.description ||
+      styleAsset?.positive_template ||
+      "",
   ).trim();
   const styleName = String(catalogStyle?.display_name || "").trim();
   const styleDisplay = styleName
@@ -4640,17 +5425,20 @@ function DraftSummary({
     : styleDescription
     ? compactText(styleDescription.replace(/\{prompt\}\.?\s*/i, "").trim(), 52)
     : styleId
-      ? humanizeId(styleId)
-      : "—";
+    ? humanizeId(styleId)
+    : "—";
   const styleTooltip = [
     styleName || null,
     styleDescription || null,
     styleId ? `Style ID: ${styleId}` : null,
-  ].filter(Boolean).join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
   const defaultProvider =
     (draft.global_config?.video_provider as string | undefined) || "wan27";
   const defaultFrameProvider =
-    (draft.global_config?.frame_provider as string | undefined) || "gpt-image-2";
+    (draft.global_config?.frame_provider as string | undefined) ||
+    "gpt-image-2";
   const [savingProvider, setSavingProvider] = React.useState(false);
   const [savingFrameProvider, setSavingFrameProvider] = React.useState(false);
 
@@ -4666,7 +5454,7 @@ function DraftSummary({
       // labeled "default" but expected behavior here is "apply
       // everywhere" — overriding individual scene choices.
       let synced = 0;
-      for (const s of (newDraft.scenes || [])) {
+      for (const s of newDraft.scenes || []) {
         if (s.video_provider !== next) {
           s.video_provider = next;
           synced += 1;
@@ -4692,7 +5480,7 @@ function DraftSummary({
       newDraft.global_config = newDraft.global_config || {};
       newDraft.global_config.frame_provider = next;
       let synced = 0;
-      for (const s of (newDraft.scenes || [])) {
+      for (const s of newDraft.scenes || []) {
         if (s.frame_provider !== next) {
           s.frame_provider = next;
           synced += 1;
@@ -4760,7 +5548,10 @@ function DraftSummary({
           size: "middle",
           style: { width: "100%" },
           options: [
-            { value: "gpt-image-2-dashscope", label: "gpt-image-2 (dashscope)" },
+            {
+              value: "gpt-image-2-dashscope",
+              label: "gpt-image-2 (dashscope)",
+            },
             { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
             { value: "qwen-image", label: "qwen-image-2.0-pro" },
           ],
@@ -4797,18 +5588,38 @@ function DraftSummary({
       ),
     ),
     // Stats row.
-    React.createElement(Row, { gutter: 16 },
-      React.createElement(Col, { span: 5 }, React.createElement(Stat, { label: "Scenes", value: scenes.length })),
-      React.createElement(Col, { span: 5 }, React.createElement(Stat, { label: "Characters", value: chars.length })),
-      React.createElement(Col, { span: 4 }, React.createElement(Stat, { label: "Props", value: props.length })),
-      React.createElement(Col, { span: 4 }, React.createElement(Stat, { label: "Settings", value: refs.length })),
+    React.createElement(
+      Row,
+      { gutter: 16 },
+      React.createElement(
+        Col,
+        { span: 5 },
+        React.createElement(Stat, { label: "Scenes", value: scenes.length }),
+      ),
+      React.createElement(
+        Col,
+        { span: 5 },
+        React.createElement(Stat, { label: "Characters", value: chars.length }),
+      ),
+      React.createElement(
+        Col,
+        { span: 4 },
+        React.createElement(Stat, { label: "Props", value: props.length }),
+      ),
+      React.createElement(
+        Col,
+        { span: 4 },
+        React.createElement(Stat, { label: "Settings", value: refs.length }),
+      ),
       React.createElement(
         Col,
         { span: 6 },
         React.createElement(
           Tooltip,
           { title: styleTooltip || undefined },
-          React.createElement("div", null,
+          React.createElement(
+            "div",
+            null,
             React.createElement(Stat, {
               label: "Style",
               value: styleDisplay,
@@ -4825,7 +5636,11 @@ function Stat({ label, value, title }: any) {
   return React.createElement(
     "div",
     null,
-    React.createElement(AntText, { type: "secondary", style: { fontSize: 12 } }, label),
+    React.createElement(
+      AntText,
+      { type: "secondary", style: { fontSize: 12 } },
+      label,
+    ),
     React.createElement(
       "div",
       {
@@ -4847,8 +5662,16 @@ function Stat({ label, value, title }: any) {
 // ── ref gallery (Stage 0) ────────────────────────────────────────────
 
 function RefGallery({
-  pid, draft, styles, projStatus, busy, activeStage,
-  onRunPiece, onAddAnchor, onEditAnchor, onDeleteAnchor,
+  pid,
+  draft,
+  styles,
+  projStatus,
+  busy,
+  activeStage,
+  onRunPiece,
+  onAddAnchor,
+  onEditAnchor,
+  onDeleteAnchor,
 }: any) {
   const refsByName = new Map<string, any>(
     (projStatus?.stages?.["0"]?.refs ?? []).map((r: any) => [r.name, r]),
@@ -4864,24 +5687,28 @@ function RefGallery({
   const styleLabel = styleName
     ? compactText(styleName.replace(/\s*\([^)]*\)\s*/g, " "), 48)
     : style?.catalog_id
-      ? humanizeId(style.catalog_id)
-      : "";
+    ? humanizeId(style.catalog_id)
+    : "";
   const styleDescription = String(
     style?.description || catalogStyle?.description || "",
   ).trim();
 
   const renderItem = (it: {
-    kind: string; id: string; name: string; refName: string;
-    description?: string; raw?: any;
+    kind: string;
+    id: string;
+    name: string;
+    refName: string;
+    description?: string;
+    raw?: any;
   }) => {
     const exists = refsByName.has(it.refName);
-    const busyHere = busy && (
-      (it.kind === "character" && activeStage === "0a") ||
-      (it.kind === "prop" && activeStage === "0a") ||
-      (it.kind === "scene_ref" && activeStage === "0b") ||
-      (it.kind === "style" && activeStage === "0c") ||
-      activeStage === "0"
-    );
+    const busyHere =
+      busy &&
+      ((it.kind === "character" && activeStage === "0a") ||
+        (it.kind === "prop" && activeStage === "0a") ||
+        (it.kind === "scene_ref" && activeStage === "0b") ||
+        (it.kind === "style" && activeStage === "0c") ||
+        activeStage === "0");
     return React.createElement(
       Col,
       { key: `${it.kind}:${it.id}`, span: 8 },
@@ -4893,15 +5720,25 @@ function RefGallery({
             Space,
             { size: 4 },
             exists
-              ? React.createElement(CheckCircleTwoTone, { twoToneColor: "#52c41a" })
-              : React.createElement(ExclamationCircleOutlined, { style: { color: "#bbb" } }),
-            React.createElement(AntText, { ellipsis: true, style: { maxWidth: 140 } }, it.name),
+              ? React.createElement(CheckCircleTwoTone, {
+                  twoToneColor: "#52c41a",
+                })
+              : React.createElement(ExclamationCircleOutlined, {
+                  style: { color: "#bbb" },
+                }),
+            React.createElement(
+              AntText,
+              { ellipsis: true, style: { maxWidth: 140 } },
+              it.name,
+            ),
           ),
           extra: React.createElement(
             Space,
             { size: 2 },
             it.kind !== "style"
-              ? React.createElement(Tooltip, { title: "Edit description" },
+              ? React.createElement(
+                  Tooltip,
+                  { title: "Edit description" },
                   React.createElement(Button, {
                     size: "small",
                     type: "text",
@@ -4911,7 +5748,9 @@ function RefGallery({
                 )
               : null,
             it.kind !== "style"
-              ? React.createElement(Tooltip, { title: "Delete anchor" },
+              ? React.createElement(
+                  Tooltip,
+                  { title: "Delete anchor" },
                   React.createElement(Button, {
                     size: "small",
                     type: "text",
@@ -4933,11 +5772,13 @@ function RefGallery({
         },
         exists
           ? React.createElement(Image, {
-              src: refUrl(
-                pid, it.refName,
-                refsByName.get(it.refName)?.size,
-              ),
-              style: { width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 4 },
+              src: refUrl(pid, it.refName, refsByName.get(it.refName)?.size),
+              style: {
+                width: "100%",
+                maxHeight: 220,
+                objectFit: "cover",
+                borderRadius: 4,
+              },
               fallback: "",
             })
           : React.createElement(
@@ -4977,8 +5818,11 @@ function RefGallery({
       "div",
       {
         style: {
-          marginTop: 12, marginBottom: 8,
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginTop: 12,
+          marginBottom: 8,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
         },
       },
       React.createElement(AntText, { strong: true }, label),
@@ -4988,9 +5832,12 @@ function RefGallery({
             type: "dashed",
             icon: React.createElement(PlusOutlined),
             onClick: () => onAddAnchor?.(kind),
-            children: kind === "character"
-              ? "Add character"
-              : kind === "prop" ? "Add prop" : "Add setting",
+            children:
+              kind === "character"
+                ? "Add character"
+                : kind === "prop"
+                ? "Add prop"
+                : "Add setting",
           })
         : null,
     );
@@ -5000,7 +5847,9 @@ function RefGallery({
     null,
     sectionHeader("Style anchor", null),
     style?.catalog_id
-      ? React.createElement(Row, { gutter: [12, 12] },
+      ? React.createElement(
+          Row,
+          { gutter: [12, 12] },
           renderItem({
             kind: "style",
             id: style.catalog_id,
@@ -5013,11 +5862,19 @@ function RefGallery({
 
     sectionHeader(`Characters (${chars.length})`, "character"),
     chars.length
-      ? React.createElement(Row, { gutter: [12, 12] },
-          ...chars.map((c: any) => renderItem({
-            kind: "character", id: c.id, name: c.id,
-            refName: `${c.id}_ref.png`, description: c.description, raw: c,
-          })),
+      ? React.createElement(
+          Row,
+          { gutter: [12, 12] },
+          ...chars.map((c: any) =>
+            renderItem({
+              kind: "character",
+              id: c.id,
+              name: c.id,
+              refName: `${c.id}_ref.png`,
+              description: c.description,
+              raw: c,
+            }),
+          ),
         )
       : React.createElement(Empty, {
           description: 'No characters — click "Add character" above.',
@@ -5026,11 +5883,19 @@ function RefGallery({
 
     sectionHeader(`Props (${props.length})`, "prop"),
     props.length
-      ? React.createElement(Row, { gutter: [12, 12] },
-          ...props.map((p: any) => renderItem({
-            kind: "prop", id: p.id, name: p.id,
-            refName: `prop_${p.id}_ref.png`, description: p.description, raw: p,
-          })),
+      ? React.createElement(
+          Row,
+          { gutter: [12, 12] },
+          ...props.map((p: any) =>
+            renderItem({
+              kind: "prop",
+              id: p.id,
+              name: p.id,
+              refName: `prop_${p.id}_ref.png`,
+              description: p.description,
+              raw: p,
+            }),
+          ),
         )
       : React.createElement(Empty, {
           description: 'No props — click "Add prop" above.',
@@ -5039,11 +5904,19 @@ function RefGallery({
 
     sectionHeader(`Settings (${sRefs.length})`, "scene_ref"),
     sRefs.length
-      ? React.createElement(Row, { gutter: [12, 12] },
-          ...sRefs.map((r: any) => renderItem({
-            kind: "scene_ref", id: r.id, name: r.id,
-            refName: `scene_${r.id}_ref.png`, description: r.description, raw: r,
-          })),
+      ? React.createElement(
+          Row,
+          { gutter: [12, 12] },
+          ...sRefs.map((r: any) =>
+            renderItem({
+              kind: "scene_ref",
+              id: r.id,
+              name: r.id,
+              refName: `scene_${r.id}_ref.png`,
+              description: r.description,
+              raw: r,
+            }),
+          ),
         )
       : React.createElement(Empty, {
           description: 'No settings — click "Add setting" above.',
@@ -5072,13 +5945,15 @@ function AnchorTags({ scene }: any) {
     { style: { marginTop: 4, lineHeight: "20px" } },
     usesStyle
       ? React.createElement(
-          Tag, { color: "purple", style: { fontSize: 10 } },
+          Tag,
+          { color: "purple", style: { fontSize: 10 } },
           "style",
         )
       : null,
     ref
       ? React.createElement(
-          Tag, { color: "geekblue", style: { fontSize: 10 } },
+          Tag,
+          { color: "geekblue", style: { fontSize: 10 } },
           `📍 ${ref}`,
         )
       : null,
@@ -5098,7 +5973,8 @@ function AnchorTags({ scene }: any) {
     ),
     chars.length === 0 && props.length === 0 && !ref && !scene.standalone
       ? React.createElement(
-          Tag, { color: "red", style: { fontSize: 10 } },
+          Tag,
+          { color: "red", style: { fontSize: 10 } },
           "⚠ no anchors",
         )
       : null,
@@ -5191,12 +6067,12 @@ function RegenNotesBox({
           saving ? "saving..." : "autosaves shortly",
         )
       : savedValue
-        ? React.createElement(
-            AntText,
-            { type: "secondary", style: { fontSize: 10 } },
-            savedLabel,
-          )
-        : null,
+      ? React.createElement(
+          AntText,
+          { type: "secondary", style: { fontSize: 10 } },
+          savedLabel,
+        )
+      : null,
   );
 }
 
@@ -5222,7 +6098,9 @@ function MediaTakeSelector({
         marginTop: 6,
       },
     },
-    React.createElement(Tag, { color: "blue", style: { margin: 0 } },
+    React.createElement(
+      Tag,
+      { color: "blue", style: { margin: 0 } },
       `take ${active?.take ?? takes.length}/${takes.length}`,
     ),
     React.createElement(Select, {
@@ -5240,19 +6118,16 @@ function MediaTakeSelector({
       Tooltip,
       {
         title: active?.name
-          ? React.createElement(
-              media === "video" ? "video" : "img",
-              {
-                src: takeUrl(pid, active.name, active.size),
-                controls: media === "video" ? true : undefined,
-                style: {
-                  maxWidth: 220,
-                  maxHeight: 160,
-                  objectFit: "cover",
-                  background: media === "video" ? "#000" : undefined,
-                },
+          ? React.createElement(media === "video" ? "video" : "img", {
+              src: takeUrl(pid, active.name, active.size),
+              controls: media === "video" ? true : undefined,
+              style: {
+                maxWidth: 220,
+                maxHeight: 160,
+                objectFit: "cover",
+                background: media === "video" ? "#000" : undefined,
               },
-            )
+            })
           : undefined,
       },
       React.createElement(Button, {
@@ -5265,8 +6140,17 @@ function MediaTakeSelector({
 }
 
 function FrameGallery({
-  pid, draft, projStatus, busy, activeStage, pendingSceneRun,
-  onRunOne, onEditScene, liveProgress, onPatchScene, onSelectTake,
+  pid,
+  draft,
+  projStatus,
+  busy,
+  activeStage,
+  pendingSceneRun,
+  onRunOne,
+  onEditScene,
+  liveProgress,
+  onPatchScene,
+  onSelectTake,
 }: any) {
   const live = liveProgress || {};
   const framesByName = new Map<string, any>(
@@ -5283,15 +6167,14 @@ function FrameGallery({
       const refName = `${s.id}_${s.name}_frame.png`;
       const frameAsset = framesByName.get(refName);
       const exists = Boolean(frameAsset);
-      const livePhase = live[s.id]?.state;  // 'running' | 'done' | 'failed'
+      const livePhase = live[s.id]?.state; // 'running' | 'done' | 'failed'
       const liveStageMatch = live[s.id]?.stage === "2";
       const liveBusy = liveStageMatch && livePhase === "running";
-      const pendingBusy = pendingSceneRun?.stage === "2"
-        && pendingSceneRun?.sceneId === s.id;
+      const pendingBusy =
+        pendingSceneRun?.stage === "2" && pendingSceneRun?.sceneId === s.id;
       const stageBusy = busy && activeStage === "2";
-      const busyHere = liveBusy || pendingBusy || (
-        stageBusy && !pendingSceneRun?.sceneId
-      );
+      const busyHere =
+        liveBusy || pendingBusy || (stageBusy && !pendingSceneRun?.sceneId);
       const dimmed = stageBusy && !busyHere;
       const hasNotes = !!(s.regen_notes && s.regen_notes.trim());
       return React.createElement(
@@ -5302,17 +6185,23 @@ function FrameGallery({
           {
             size: "small",
             title: React.createElement(
-              Space, { size: 4 },
+              Space,
+              { size: 4 },
               exists
-                ? React.createElement(CheckCircleTwoTone, { twoToneColor: "#52c41a" })
-                : React.createElement(ExclamationCircleOutlined, { style: { color: "#bbb" } }),
+                ? React.createElement(CheckCircleTwoTone, {
+                    twoToneColor: "#52c41a",
+                  })
+                : React.createElement(ExclamationCircleOutlined, {
+                    style: { color: "#bbb" },
+                  }),
               `${s.id} — ${s.name}`,
               React.createElement(Tag, null, `${s.duration}s`),
               (() => {
                 const fp = s.frame_provider || "gpt-image-2";
-                const tagSpec = fp === "qwen-image"
-                  ? { color: "cyan", label: "🪶 qwen" }
-                  : { color: "purple", label: "🖼️ gpt" };
+                const tagSpec =
+                  fp === "qwen-image"
+                    ? { color: "cyan", label: "🪶 qwen" }
+                    : { color: "purple", label: "🖼️ gpt" };
                 return React.createElement(
                   Tag,
                   { color: tagSpec.color, style: { fontSize: 10 } },
@@ -5330,11 +6219,13 @@ function FrameGallery({
                 const tooltipBody = passed
                   ? `All ${total} validation rule(s) pass`
                   : `${failures}/${total} rule(s) failed:\n` +
-                    (myReport.failures || []).slice(0, 5).map(
-                      (f: any) => `• ${f.rule}`,
-                    ).join("\n");
+                    (myReport.failures || [])
+                      .slice(0, 5)
+                      .map((f: any) => `• ${f.rule}`)
+                      .join("\n");
                 return React.createElement(
-                  Tooltip, { title: tooltipBody },
+                  Tooltip,
+                  { title: tooltipBody },
                   React.createElement(
                     Tag,
                     {
@@ -5365,8 +6256,11 @@ function FrameGallery({
                 : null,
             ),
             extra: React.createElement(
-              Space, { size: 2 },
-              React.createElement(Tooltip, { title: "Edit scene" },
+              Space,
+              { size: 2 },
+              React.createElement(
+                Tooltip,
+                { title: "Edit scene" },
                 React.createElement(Button, {
                   size: "small",
                   type: "text",
@@ -5382,7 +6276,9 @@ function FrameGallery({
                 icon: React.createElement(ReloadOutlined),
                 onClick: () => onRunOne(s.id),
                 children: exists
-                  ? (hasNotes ? "Regen w/ note" : "Regen")
+                  ? hasNotes
+                    ? "Regen w/ note"
+                    : "Regen"
                   : "Gen",
                 type: hasNotes ? "primary" : "default",
               }),
@@ -5392,11 +6288,13 @@ function FrameGallery({
           },
           exists
             ? React.createElement(Image, {
-                src: refUrl(
-                  pid, refName,
-                  frameAsset?.size,
-                ),
-                style: { width: "100%", maxHeight: 360, objectFit: "cover", borderRadius: 4 },
+                src: refUrl(pid, refName, frameAsset?.size),
+                style: {
+                  width: "100%",
+                  maxHeight: 360,
+                  objectFit: "cover",
+                  borderRadius: 4,
+                },
                 fallback: "",
               })
             : React.createElement(
@@ -5443,7 +6341,8 @@ function FrameGallery({
                 "div",
                 { style: { marginTop: 4 } },
                 React.createElement(
-                  Tag, { color: "blue", style: { fontSize: 10 } },
+                  Tag,
+                  { color: "blue", style: { fontSize: 10 } },
                   "narration",
                 ),
                 React.createElement(
@@ -5456,7 +6355,8 @@ function FrameGallery({
           React.createElement(RegenNotesBox, {
             scene: s,
             field: "regen_notes",
-            placeholder: "Frame notes for next Regen — e.g. \"marlin smaller, no hat band\"",
+            placeholder:
+              'Frame notes for next Regen — e.g. "marlin smaller, no hat band"',
             savedLabel: "will be applied on next frame Regen",
             onPatchScene,
           }),
@@ -5497,10 +6397,15 @@ function AudioGallery({ pid, draft, projStatus, busy, activeStage }: any) {
           {
             size: "small",
             title: React.createElement(
-              Space, null,
+              Space,
+              null,
               exists
-                ? React.createElement(CheckCircleTwoTone, { twoToneColor: "#52c41a" })
-                : React.createElement(ExclamationCircleOutlined, { style: { color: "#bbb" } }),
+                ? React.createElement(CheckCircleTwoTone, {
+                    twoToneColor: "#52c41a",
+                  })
+                : React.createElement(ExclamationCircleOutlined, {
+                    style: { color: "#bbb" },
+                  }),
               `${sid} — ${s.name}`,
               React.createElement(Tag, null, `${s.duration}s`),
             ),
@@ -5535,8 +6440,17 @@ function AudioGallery({ pid, draft, projStatus, busy, activeStage }: any) {
 // ── shot gallery (Stage 3) — Wan 2.7 I2V ─────────────────────────────
 
 function ShotGallery({
-  pid, draft, projStatus, busy, activeStage, pendingSceneRun,
-  liveProgress, onRunOne, onEditScene, onPatchScene, onSelectTake,
+  pid,
+  draft,
+  projStatus,
+  busy,
+  activeStage,
+  pendingSceneRun,
+  liveProgress,
+  onRunOne,
+  onEditScene,
+  onPatchScene,
+  onSelectTake,
 }: any) {
   const live = liveProgress || {};
   const shotsByName = new Map<string, any>(
@@ -5557,12 +6471,11 @@ function ShotGallery({
       const livePhase = live[sid]?.state;
       const liveStageMatch = live[sid]?.stage === "3";
       const liveBusy = liveStageMatch && livePhase === "running";
-      const pendingBusy = pendingSceneRun?.stage === "3"
-        && pendingSceneRun?.sceneId === sid;
+      const pendingBusy =
+        pendingSceneRun?.stage === "3" && pendingSceneRun?.sceneId === sid;
       const stageBusy = busy && activeStage === "3";
-      const busyHere = liveBusy || pendingBusy || (
-        stageBusy && !pendingSceneRun?.sceneId
-      );
+      const busyHere =
+        liveBusy || pendingBusy || (stageBusy && !pendingSceneRun?.sceneId);
       const dimmed = stageBusy && !busyHere;
       const hasVideoNotes = !!(
         s.video_regen_notes && s.video_regen_notes.trim()
@@ -5575,10 +6488,15 @@ function ShotGallery({
           {
             size: "small",
             title: React.createElement(
-              Space, { size: 4 },
+              Space,
+              { size: 4 },
               exists
-                ? React.createElement(CheckCircleTwoTone, { twoToneColor: "#52c41a" })
-                : React.createElement(ExclamationCircleOutlined, { style: { color: "#bbb" } }),
+                ? React.createElement(CheckCircleTwoTone, {
+                    twoToneColor: "#52c41a",
+                  })
+                : React.createElement(ExclamationCircleOutlined, {
+                    style: { color: "#bbb" },
+                  }),
               `${sid} — ${s.name}`,
               React.createElement(Tag, null, `${s.duration}s`),
               (() => {
@@ -5587,8 +6505,8 @@ function ShotGallery({
                   vp === "happyhorse"
                     ? { color: "magenta", label: "🐎 happyhorse" }
                     : vp === "seedance"
-                      ? { color: "green", label: "🌱 seedance" }
-                      : { color: "blue", label: "🎬 wan2.7" };
+                    ? { color: "green", label: "🌱 seedance" }
+                    : { color: "blue", label: "🎬 wan2.7" };
                 return React.createElement(
                   Tag,
                   { color: tagSpec.color, style: { fontSize: 10 } },
@@ -5597,8 +6515,11 @@ function ShotGallery({
               })(),
             ),
             extra: React.createElement(
-              Space, { size: 2 },
-              React.createElement(Tooltip, { title: "Edit scene" },
+              Space,
+              { size: 2 },
+              React.createElement(
+                Tooltip,
+                { title: "Edit scene" },
                 React.createElement(Button, {
                   size: "small",
                   type: "text",
@@ -5614,7 +6535,9 @@ function ShotGallery({
                 icon: React.createElement(ReloadOutlined),
                 onClick: () => onRunOne(sid),
                 children: exists
-                  ? (hasVideoNotes ? "Regen w/ note" : "Regen")
+                  ? hasVideoNotes
+                    ? "Regen w/ note"
+                    : "Regen"
                   : "Animate",
                 type: hasVideoNotes ? "primary" : "default",
               }),
@@ -5624,18 +6547,22 @@ function ShotGallery({
           },
           exists
             ? React.createElement("video", {
-                src: refUrl(
-                  pid, refName, shotAsset?.size,
-                ),
+                src: refUrl(pid, refName, shotAsset?.size),
                 controls: true,
                 preload: "metadata",
-                style: { width: "100%", maxHeight: 360, borderRadius: 4, background: "#000" },
+                style: {
+                  width: "100%",
+                  maxHeight: 360,
+                  borderRadius: 4,
+                  background: "#000",
+                },
               })
             : React.createElement(
                 "div",
                 {
                   style: {
-                    width: "100%", height: 200,
+                    width: "100%",
+                    height: 200,
                     background: "#fafafa",
                     border: "1px dashed #d9d9d9",
                     borderRadius: 4,
@@ -5685,7 +6612,8 @@ function ShotGallery({
           React.createElement(RegenNotesBox, {
             scene: { ...s, id: sid },
             field: "video_regen_notes",
-            placeholder: "Video notes for next Regen — e.g. \"slower pan, keep subject centered\"",
+            placeholder:
+              'Video notes for next Regen — e.g. "slower pan, keep subject centered"',
             savedLabel: "will be applied on next video Regen",
             onPatchScene,
           }),
@@ -5714,7 +6642,8 @@ function FinalGallery({ pid, draft, projStatus, busy, activeStage }: any) {
   }
   if (!finals.length) {
     return React.createElement(Empty, {
-      description: 'Run "Build final MP4" once all scenes are animated and narration is generated.',
+      description:
+        'Run "Build final MP4" once all scenes are animated and narration is generated.',
     });
   }
   return React.createElement(
@@ -5738,15 +6667,27 @@ function FinalGallery({ pid, draft, projStatus, busy, activeStage }: any) {
           src: refUrl(pid, f.name, f.size),
           controls: true,
           preload: "metadata",
-          style: { width: "100%", maxHeight: 480, borderRadius: 4, background: "#000" },
+          style: {
+            width: "100%",
+            maxHeight: 480,
+            borderRadius: 4,
+            background: "#000",
+          },
         }),
         React.createElement(
           AntText,
-          { type: "secondary", style: { fontSize: 11, display: "block", marginTop: 4 } },
-          React.createElement("a", {
-            href: refUrl(pid, f.name, f.size),
-            download: f.name,
-          }, "Download"),
+          {
+            type: "secondary",
+            style: { fontSize: 11, display: "block", marginTop: 4 },
+          },
+          React.createElement(
+            "a",
+            {
+              href: refUrl(pid, f.name, f.size),
+              download: f.name,
+            },
+            "Download",
+          ),
         ),
       ),
     ),
@@ -5760,7 +6701,8 @@ function FinalGallery({ pid, draft, projStatus, busy, activeStage }: any) {
 // generic "Something went wrong" page.
 function CreatorPageWithBoundary(): any {
   return React.createElement(
-    CreatorErrorBoundary, null,
+    CreatorErrorBoundary,
+    null,
     React.createElement(CreatorPage),
   );
 }

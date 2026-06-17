@@ -39,6 +39,7 @@ repos:
           | ^docs
           | \.html$
           | .*/skills/.*
+          | ^plugins/bundle/.*/plugin\.py$
           | ^e2e/
           )
         args: [
@@ -109,6 +110,12 @@ repos:
           --disable=C0302,
           --disable=W1203,
           --disable=C2801,
+          --disable=R0911,  # too-many-return-statements (pre-existing)
+          --disable=R0912,  # too-many-branches (pre-existing)
+          --disable=R0915,  # too-many-statements (pre-existing)
+          --disable=W1201,  # logging-not-lazy (sibling of disabled W1203)
+          --disable=C0413,  # wrong-import-position (plugins set sys.path)
+          --disable=E0611,  # no-name-in-module (dynamic plugin imports)
           --disable=C0114,  # Disable missing module docstring for quick dev
           --disable=C0115,  # Disable missing class docstring for quick dev
           --disable=C0116,  # Disable missing function or method docstring for quick dev

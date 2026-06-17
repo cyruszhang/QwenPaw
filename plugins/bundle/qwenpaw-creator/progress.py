@@ -18,9 +18,51 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class StreamCoalescer:
+    """Throttle streamed text deltas into low-frequency full snapshots.
+
+    A token stream (e.g. the LLM decomposition) can produce hundreds of
+    tiny deltas. Forwarding each one to the SSE bus would flood the
+    bounded subscriber queues. Instead, ``push(delta)`` accumulates the
+    text and only returns a snapshot when enough new characters have
+    arrived (or a line just completed); otherwise it returns ``None``.
+
+    Snapshots are the FULL accumulated text, not a delta — so the
+    channel is drop-robust: a subscriber that misses intermediate
+    events still converges on the latest snapshot. Call ``flush()`` once
+    at the end to emit any unflushed tail. Pure / no I/O — unit-testable.
+    """
+
+    def __init__(self, min_chars: int = 64) -> None:
+        self._text = ""
+        self._emitted_len = 0
+        self._min_chars = max(1, min_chars)
+
+    def push(self, delta: str) -> Optional[str]:
+        if not delta:
+            return None
+        self._text += delta
+        pending = len(self._text) - self._emitted_len
+        if pending >= self._min_chars or delta.endswith("\n"):
+            self._emitted_len = len(self._text)
+            return self._text
+        return None
+
+    def flush(self) -> Optional[str]:
+        if len(self._text) > self._emitted_len:
+            self._emitted_len = len(self._text)
+            return self._text
+        return None
+
+    @property
+    def text(self) -> str:
+        return self._text
+
 
 # pid → set of subscriber queues
 _SUBSCRIBERS: dict[str, set[asyncio.Queue]] = {}
@@ -49,11 +91,16 @@ def emit(pid: str, kind: str, **payload) -> None:
             q.put_nowait(event)
         except asyncio.QueueFull:
             logger.warning(
-                "[progress] dropped %s event for %s (queue full)", kind, pid,
+                "[progress] dropped %s event for %s (queue full)",
+                kind,
+                pid,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "[progress] dropped %s event for %s: %s", kind, pid, exc,
+                "[progress] dropped %s event for %s: %s",
+                kind,
+                pid,
+                exc,
             )
             dead.append(q)
     for q in dead:
