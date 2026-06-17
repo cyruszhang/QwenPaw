@@ -1689,8 +1689,9 @@ function ProjectPane({
   );
   React.useEffect(() => {
     const hasScenes = (sidebarDraft?.scenes ?? []).length > 0;
-    onStageRowsChange?.(hasScenes ? sidebarStageRows : null);
-  }, [sidebarDraft, sidebarStageRows, onStageRowsChange]);
+    // In Studio mode the stage rail is redundant with the Reel — hide it.
+    onStageRowsChange?.(hasScenes && !studioMode ? sidebarStageRows : null);
+  }, [sidebarDraft, sidebarStageRows, onStageRowsChange, studioMode]);
   React.useEffect(() => () => onStageRowsChange?.(null), [onStageRowsChange]);
 
   if (!project) {
@@ -1770,36 +1771,38 @@ function ProjectPane({
         }),
       ),
     },
-    React.createElement(
-      Steps,
-      {
-        current: currentStep,
-        size: "small",
-        style: {
-          margin: "6px 0 22px",
-          padding: "12px 16px",
-          border: "1px solid #f0f0f0",
-          borderRadius: 8,
-          background: "#fcfcfd",
-        },
-      },
-      React.createElement(Step, {
-        title: "Source",
-        icon: React.createElement(CloudUploadOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Storyboard",
-        icon: React.createElement(ScissorOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Anchors",
-        icon: React.createElement(PictureOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Frames",
-        icon: React.createElement(PlayCircleOutlined),
-      }),
-    ),
+    studioMode && hasDraft
+      ? null
+      : React.createElement(
+          Steps,
+          {
+            current: currentStep,
+            size: "small",
+            style: {
+              margin: "6px 0 22px",
+              padding: "12px 16px",
+              border: "1px solid #f0f0f0",
+              borderRadius: 8,
+              background: "#fcfcfd",
+            },
+          },
+          React.createElement(Step, {
+            title: "Source",
+            icon: React.createElement(CloudUploadOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Storyboard",
+            icon: React.createElement(ScissorOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Anchors",
+            icon: React.createElement(PictureOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Frames",
+            icon: React.createElement(PlayCircleOutlined),
+          }),
+        ),
 
     runError
       ? React.createElement(Alert, {
