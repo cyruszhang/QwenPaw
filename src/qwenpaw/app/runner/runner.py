@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Coroutine
 
@@ -265,16 +266,40 @@ class AgentRunner(Runner):
                 ],
             )
 
-        # /<name> <input> → rewrite user message with skill body.
+        # /<name> <input> → append the skill body to the user message as
+        # a trailing <skill> block. The typed command stays verbatim at
+        # the head; everything injected lives inside the block.
+        original_text = AgentRunner._extract_text_content(msgs[-1])
         merged = (
-            f"Use the [{display_name}] skill in "
-            f"`{skill_dir}` to fulfill "
-            f"user's task: {user_input}\n\n"
-            f"{post.content}"
+            f"{original_text}\n\n"
+            f'<skill name="{display_name}" dir="{skill_dir}">\n'
+            f"This block was injected because the user invoked the "
+            f"[{display_name}] skill above. It is the full content of "
+            f"the skill's SKILL.md — do not re-read that file. Follow "
+            f"these instructions to fulfill the user's task: "
+            f"{user_input}\n"
+            f"Relative paths inside the skill (e.g. `scripts/`) resolve "
+            f"against the skill directory.\n\n"
+            f"{post.content.strip()}\n"
+            f"</skill>"
         )
         AgentRunner._rewrite_last_message_text(msgs, merged)
         logger.info("Skill invocation: %s", name)
         return None
+
+    @staticmethod
+    def _extract_text_content(msg) -> str:
+        """Return the concatenated text of a Msg's content."""
+        content = getattr(msg, "content", None)
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "\n".join(
+                block.get("text") or ""
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        return ""
 
     @staticmethod
     def _rewrite_last_message_text(
@@ -351,6 +376,18 @@ class AgentRunner(Runner):
                 exc_info=True,
             )
 
+    async def stream_query(self, request, **kwargs):
+        """Override to set created_at to current time on response events."""
+        from datetime import datetime, timezone
+
+        created_at = int(
+            datetime.now(timezone.utc).timestamp(),
+        )
+        async for event in super().stream_query(request, **kwargs):
+            if getattr(event, "object", None) == "response":
+                event.created_at = created_at
+            yield event
+
     async def query_handler(
         self,
         msgs,
@@ -385,6 +422,8 @@ class AgentRunner(Runner):
             set_current_agent_id,
             set_current_session_id,
             set_current_root_session_id,
+            set_current_user_id,
+            set_current_channel,
         )
 
         set_current_agent_id(self.agent_id)
@@ -400,6 +439,8 @@ class AgentRunner(Runner):
             session_id = request.session_id
             user_id = request.user_id
             channel = getattr(request, "channel", DEFAULT_CHANNEL)
+            set_current_user_id(user_id)
+            set_current_channel(channel)
 
             logger.info(
                 "Handle agent query:\n%s",
@@ -433,6 +474,54 @@ class AgentRunner(Runner):
                 or os.environ.get("SHELL")
                 or ("cmd.exe" if sys.platform == "win32" else "/bin/sh")
             )
+            # In Coding Mode with a concrete project_dir, surface the
+            # project as the env_context's primary location so the LLM
+            # stops treating the agent workspace as "home".
+            _cm = getattr(agent_config, "coding_mode", None)
+            _coding_project_dir = (
+                _cm.project_dir
+                if _cm
+                and getattr(_cm, "enabled", False)
+                and getattr(_cm, "project_dir", None)
+                else None
+            )
+
+            # Fork subagent: override project_dir with worktree path.
+            _payload_ctx = getattr(request, "request_context", None)
+            _fork_project = (
+                _payload_ctx.get("fork_project_dir", "")
+                if isinstance(_payload_ctx, dict)
+                else ""
+            )
+            if _fork_project:
+                _resolved_fork = Path(_fork_project).expanduser().resolve()
+                _project_base = (
+                    Path(
+                        _coding_project_dir
+                        or (
+                            str(self.workspace_dir)
+                            if self.workspace_dir
+                            else str(WORKING_DIR)
+                        ),
+                    )
+                    .expanduser()
+                    .resolve()
+                )
+                _allowed_base = _project_base / ".qwenpaw" / "worktrees"
+                try:
+                    _resolved_fork.relative_to(_allowed_base)
+                    _is_allowed = _resolved_fork.is_dir()
+                except ValueError:
+                    _is_allowed = False
+                if _is_allowed:
+                    _coding_project_dir = str(_resolved_fork)
+                else:
+                    logger.warning(
+                        "Rejected fork_project_dir outside "
+                        "allowed subtree: %s",
+                        _fork_project,
+                    )
+
             env_context = build_env_context(
                 session_id=session_id,
                 user_id=user_id,
@@ -444,6 +533,7 @@ class AgentRunner(Runner):
                     else str(WORKING_DIR)
                 ),
                 default_shell=_default_shell,
+                project_dir=_coding_project_dir,
             )
 
             # Get MCP clients from manager (hot-reloadable)
@@ -809,43 +899,70 @@ class AgentRunner(Runner):
             agent.rebuild_sys_prompt()
 
             # --- Execution: Mission Mode (phased) or standard -----
-            if mission_info is not None:
-                from ...agents.mission.mission_runner import (
-                    run_mission_phase1,
-                    run_mission_phase2,
-                )
+            from ...observability.langfuse import agent_trace_scope
 
-                phase = mission_info["mission_phase"]
-                loop_dir = Path(mission_info["loop_dir"])
-                max_iters = mission_info.get(
-                    "max_iterations",
-                    20,
-                )
+            root_session_id = base_request_context.get(
+                "root_session_id",
+                session_id,
+            )
+            trace_metadata = {
+                "session_id": session_id,
+                "root_session_id": root_session_id,
+                "user_id": user_id,
+                "channel": channel,
+                "agent_id": self.agent_id,
+                "root_agent_id": base_request_context.get("root_agent_id"),
+                "source": base_request_context.get("source"),
+            }
+            async with agent_trace_scope(
+                trace_id=uuid.uuid4().hex,
+                name="qwenpaw.agent.react_loop",
+                metadata=trace_metadata,
+                input={
+                    "query": query,
+                    "messages_count": len(msgs) if msgs else 0,
+                },
+            ):
+                if mission_info is not None:
+                    from ...agents.mission.mission_runner import (
+                        run_mission_phase1,
+                        run_mission_phase2,
+                    )
 
-                if phase == 1:
-                    async for msg, last in run_mission_phase1(
-                        agent=agent,
-                        msgs=msgs,
-                        loop_dir=loop_dir,
-                        max_iterations=max_iters,
-                        agent_id=self.agent_id,
-                    ):
-                        yield msg, last
+                    phase = mission_info["mission_phase"]
+                    loop_dir = Path(mission_info["loop_dir"])
+                    max_iters = mission_info.get(
+                        "max_iterations",
+                        20,
+                    )
+
+                    if phase == 1:
+                        async for msg, last in run_mission_phase1(
+                            agent=agent,
+                            msgs=msgs,
+                            loop_dir=loop_dir,
+                            max_iterations=max_iters,
+                            agent_id=self.agent_id,
+                        ):
+                            yield msg, last
+                    else:
+                        async for msg, last in run_mission_phase2(
+                            agent=agent,
+                            msgs=msgs,
+                            loop_dir=loop_dir,
+                            max_iterations=max_iters,
+                            agent_id=self.agent_id,
+                        ):
+                            yield msg, last
                 else:
-                    async for msg, last in run_mission_phase2(
-                        agent=agent,
-                        msgs=msgs,
-                        loop_dir=loop_dir,
-                        max_iterations=max_iters,
-                        agent_id=self.agent_id,
+                    async for (
+                        msg,
+                        last,
+                    ) in _stream_printing_messages_interruptible(
+                        agents=[agent],
+                        coroutine_task=agent(msgs),
                     ):
                         yield msg, last
-            else:
-                async for msg, last in _stream_printing_messages_interruptible(
-                    agents=[agent],
-                    coroutine_task=agent(msgs),
-                ):
-                    yield msg, last
 
         except asyncio.CancelledError as exc:
             logger.info(f"query_handler: {session_id} cancelled!")
@@ -865,11 +982,14 @@ class AgentRunner(Runner):
             )
             if cancelled_count > 0:
                 logger.info(
-                    "Auto-denied %d pending approval(s) for root session %s",
+                    "Auto-denied %d pending approval(s) for root "
+                    "session %s",
                     cancelled_count,
-                    root_session_id[:8]
-                    if len(root_session_id) >= 8
-                    else root_session_id,
+                    (
+                        root_session_id[:8]
+                        if len(root_session_id) >= 8
+                        else root_session_id
+                    ),
                 )
 
             if agent is not None:

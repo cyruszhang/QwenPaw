@@ -181,8 +181,10 @@
       "hub": "Docker Hub"
     },
     "cloud": {
+      "agentscope": "AgentScope Platform",
       "aliyun": "Aliyun",
       "modelscope": "ModelScope",
+      "agentscopeGo": "Ir para AgentScope Platform",
       "aliyunDeploy": "Implantar no Aliyun ECS",
       "aliyunDoc": "Ver Documentacao",
       "modelscopeGo": "Ir para ModelScope Studio"
@@ -263,6 +265,7 @@
     "acpServer": "Integracao ACP",
     "memory": "Memoria",
     "memoryEvolvingAndProactive": "Memoria Evolutiva e Proativa",
+    "codingMode": "Modo Coding",
     "context": "Contexto",
     "commands": "Comandos magicos",
     "plan": "Modo plano",

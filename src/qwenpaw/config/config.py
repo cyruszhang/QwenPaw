@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Optional, Union, Dict, List, Literal, Any, Set
@@ -32,6 +33,8 @@ from ..constant import (
     LLM_RATE_LIMIT_PAUSE,
     WORKING_DIR,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -200,6 +203,11 @@ class BaseChannelConfig(BaseModel):
     allow_from: List[str] = Field(default_factory=list)
     deny_message: str = ""
     require_mention: bool = False
+    access_control_dm: bool = False
+    access_control_group: bool = False
+    # Channel-level mute: completely disable DM or group messages
+    dm_disabled: bool = False
+    group_disabled: bool = False
 
 
 class IMessageChannelConfig(BaseChannelConfig):
@@ -238,6 +246,8 @@ class FeishuConfig(BaseChannelConfig):
     domain: 'feishu' for China, 'lark' for international.
     streaming_enabled: enable CardKit streaming card updates for real-time
     typewriter-style text output.
+    share_session_in_group: if True, all group members share one session;
+    if False (default), each member gets an independent session.
     """
 
     app_id: str = ""
@@ -247,6 +257,7 @@ class FeishuConfig(BaseChannelConfig):
     media_dir: Optional[str] = None
     domain: Literal["feishu", "lark"] = "feishu"
     streaming_enabled: bool = False
+    share_session_in_group: bool = False
 
 
 class QQConfig(BaseChannelConfig):
@@ -400,8 +411,21 @@ class XiaoYiConfig(BaseChannelConfig):
     ak: str = ""  # Access Key
     sk: str = ""  # Secret Key
     agent_id: str = ""  # Agent ID from XiaoYi platform
-    ws_url: str = "wss://hag.cloud.huawei.com/openclaw/v1/ws/link"
     task_timeout_ms: int = 3600000  # 1 hour task timeout
+
+
+class YuanbaoConfig(BaseChannelConfig):
+    """Tencent Yuanbao (元宝) channel config.
+
+    Connects to Yuanbao bot platform via protobuf WebSocket with
+    sign-token authentication. Supports C2C and group messaging.
+    """
+
+    app_id: str = ""
+    app_secret: str = ""
+    api_domain: str = "bot.yuanbao.tencent.com"
+    media_dir: Optional[str] = None
+    accept_bot_messages: bool = False
 
 
 class WeChatConfig(BaseChannelConfig):
@@ -450,6 +474,7 @@ class ChannelConfig(BaseModel):
     sip: SIPChannelConfig = SIPChannelConfig()
     wecom: WecomConfig = WecomConfig()
     xiaoyi: XiaoYiConfig = XiaoYiConfig()
+    yuanbao: YuanbaoConfig = YuanbaoConfig()
     wechat: WeChatConfig = WeChatConfig()
     onebot: OneBotConfig = OneBotConfig()
 
@@ -1060,6 +1085,24 @@ class PlanConfig(BaseModel):
     )
 
 
+class CodingModeConfig(BaseModel):
+    """Configuration for the Coding Mode feature."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable Coding Mode IDE layout and tools",
+    )
+    project_dir: Optional[str] = Field(
+        default=None,
+        description=(
+            "Active coding project directory (absolute path). "
+            "When set, Coding Mode file / git operations use this path "
+            "instead of the agent workspace_dir. "
+            "None means use the default workspace_dir."
+        ),
+    )
+
+
 class AgentProfileConfig(BaseModel):
     """Complete Agent Profile configuration (stored in workspace/agent.json).
 
@@ -1140,6 +1183,10 @@ class AgentProfileConfig(BaseModel):
     plan: PlanConfig = Field(
         default_factory=PlanConfig,
         description="Plan mode configuration for this agent",
+    )
+    coding_mode: CodingModeConfig = Field(
+        default_factory=CodingModeConfig,
+        description="Coding Mode configuration for this agent",
     )
 
 
@@ -1259,6 +1306,11 @@ class MCPClientConfig(BaseModel):
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
     cwd: str = ""
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="Tool whitelist. Only listed tools will be loaded. "
+        "None means load all tools from the server.",
+    )
     oauth: Optional[MCPOAuthConfig] = None
 
     @model_validator(mode="before")
@@ -1495,6 +1547,14 @@ def _default_builtin_tools() -> Dict[str, BuiltinToolConfig]:
             description="Check the status of a background agent task",
             icon="⏳",
         ),
+        "spawn_subagent": BuiltinToolConfig(
+            name="spawn_subagent",
+            enabled=True,
+            description=(
+                "Spawn an ephemeral sub-task within the current " "workspace"
+            ),
+            icon="🔀",
+        ),
     }
 
     # Merge dynamically registered tools from plugins
@@ -1673,6 +1733,7 @@ class FileGuardConfig(BaseModel):
 
     enabled: bool = True
     sensitive_files: List[str] = Field(default_factory=list)
+    allow_preview_outside_workspace: bool = True
 
 
 class SkillScannerWhitelistEntry(BaseModel):
@@ -1756,6 +1817,13 @@ class Config(BaseModel):
         description="Plugin configurations. Key is plugin_id, "
         "value is plugin-specific config dict.",
     )
+    skill_paths: List[str] = Field(
+        default_factory=list,
+        description="Additional read-only skill pool roots, scanned after "
+        "the primary skill_pool in order. Paths support ~ expansion. "
+        "Skills found here are read-only (no edit/create); they can be "
+        "listed, downloaded to a workspace, and deleted.",
+    )
 
 
 ChannelConfigUnion = Union[
@@ -1835,7 +1903,74 @@ def build_fallback_agent_profile_config(
     )
 
 
-def load_agent_config(agent_id: str) -> AgentProfileConfig:
+def _migrate_access_control_fields(  # pylint: disable=too-many-branches
+    channels: dict,
+    workspace_dir: Path,
+) -> bool:
+    """Migrate legacy dm_policy/group_policy/allow_from to new fields.
+
+    Returns True if any field was migrated (caller should rewrite file).
+    """
+    migrated = False
+    for ch_key, ch_cfg in channels.items():
+        if not isinstance(ch_cfg, dict):
+            continue
+        # dm_policy → access_control_dm or dm_disabled
+        dm_policy = ch_cfg.get("dm_policy")
+        if dm_policy is not None:
+            if dm_policy == "allowlist" and "access_control_dm" not in ch_cfg:
+                ch_cfg["access_control_dm"] = True
+            elif dm_policy == "disabled" and "dm_disabled" not in ch_cfg:
+                ch_cfg["dm_disabled"] = True
+            del ch_cfg["dm_policy"]
+            migrated = True
+        # group_policy → access_control_group or group_disabled
+        group_policy = ch_cfg.get("group_policy")
+        if group_policy is not None:
+            if (
+                group_policy == "allowlist"
+                and "access_control_group" not in ch_cfg
+            ):
+                ch_cfg["access_control_group"] = True
+            elif group_policy == "disabled" and "group_disabled" not in ch_cfg:
+                ch_cfg["group_disabled"] = True
+            del ch_cfg["group_policy"]
+            migrated = True
+        # allow_from → access_control.json whitelist
+        allow_from = ch_cfg.get("allow_from")
+        if allow_from and isinstance(allow_from, list):
+            try:
+                from ..app.channels.access_control import (
+                    get_access_control_store,
+                )
+
+                store = get_access_control_store(workspace_dir)
+                store.import_allow_from(ch_key, set(allow_from))
+            except Exception:
+                pass
+            del ch_cfg["allow_from"]
+            migrated = True
+        # group_allow_from (matrix legacy) → whitelist
+        grp_allow = ch_cfg.get("group_allow_from")
+        if grp_allow is not None:
+            if isinstance(grp_allow, list) and grp_allow:
+                try:
+                    from ..app.channels.access_control import (
+                        get_access_control_store,
+                    )
+
+                    store = get_access_control_store(workspace_dir)
+                    store.import_allow_from(ch_key, set(grp_allow))
+                except Exception:
+                    pass
+            del ch_cfg["group_allow_from"]
+            migrated = True
+    return migrated
+
+
+def load_agent_config(  # pylint: disable=too-many-branches,too-many-statements
+    agent_id: str,
+) -> AgentProfileConfig:
     """Load agent's complete configuration from workspace/agent.json with
     mtime-based caching.
 
@@ -1925,6 +2060,27 @@ def load_agent_config(agent_id: str) -> AgentProfileConfig:
                     pass
             except OSError:
                 pass
+
+        # One-shot migration: convert legacy access control fields.
+        if isinstance(channels, dict):
+            _acl_migrated = _migrate_access_control_fields(
+                channels,
+                workspace_dir,
+            )
+            if _acl_migrated:
+                try:
+                    with open(
+                        agent_config_path,
+                        "w",
+                        encoding="utf-8",
+                    ) as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    try:
+                        current_mtime = agent_config_path.stat().st_mtime
+                    except OSError:
+                        pass
+                except OSError:
+                    pass
 
         # Normalize legacy ~/.copaw-bound paths to current WORKING_DIR.
         # This keeps QWENPAW_WORKING_DIR effective even if existing agent.json
@@ -2024,6 +2180,19 @@ def migrate_legacy_config_to_multi_agent() -> bool:
     default_workspace = Path(f"{WORKING_DIR}/workspaces/default").expanduser()
     default_workspace.mkdir(parents=True, exist_ok=True)
 
+    # Inherit the global active model so the new agent.json has a valid
+    # active_model pointer from the start (fixes #4937).
+    try:
+        from ..providers import ProviderManager
+
+        global_active_model = ProviderManager.get_instance().get_active_model()
+    except Exception:
+        global_active_model = None
+        logger.info(
+            "Could not resolve global active model during migration; "
+            "agent will be created without active_model.",
+        )
+
     # Create default agent configuration from legacy settings
     default_agent_config = AgentProfileConfig(
         id="default",
@@ -2054,6 +2223,7 @@ def migrate_legacy_config_to_multi_agent() -> bool:
         ),
         tools=config.tools if config.tools else None,
         security=config.security if config.security else None,
+        active_model=global_active_model,
     )
 
     # Save default agent configuration to workspace
@@ -2142,6 +2312,14 @@ def get_model_max_input_length(
     from ..providers import ProviderManager
 
     model_slot = agent_config.active_model
+    # Fallback: if agent.json doesn't have active_model, try ProviderManager
+    if not model_slot or not model_slot.provider_id:
+        try:
+            manager = ProviderManager.get_instance()
+            model_slot = manager.get_active_model()
+        except Exception:
+            pass
+
     if model_slot and model_slot.provider_id and model_slot.model:
         try:
             manager = ProviderManager.get_instance()
@@ -2152,4 +2330,10 @@ def get_model_max_input_length(
                     return model_info.max_input_length
         except Exception:
             pass
+    logger.debug(
+        "Could not resolve max_input_length for agent '%s' "
+        "(active_model=%s), falling back to 128K default.",
+        getattr(agent_config, "id", "?"),
+        agent_config.active_model,
+    )
     return 128 * 1024

@@ -25,8 +25,14 @@ async def create_mcp_service(ws: "Workspace", mcp):
     # pylint: disable=protected-access
     if ws._config.mcp:
         try:
-            await mcp.init_from_config(ws._config.mcp)
-            logger.debug(f"MCP initialized for agent: {ws.agent_id}")
+            if getattr(ws, "defer_mcp_startup", False):
+                mcp.init_from_config_background(ws._config.mcp)
+                logger.debug(
+                    f"MCP initialization deferred for agent: {ws.agent_id}",
+                )
+            else:
+                await mcp.init_from_config(ws._config.mcp)
+                logger.debug(f"MCP initialized for agent: {ws.agent_id}")
         except Exception as e:
             logger.warning(f"Failed to init MCP: {e}")
     ws._service_manager.services["runner"].set_mcp_manager(mcp)
@@ -78,6 +84,11 @@ async def create_channel_service(ws: "Workspace", _):
     from ...config import Config, update_last_dispatch
     from ..channels.manager import ChannelManager
     from ..channels.utils import make_process_from_runner
+    from ..channels.access_control import init_access_control_store
+
+    # Initialise the access-control store for this workspace so that
+    # each workspace maintains its own access_control.json.
+    init_access_control_store(ws.workspace_dir)
 
     temp_config = Config(channels=ws._config.channels)
     runner = ws._service_manager.services["runner"]
@@ -100,6 +111,11 @@ async def create_channel_service(ws: "Workspace", _):
 
     # Inject workspace into ChannelManager and all channels
     cm.set_workspace(ws)
+
+    # Propagate agent language to channels for i18n deny messages
+    agent_language = getattr(ws._config, "language", "zh") or "zh"
+    for ch in cm.channels:
+        ch._language = agent_language
 
     # Inject workspace into runner for control command handlers
     runner.set_workspace(ws)

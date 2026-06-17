@@ -2,10 +2,12 @@ import { Layout, Space, Badge, Spin, Tooltip, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import LanguageSwitcher from "../components/LanguageSwitcher/index";
 import ThemeToggleButton from "../components/ThemeToggleButton";
+import CodingModeToggle from "../components/CodingModeToggle";
 import { useTranslation } from "react-i18next";
 import { Button, Modal } from "@agentscope-ai/design";
 import styles from "./index.module.less";
 import api from "../api";
+import { openExternalLink } from "../utils/openExternalLink";
 import {
   GITHUB_URL,
   getDocsUrl,
@@ -20,6 +22,7 @@ import {
 } from "./constants";
 import { useTheme } from "../contexts/ThemeContext";
 import { useState, useEffect } from "react";
+import { Slot } from "../plugins/registry/Slot";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -151,25 +154,26 @@ export default function Header() {
   };
 
   const handleNavClick = (url: string) => {
-    if (url) {
-      const pywebview = (window as any).pywebview;
-      if (pywebview?.api) {
-        pywebview.api.open_external_link(url);
-      } else {
-        window.open(url, "_blank");
-      }
-    }
+    openExternalLink(url);
   };
 
   return (
     <>
       <AntHeader className={styles.header}>
         <div className={styles.logoWrapper}>
-          <img
-            src={isDark ? "/logo-dark.svg" : "/logo-light.svg"}
-            alt="QwenPaw"
-            className={styles.logoImg}
-          />
+          {/*
+            Slot lets a plugin replace the brand logo (e.g. a per-agent
+            branding override). When no plugin registers a replacement —
+            or when the registered render returns null — the host default
+            <img> below paints.
+          */}
+          <Slot name="header.logo" kind="replace">
+            <img
+              src={isDark ? "/logo-dark.svg" : "/logo-light.svg"}
+              alt="QwenPaw"
+              className={styles.logoImg}
+            />
+          </Slot>
           <div className={styles.logoDivider} />
           {version && (
             <Badge
@@ -190,7 +194,9 @@ export default function Header() {
             </Badge>
           )}
         </div>
+        <Slot name="header.left" kind="fill" />
         <Space size="middle">
+          <Slot name="header.right" kind="fill" />
           <Dropdown
             menu={{
               items: [
@@ -236,6 +242,8 @@ export default function Header() {
               {t("header.github")}
             </Button>
           </Tooltip>
+          <div className={styles.headerDivider} />
+          <CodingModeToggle />
           <div className={styles.headerDivider} />
           <LanguageSwitcher />
           <ThemeToggleButton />

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from abc import ABC
 from typing import (
     Optional,
@@ -36,6 +37,7 @@ from agentscope_runtime.engine.schemas.agent_schemas import (
 
 from .renderer import MessageRenderer, RenderStyle
 from .schema import ChannelType
+from .access_control import get_access_control_store
 from ...config.utils import load_config
 
 # Optional callback to enqueue payload (set by manager)
@@ -129,6 +131,8 @@ class BaseChannel(ABC):
         deny_message: str = "",
         require_mention: bool = False,
         streaming_enabled: bool = False,
+        access_control_dm: bool = False,
+        access_control_group: bool = False,
     ):
         self._process = process
         self._on_reply_sent = on_reply_sent
@@ -136,11 +140,16 @@ class BaseChannel(ABC):
         self._filter_tool_messages = filter_tool_messages
         self._filter_thinking = filter_thinking
         self.streaming_enabled = streaming_enabled
+        # Legacy fields — stored for backward compat but not used for
+        # filtering (new ACL gate handles access control).
         self.dm_policy = dm_policy or "open"
         self.group_policy = group_policy or "open"
         self.allow_from = set(allow_from or [])
         self.deny_message = deny_message or ""
         self.require_mention = require_mention
+        self.access_control_dm = access_control_dm
+        self.access_control_group = access_control_group
+        self._language = "zh"
         self._enqueue: EnqueueCallback = None
         self._workspace = None
         cfg = load_config()
@@ -212,6 +221,7 @@ class BaseChannel(ABC):
         return {
             "channel_id": first.get("channel_id") or self.channel,
             "sender_id": first.get("sender_id") or "",
+            "acl_sender_id": first.get("acl_sender_id") or "",
             "content_parts": merged_parts,
             "meta": merged_meta,
         }
@@ -321,29 +331,119 @@ class BaseChannel(ABC):
         merged = pending + list(content_parts)
         return (True, merged)
 
-    def _check_allowlist(
-        self,
-        sender_id: str,
-        is_group: bool,
-    ) -> tuple[bool, Optional[str]]:
-        """Check sender against allowlist policy."""
-        policy = self.group_policy if is_group else self.dm_policy
-        if policy == "open":
-            return True, None
-        if sender_id in self.allow_from:
-            return True, None
-        if self.deny_message:
-            return False, self.deny_message
-        if is_group:
-            return (
-                False,
-                "Sorry, this bot is only available to authorized users.",
+    # ── Access-control i18n messages ───────────────────────────────────
+
+    _ACL_I18N = {
+        "blocked": {
+            "zh": "您已被禁止访问此智能体。",
+            "en": "You have been blocked from this agent.",
+            "ja": "このエージェントへのアクセスがブロックされています。",
+            "ru": "Вам заблокирован доступ к этому агенту.",
+            "pt-BR": "Você foi bloqueado deste agente.",
+            "id": "Anda telah diblokir dari agen ini.",
+        },
+        "pending": {
+            "zh": "您目前没有访问此智能体的权限，需要审批。\n" "ID: {sender_id}",
+            "en": "You do not have access to this agent. "
+            "Approval required.\nID: {sender_id}",
+            "ja": "このエージェントへのアクセス権がありません。" "承認が必要です。\nID: {sender_id}",
+            "ru": "У вас нет доступа к этому агенту. "
+            "Требуется одобрение.\nID: {sender_id}",
+            "pt-BR": "Você não tem acesso a este agente. "
+            "Aprovação necessária.\nID: {sender_id}",
+            "id": "Anda tidak memiliki akses ke agen ini. "
+            "Persetujuan diperlukan.\nID: {sender_id}",
+        },
+    }
+
+    _ACL_LANG_FALLBACK = {"zh", "en", "ja", "ru", "pt-BR", "id"}
+
+    def _acl_msg(self, key: str, **kwargs: str) -> str:
+        """Return an access-control message in the agent's language."""
+        lang = self._language
+        if lang not in self._ACL_LANG_FALLBACK:
+            lang = "zh" if lang.startswith("zh") else "en"
+        template = self._ACL_I18N[key][lang]
+        return template.format(**kwargs) if kwargs else template
+
+    @property
+    def access_control_enabled(self) -> bool:
+        """True if access control is active for any chat type."""
+        return self.access_control_dm or self.access_control_group
+
+    async def _access_control_gate(self, payload: Any) -> bool:
+        """Check access control. Returns True if blocked."""
+        if not self.access_control_enabled:
+            return False
+
+        # Prefer acl_sender_id (real sender, unaffected by shared session)
+        if isinstance(payload, dict):
+            sender_id = (
+                payload.get("acl_sender_id") or payload.get("sender_id") or ""
             )
-        return False, (
-            "Sorry, you are not authorized to use this bot. "
-            "Please contact the administrator to add your ID "
-            f"to the allowlist. Your ID: {sender_id}"
+            meta = dict(payload.get("meta") or {})
+        else:
+            sender_id = (
+                getattr(payload, "acl_sender_id", "")
+                or getattr(payload, "user_id", "")
+                or ""
+            )
+            meta = dict(getattr(payload, "channel_meta", None) or {})
+
+        if not sender_id:
+            return False
+
+        # Skip if access control not enabled for this chat type
+        is_group = meta.get("is_group", False)
+        if is_group and not self.access_control_group:
+            return False
+        if not is_group and not self.access_control_dm:
+            return False
+
+        store = self._get_acl_store()
+        channel_key = self.channel
+
+        # ── Whitelist / blacklist / pending decision ────────────────────
+        if store.is_whitelisted(channel_key, sender_id):
+            return False  # allowed
+
+        if store.is_blacklisted(channel_key, sender_id):
+            deny_msg = self._acl_msg("blocked")
+        else:
+            first_message = self._extract_query_from_payload(payload)
+            username = meta.get("user_name") or ""
+            store.add_pending(
+                channel_key,
+                sender_id,
+                first_message,
+                username=username,
+            )
+            deny_msg = self._acl_msg("pending", sender_id=sender_id)
+
+        # ── Send deny message back via the channel's own send() ─────────
+        try:
+            if isinstance(payload, dict):
+                to_handle = sender_id
+            else:
+                to_handle = self.get_to_handle_from_request(payload)
+            await self.send_content_parts(
+                to_handle,
+                [TextContent(type=ContentType.TEXT, text=deny_msg)],
+                meta,
+            )
+        except Exception:
+            logger.debug(
+                "%s access control: failed to send deny to %s",
+                self.channel,
+                sender_id[:20] if sender_id else "?",
+            )
+
+        logger.info(
+            "%s access control blocked: sender=%s",
+            self.channel,
+            sender_id,
         )
+        return True
 
     def _check_group_mention(
         self,
@@ -356,6 +456,15 @@ class BaseChannel(ABC):
         return bool(
             meta.get("bot_mentioned") or meta.get("has_bot_command"),
         )
+
+    def _get_acl_store(self):
+        """Get the AccessControlStore for this channel's workspace."""
+        from pathlib import Path
+
+        workspace_dir = None
+        if self._workspace is not None:
+            workspace_dir = Path(self._workspace.workspace_dir)
+        return get_access_control_store(workspace_dir)
 
     def set_enqueue(self, cb: EnqueueCallback) -> None:
         """Set enqueue callback (called by ChannelManager)."""
@@ -470,6 +579,8 @@ class BaseChannel(ABC):
             )
 
     _STREAMABLE_TYPES = {"reasoning", "message"}
+    _STREAM_DELTA_MIN_INTERVAL_S: float = 0.0
+    _STREAM_FLUSH_TIMEOUT_S: float = 5.0
 
     def _resolve_stream_type(self, event: Any) -> str:
         """Map event.type to a stream_type string.
@@ -577,9 +688,11 @@ class BaseChannel(ABC):
             content_msg_id,
             "",
         )
-        if not stream_type or stream_type not in self._STREAMABLE_TYPES:
-            return False
-        if stream_type not in streaming_buffers:
+        if (
+            not stream_type
+            or stream_type not in self._STREAMABLE_TYPES
+            or stream_type not in streaming_buffers
+        ):
             return False
         if stream_type == "reasoning" and self._filter_thinking:
             return True
@@ -587,13 +700,38 @@ class BaseChannel(ABC):
         streaming_buffers[stream_type] = (
             streaming_buffers.get(stream_type, "") + delta_text
         )
-        await self.on_streaming_delta(
-            request,
-            to_handle,
-            event,
-            send_meta,
-            stream_type,
-            accumulated_text=streaming_buffers[stream_type],
+
+        # --- Non-blocking flush with in-flight guard ---
+        flush_meta = self._get_stream_flush_meta(send_meta, stream_type)
+        now = time.monotonic()
+
+        # Guard 1: previous flush still in-flight
+        task = flush_meta.get("task")
+        if task and not task.done():
+            elapsed = now - flush_meta.get("last_ts", 0.0)
+            if elapsed > self._STREAM_FLUSH_TIMEOUT_S:
+                task.cancel()
+            return True
+
+        # Guard 2: minimum interval not elapsed
+        if self._STREAM_DELTA_MIN_INTERVAL_S > 0:
+            if (
+                now - flush_meta.get("last_ts", 0.0)
+                < self._STREAM_DELTA_MIN_INTERVAL_S
+            ):
+                return True
+
+        # Fire-and-forget flush
+        flush_meta["last_ts"] = now
+        flush_meta["task"] = asyncio.create_task(
+            self._safe_streaming_delta(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                stream_type,
+                streaming_buffers[stream_type],
+            ),
         )
         return True
 
@@ -616,6 +754,31 @@ class BaseChannel(ABC):
             if stream_type == "reasoning" and self._filter_thinking:
                 streaming_buffers.pop(stream_type, None)
                 return True
+
+            # Await pending flush to ensure ordering before finalize
+            flush_meta = self._get_stream_flush_meta(
+                send_meta,
+                stream_type,
+            )
+            task = flush_meta.get("task")
+            if task and not task.done():
+                try:
+                    await asyncio.wait_for(
+                        task,
+                        timeout=self._STREAM_FLUSH_TIMEOUT_S,
+                    )
+                except (
+                    asyncio.TimeoutError,
+                    asyncio.CancelledError,
+                    Exception,
+                ):
+                    task.cancel()
+            # Clean up flush state
+            send_meta.get("_stream_flush", {}).pop(
+                stream_type,
+                None,
+            )
+
             accumulated = streaming_buffers.pop(stream_type, "")
             await self.on_streaming_end(
                 request,
@@ -1052,6 +1215,10 @@ class BaseChannel(ABC):
         if not self._debounce_payload(payload):
             return
 
+        # ── Unified access control gate ─────────────────────────────────
+        if await self._access_control_gate(payload):
+            return
+
         if self._workspace is not None and self._command_registry is not None:
             query_text = self._extract_query_from_payload(payload)
             logger.debug(
@@ -1219,6 +1386,49 @@ class BaseChannel(ABC):
     # ------------------------------------------------------------------
     # Streaming hooks — override in subclasses
     # ------------------------------------------------------------------
+
+    def _get_stream_flush_meta(
+        self,
+        send_meta: Dict[str, Any],
+        stream_type: str,
+    ) -> Dict[str, Any]:
+        """Return per-stream_type flush state dict from *send_meta*."""
+        key = "_stream_flush"
+        if key not in send_meta:
+            send_meta[key] = {}
+        if stream_type not in send_meta[key]:
+            send_meta[key][stream_type] = {
+                "task": None,
+                "last_ts": 0.0,
+            }
+        return send_meta[key][stream_type]
+
+    async def _safe_streaming_delta(
+        self,
+        request: "AgentRequest",
+        to_handle: str,
+        event: Any,
+        send_meta: Dict[str, Any],
+        stream_type: str,
+        accumulated_text: str,
+    ) -> None:
+        """Wrapper that invokes on_streaming_delta and catches errors."""
+        try:
+            await self.on_streaming_delta(
+                request,
+                to_handle,
+                event,
+                send_meta,
+                stream_type,
+                accumulated_text=accumulated_text,
+            )
+        except Exception:
+            logger.warning("streaming delta failed", exc_info=True)
+            flush_meta = self._get_stream_flush_meta(
+                send_meta,
+                stream_type,
+            )
+            flush_meta["last_ts"] = 0.0
 
     async def on_streaming_start(
         self,

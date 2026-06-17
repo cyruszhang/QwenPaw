@@ -15,6 +15,7 @@
 [![Discord](https://img.shields.io/badge/Discord-Join_Us-blueviolet.svg?logo=discord)](https://discord.gg/eYMpfnkG8h)
 [![X](https://img.shields.io/badge/X-Follow_Us-black.svg?logo=x)](https://x.com/agentscope_ai)
 [![DingTalk](https://img.shields.io/badge/DingTalk-Join_Us-orange.svg)](https://qr.dingtalk.com/action/joingroup?code=v1,k1,OmDlBXpjW+I2vWjKDsjvI9dhcXjGZi3bQiojOq3dlDw=&_dt_no_comment=1&origin=11)
+[![AgentScope Platform](https://img.shields.io/badge/%E2%98%81_AgentScope_Platform-%F0%9F%90%BE_7%2F24_Online_%26_Free-FF6B2B.svg)](https://platform.agentscope.io/)
 
 [[Documentation](https://qwenpaw.agentscope.io/)] [[中文](README_zh.md)] [[日本語](README_ja.md)] [[Русский](README_ru.md)]
 
@@ -60,33 +61,33 @@ Your personal AI assistant — easy to install, deploy locally or in the cloud, 
 
 ## News
 
-- [2026-05-19] We've released **v1.1.8**! See the full [v1.1.8 Release Notes](https://qwenpaw.agentscope.io/release-notes).
+- [2026-06-17] **v1.1.12 — Models Page Overhaul & Simple Mode** | Redesigned Models page with provider aggregation; new Simple Mode for streamlined navigation.
 
-  - **[v1.1.8] Added**: Official plugin resources (website download + one-click install from console); QwenPaw Pet desktop companion; CloudPaw Alibaba Cloud deployment plugin; `/make-skill` command; custom HTTP headers & auth mode; per-model context configuration; Inbox batch operations; pinned chat history drawer.
-  - **[v1.1.8] Security**: Backup trust controls; Skill & AgentMd path traversal prevention; plugin API auth.
-  - **[v1.1.8] Fixed**: WeCom/WeChat/QQ channel stability; per-model rate limiter; SSE connection leak.
-  - **[v1.1.8] New Contributors**: @Morxi.
+  | Highlight | What's new |
+  |-----------|------------|
+  | **Models Page Overhaul** | Provider Aggregation, Unified Card UI & Layout Redesign. |
+  | **Simple Mode** | Flat nav and sorted session list by updated time. |
+  | **Non-blocking Flush** | Adaptive throttling for all channels. |
+  | **Per-Turn Token Usage** | Token and context usage popover per turn. |
+  | **Desktop Port Persistence** | Persist backend port across restarts. |
 
-- [2026-05-14] We've released **v1.1.7**! See the full [v1.1.7 Release Notes](https://qwenpaw.agentscope.io/release-notes).
+  Also: wide mode toggle, syntax highlighting, Langfuse agent loop grouping, Gemini tool schema fix. [v1.1.12 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.12)
 
-- [2026-05-09] We've released **v1.1.6**! See the full [v1.1.6 Release Notes](https://qwenpaw.agentscope.io/release-notes).
+- [2026-06-11] **AgentScope Platform is live** — Free QwenPaw deployment, plugin sharing, and Skill marketplace. [Try it now →](https://platform.agentscope.io/)
 
-- [2026-04-29] We've released **v1.1.5**! See the full [v1.1.5 Release Notes](https://qwenpaw.agentscope.io/release-notes).
+- [2026-06-10] **v1.1.11** — Free Model OAuth, Plugin Market, MCP Tool Whitelisting. [v1.1.11 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.11)
 
-- [2026-04-12] **CoPaw is Officially Rebranding to QwenPaw**: This rebranding marks an important step forward into our next phase of open-source development.
+- [2026-06-01] **v1.1.10** — Spawn Subagent, Open Directory, Tencent Yuanbao channel. [v1.1.10 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.10)
 
-The new name better reflects the open ecosystem we are building and the broader direction we are continuing to pursue:
+- [2026-05-27] **v1.1.9** — Coding Mode (three-panel Web IDE), Tauri desktop app, unified access control. [v1.1.9 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.9)
 
-*Qwen* — represents a deeper integration with the Qwen open-source ecosystem and a sharper focus on the model layer, including local models for agents and smart collaboration between small and large models.
+- [2026-05-19] **v1.1.8** — Official plugin distribution, QwenPaw Pet, streaming cards for DingTalk / Feishu / Telegram. [v1.1.8 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.8)
 
-*Paw* — carries forward our original mission to accompany users and become a personal assistant users can truly trust.
+- [2026-05-14] **v1.1.7** — Browser batch actions, OAuth 2.1 MCP, Cron calendar view, multiple file attachments. [v1.1.7 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.7)
 
-This rebranding does not change our vision and goals in the open-source community:
-- To build a more practical, secure, and personalized AI assistant;
-- To stay committed to open-source collaboration and move forward together with the community.
+- [2026-05-09] **v1.1.6** — Whisper voice input, GPT Image 2 plugin, Volcano Engine provider, Mermaid diagrams. [v1.1.6 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.1.6)
 
-Thank you all for your support along the way.
-From today on, QwenPaw will stay and grow with you!
+- [2026-04-12] **CoPaw rebrands to QwenPaw** — deeper Qwen ecosystem integration, same open-source mission. [v1.0.0 Release Notes →](https://qwenpaw.agentscope.io/release-notes#v1.0.0)
 
 ---
 
@@ -422,25 +423,18 @@ Star QwenPaw on GitHub and be instantly notified of new releases.
 | ------------------------ | -------------------------------------------------------------------------------------------- | -------------------- |
 | **Horizontal Expansion** | More channels, models, skills, MCPs — **community contributions welcome**                  | Seeking Contributors |
 | **Existing Feature Extension** | Display optimization, download hints, Windows path compatibility, etc. — **community contributions welcome** | Seeking Contributors |
-| **Client Experience**    | Install, update, and packaging improvements                                                  | In Progress          |
-| **Models**               | Intelligent on-device / cloud model switching                                                | In Progress          |
-|                          | OAuth                                                                                        | Planned              |
+| **Infra**               | QwenPaw OS foundation                                                                         | In Progress          |
+| **Models**               | Multi-model switching                                                                         | In Progress          |
 |                          | Response API                                                                                 | Planned              |
-| **Proactivity**          | Cron jobs and heartbeat upgrades                                                             | In Progress          |
-|                          | Proactive briefings and custom push                                                          | In Progress          |
-|                          | Insight system: discover needs via conversation and interaction                            | Planned              |
-| **Workspace**            | File access control with Sandbox integration                                                 | In Progress          |
-|                          | Subfolder layout (config, production files, etc.)                                            | Planned              |
-| **Coding**               | LSP, dedicated prompts, workspace versioning, runtime, and supporting infra                  | Planned              |
-|                          | Lightweight native APIs                                                                      | Planned              |
-|                          | Tool self-evolution                                                                          | Planned              |
-|                          | Compatibility with existing agents (e.g. Claude Code)                                        | Planned              |
+| **Workspace**            | Subfolder layout (config, production files, etc.)                                            | Planned              |
+| **Coding**               | Compatibility with existing agents (e.g. Claude Code)                                        | Planned              |
 | **Multi-agent**          | Group chat                                                                                   | Planned              |
-|                          | Subagent                                                                                     | Planned              |
+|                          | Subagent visualization                                                                                 | Planned              |
 |                          | HiClaw enterprise capabilities                                                               | Planned              |
-| **Context Management**   | Intelligent context compression                                                              | In Progress          |
+| **Context Management**   | Personal knowledge base                                                             | In Progress          |
 |                          | User-selectable compression (fine-grained control)                                           | Planned              |
-
+| **QwenPaw Application**   | QwenPaw Creator                                                             | In Progress          |
+|                          | QwenPaw Insight                                           | In Progress              |
 
 _Status:_ **In Progress** — actively being worked on; **Planned** — queued or under design, also welcome contributions; **Seeking Contributors** — we strongly encourage community contributions.
 
