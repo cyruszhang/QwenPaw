@@ -453,6 +453,19 @@ class CraftRequest(BaseModel):
     model: str = "qwen-max"
 
 
+class DirectorRequest(BaseModel):
+    """Body for POST /projects/{pid}/director.
+
+    A free-form natural-language instruction the director assistant
+    translates into per-scene spec patches. Edits the spec only — the
+    user re-rolls affected scenes afterward to render the change.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    message: str
+    model: str = "qwen-max"
+
+
 class AutoFixRequest(BaseModel):
     """Body for POST /projects/{pid}/autofix.
 
@@ -1310,6 +1323,63 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         )
 
         return {"ok": True, "project_id": pid, "draft": draft}
+
+    @router.post("/projects/{pid}/director")
+    async def director(pid: str, body: DirectorRequest) -> dict:
+        """Apply a natural-language director instruction to the scenes.
+
+        Interprets ``body.message`` against the current storyboard into
+        per-scene spec patches, applies them to ``project.yml``, and
+        returns the updated draft plus a changelog. Spec-only — the user
+        re-rolls affected scenes from the panel to render the change.
+        """
+        api_key = _resolve_dashscope_key()
+        if not api_key:
+            raise HTTPException(400, "DASHSCOPE_API_KEY not configured")
+        if not body.message.strip():
+            raise HTTPException(400, "empty instruction")
+
+        proj = project_dir(pid, create=False)
+        proj_yml = proj / "project.yml"
+        if not proj_yml.is_file():
+            raise HTTPException(
+                404,
+                "project.yml missing — decompose + craft scenes first",
+            )
+        draft = _yaml_loads(proj_yml.read_text(encoding="utf-8"))
+        if not (draft.get("scenes") or []):
+            raise HTTPException(
+                400,
+                "no scenes yet — craft scenes before directing",
+            )
+
+        from pipeline.director import apply_director_patches, interpret
+        from pipeline.stage_00_script import draft_to_yaml
+
+        try:
+            result = await interpret(
+                draft,
+                body.message,
+                api_key=api_key,
+                model=body.model,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("[creator] director interpret failed")
+            raise HTTPException(500, f"director failed: {exc}") from exc
+
+        draft, changes = apply_director_patches(
+            draft,
+            result.get("patches") or [],
+        )
+        draft["project_id"] = safe_project_id(pid)
+        proj_yml.write_text(draft_to_yaml(draft), encoding="utf-8")
+        return {
+            "ok": True,
+            "project_id": pid,
+            "draft": draft,
+            "summary": result.get("summary", ""),
+            "changes": changes,
+        }
 
     # ─── anchor CRUD (add/edit/delete characters + props + scene_refs) ─
 
