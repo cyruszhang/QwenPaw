@@ -5981,12 +5981,27 @@ function AnchorTags({ scene }: any) {
   );
 }
 
+// ⌘+Enter (mac) / Ctrl+Enter (win/linux) inside a notes box fires an
+// inline re-roll. Pure so the chord rule stays obvious + testable.
+function isRerollChord(e: any): boolean {
+  return !!e && e.key === "Enter" && (e.metaKey || e.ctrlKey);
+}
+
 function RegenNotesBox({
   scene,
   field,
   placeholder,
   savedLabel,
   onPatchScene,
+  // Optional inline re-roll. When provided, the box shows a Re-roll
+  // button (and accepts ⌘/Ctrl+Enter) that persists the current note
+  // and then regenerates just this scene — fusing the old two-step
+  // "save the note, then hunt for the header Regen button" flow into a
+  // single gesture, right where the user is typing.
+  onReroll,
+  rerollBusy,
+  rerollDisabled,
+  rerollLabel,
 }: any) {
   const initialValue = String(scene?.[field] ?? "");
   const [value, setValue] = React.useState<string>(initialValue);
@@ -6045,6 +6060,30 @@ function RegenNotesBox({
       setSaving(false);
     }
   };
+  // Persist the latest note, THEN re-roll this scene. We PATCH the
+  // current value explicitly (not via flush, which no-ops when a
+  // debounced autosave is mid-flight) so the backend Stage-2/3 run
+  // reads exactly what the user just typed. Abort the re-roll if the
+  // save fails — better to leave the old frame than regen blindly.
+  const doReroll = async () => {
+    if (!onReroll || rerollBusy || rerollDisabled) return;
+    if (value !== savedValue) {
+      setSaving(true);
+      try {
+        await onPatchScene?.(
+          scene.id ?? scene.scene_id,
+          { [field]: value },
+          { quiet: true, reload: false, updateProject: false },
+        );
+        setSavedValue(value);
+      } catch {
+        return; // onPatchScene surfaced the error
+      } finally {
+        setSaving(false);
+      }
+    }
+    await onReroll();
+  };
   return React.createElement(
     "div",
     { style: { marginTop: 6 } },
@@ -6056,23 +6095,66 @@ function RegenNotesBox({
         setFocused(false);
         void flush();
       },
+      onKeyDown: onReroll
+        ? (e: any) => {
+            if (isRerollChord(e)) {
+              e.preventDefault();
+              void doReroll();
+            }
+          }
+        : undefined,
       placeholder,
       autoSize: { minRows: 1, maxRows: 4 },
       style: { fontSize: 11, background: dirty ? "#fffbe6" : undefined },
     }),
-    dirty
-      ? React.createElement(
-          AntText,
-          { type: "warning", style: { fontSize: 10 } },
-          saving ? "saving..." : "autosaves shortly",
-        )
-      : savedValue
-      ? React.createElement(
-          AntText,
-          { type: "secondary", style: { fontSize: 10 } },
-          savedLabel,
-        )
-      : null,
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginTop: 2,
+        },
+      },
+      React.createElement(
+        "span",
+        { style: { lineHeight: 1.2 } },
+        dirty
+          ? React.createElement(
+              AntText,
+              { type: "warning", style: { fontSize: 10 } },
+              saving ? "saving..." : "autosaves shortly",
+            )
+          : savedValue
+          ? React.createElement(
+              AntText,
+              { type: "secondary", style: { fontSize: 10 } },
+              savedLabel,
+            )
+          : null,
+      ),
+      onReroll
+        ? React.createElement(
+            Tooltip,
+            {
+              title:
+                "Save this note and re-roll just this scene (⌘/Ctrl+Enter)",
+            },
+            React.createElement(Button, {
+              size: "small",
+              type: "primary",
+              ghost: true,
+              loading: !!rerollBusy,
+              disabled: !!rerollDisabled,
+              icon: React.createElement(ReloadOutlined),
+              onClick: () => void doReroll(),
+              children: rerollLabel || "Re-roll",
+            }),
+          )
+        : null,
+    ),
   );
 }
 
@@ -6359,6 +6441,10 @@ function FrameGallery({
               'Frame notes for next Regen — e.g. "marlin smaller, no hat band"',
             savedLabel: "will be applied on next frame Regen",
             onPatchScene,
+            onReroll: () => onRunOne(s.id),
+            rerollBusy: busyHere,
+            rerollDisabled: dimmed,
+            rerollLabel: exists ? "Re-roll frame" : "Compose",
           }),
         ),
       );
@@ -6616,6 +6702,10 @@ function ShotGallery({
               'Video notes for next Regen — e.g. "slower pan, keep subject centered"',
             savedLabel: "will be applied on next video Regen",
             onPatchScene,
+            onReroll: () => onRunOne(sid),
+            rerollBusy: busyHere,
+            rerollDisabled: dimmed,
+            rerollLabel: exists ? "Re-roll motion" : "Animate",
           }),
         ),
       );
