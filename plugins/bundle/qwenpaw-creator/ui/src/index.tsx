@@ -1347,6 +1347,26 @@ function ProjectPane({
   };
 
   /**
+   * Director: apply one natural-language instruction to the scene specs.
+   * Spec-only — updates the draft, then the user re-rolls affected
+   * scenes (the inline Re-roll) to render the change. Throws on error so
+   * the DirectorChat panel can surface it inline; returns the summary +
+   * per-scene changelog for the transcript on success.
+   */
+  const onDirector = async (message: string) => {
+    const r = await apiJson("POST", `/creator/projects/${pid}/director`, {
+      message,
+    });
+    setProject((p: any) => ({ ...(p ?? {}), draft: r.draft }));
+    onChange?.();
+    await reload();
+    return {
+      summary: (r.summary as string) || "",
+      changes: (r.changes || []) as any[],
+    };
+  };
+
+  /**
    * Auto-fix loop: validate → regen failing scenes with VLM failure
    * reasons appended to regen_notes → revalidate. Caps at maxIters.
    * Each Stage 2 regen is paid ($0.20-0.30 on gpt-image-2 / ~$0.04
@@ -1875,6 +1895,7 @@ function ProjectPane({
           onRunStage,
           onRunStageAllParallel,
           onAutofix,
+          onDirector,
           onSaveDraft,
           onPatchScene,
           onSelectTake,
@@ -4759,6 +4780,189 @@ function BeatSheetView({ draft, busy, activeStage, onCraft }: any) {
 
 // ── draft panel: YAML viewer + stage runners + ref/frame galleries ──
 
+// Director chat: type a free-form instruction ("scene 1 at dusk, red
+// jacket"), the backend translates it into per-scene spec patches and
+// applies them. Spec-only — the transcript shows which scenes changed,
+// and the user re-rolls those scenes (inline Re-roll) to render it.
+function DirectorChat({ draft, onDirector }: any) {
+  const [input, setInput] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [log, setLog] = React.useState<any[]>([]);
+  const [open, setOpen] = React.useState(true);
+  if (!(draft?.scenes || []).length) return null;
+
+  const send = async () => {
+    const msg = input.trim();
+    if (!msg || busy) return;
+    setBusy(true);
+    try {
+      const r = await onDirector(msg);
+      const changes = r?.changes || [];
+      setLog((prev) => [
+        ...prev,
+        { message: msg, summary: r?.summary || "", changes },
+      ]);
+      setInput("");
+      antMessage.success(
+        changes.length
+          ? `Updated ${changes.length} scene${
+              changes.length > 1 ? "s" : ""
+            } — re-roll to render.`
+          : "No scenes changed.",
+      );
+    } catch (e: any) {
+      antMessage.error(`Director failed: ${compactApiError(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return React.createElement(
+    Card,
+    {
+      size: "small",
+      style: { marginBottom: 12, borderRadius: 8, borderColor: "#e6dcff" },
+      headStyle: { background: "#faf7ff", minHeight: 44 },
+      title: React.createElement(
+        Space,
+        { size: 6 },
+        React.createElement("span", null, "🎬"),
+        React.createElement(AntText, { strong: true }, "Director"),
+        React.createElement(
+          AntText,
+          { type: "secondary", style: { fontSize: 11, fontWeight: 400 } },
+          "— describe a change in plain language",
+        ),
+      ),
+      extra: React.createElement(Button, {
+        size: "small",
+        type: "text",
+        onClick: () => setOpen((v) => !v),
+        children: open ? "Hide" : "Show",
+      }),
+    },
+    open
+      ? React.createElement(
+          "div",
+          null,
+          log.length
+            ? React.createElement(
+                "div",
+                {
+                  style: {
+                    maxHeight: 220,
+                    overflow: "auto",
+                    marginBottom: 8,
+                  },
+                },
+                ...log.map((entry: any, i: number) =>
+                  React.createElement(
+                    "div",
+                    {
+                      key: i,
+                      style: {
+                        marginBottom: 8,
+                        paddingBottom: 8,
+                        borderBottom: "1px dashed #f0f0f0",
+                      },
+                    },
+                    React.createElement(
+                      AntText,
+                      { style: { fontSize: 12 } },
+                      React.createElement(
+                        "span",
+                        { style: { color: "#7a5af0" } },
+                        "› ",
+                      ),
+                      entry.message,
+                    ),
+                    React.createElement(
+                      "div",
+                      { style: { marginTop: 2 } },
+                      React.createElement(
+                        AntText,
+                        { type: "secondary", style: { fontSize: 12 } },
+                        entry.summary || "(no summary)",
+                      ),
+                    ),
+                    entry.changes && entry.changes.length
+                      ? React.createElement(
+                          "div",
+                          { style: { marginTop: 4 } },
+                          ...entry.changes.map((c: any, j: number) =>
+                            React.createElement(
+                              Tooltip,
+                              {
+                                key: j,
+                                title: `${(c.fields || []).join(", ")}${
+                                  c.reason ? " — " + c.reason : ""
+                                }`,
+                              },
+                              React.createElement(
+                                Tag,
+                                {
+                                  color: "purple",
+                                  style: { fontSize: 10, marginBottom: 2 },
+                                },
+                                `${c.scene_id}${c.name ? " " + c.name : ""}`,
+                              ),
+                            ),
+                          ),
+                        )
+                      : React.createElement(
+                          AntText,
+                          { type: "secondary", style: { fontSize: 11 } },
+                          "no scenes changed",
+                        ),
+                  ),
+                ),
+              )
+            : null,
+          React.createElement(TextArea, {
+            value: input,
+            onChange: (e: any) => setInput(e.target.value),
+            onKeyDown: (e: any) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void send();
+              }
+            },
+            placeholder:
+              'e.g. "make scene 1 at dusk and give the boy a red jacket"',
+            autoSize: { minRows: 2, maxRows: 5 },
+            disabled: busy,
+            style: { fontSize: 12 },
+          }),
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginTop: 6,
+              },
+            },
+            React.createElement(
+              AntText,
+              { type: "secondary", style: { fontSize: 10 } },
+              "Edits the spec only — re-roll affected scenes to render. " +
+                "⌘/Ctrl+Enter to send.",
+            ),
+            React.createElement(Button, {
+              type: "primary",
+              size: "small",
+              loading: busy,
+              disabled: !input.trim(),
+              onClick: () => void send(),
+              children: "Send",
+            }),
+          ),
+        )
+      : null,
+  );
+}
+
 function DraftPanel({
   pid,
   draft,
@@ -4772,6 +4976,7 @@ function DraftPanel({
   onRunStage,
   onRunStageAllParallel,
   onAutofix,
+  onDirector,
   onSaveDraft,
   onPatchScene,
   onSelectTake,
@@ -4951,6 +5156,7 @@ function DraftPanel({
   return React.createElement(
     "div",
     null,
+    React.createElement(DirectorChat, { draft, onDirector }),
     React.createElement(
       StageSection,
       {
