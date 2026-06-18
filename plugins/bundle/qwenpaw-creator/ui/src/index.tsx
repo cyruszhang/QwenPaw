@@ -1784,14 +1784,14 @@ function ProjectPane({
               Tooltip,
               {
                 title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${
-                  forecast.breakdown.characters
-                } chars + ${forecast.breakdown.props ?? 0} props + ${
-                  forecast.breakdown.scene_refs
+                  forecast.breakdown?.characters ?? 0
+                } chars + ${forecast.breakdown?.props ?? 0} props + ${
+                  forecast.breakdown?.scene_refs ?? 0
                 } settings + style). Stage 2 frames ≈ $${
                   forecast.stage_2_usd
-                } (${forecast.breakdown.scenes} scenes). Stage 3 I2V ≈ $${
+                } (${forecast.breakdown?.scenes ?? 0} scenes). Stage 3 I2V ≈ $${
                   forecast.stage_3_usd
-                } (${forecast.breakdown.scenes} clips).`,
+                } (${forecast.breakdown?.scenes ?? 0} clips).`,
               },
               React.createElement(
                 Tag,

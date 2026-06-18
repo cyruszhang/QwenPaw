@@ -326,3 +326,36 @@ test("Stop appears during render and cancels it", async ({ page }) => {
   await page.getByRole("button", { name: /Stop/ }).click();
   await expect.poll(() => calls).toContain("cancel");
 });
+
+test("a cost-forecast without a breakdown does not crash the panel", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j({ total_usd: 1 }); // no breakdown
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+
+  await expect(page.getByText("The Reel")).toBeVisible();
+  await expect(page.locator("#harness-error")).toHaveCount(0);
+  expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
+});
