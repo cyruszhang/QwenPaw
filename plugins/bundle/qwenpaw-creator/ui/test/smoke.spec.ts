@@ -262,3 +262,21 @@ test("'Make my film' auto-chains decompose → craft", async ({ page }) => {
   await expect.poll(() => calls).toContain("decompose");
   await expect.poll(() => calls).toContain("craft");
 });
+
+test("Render film opens a budget gate with Draft vs Full", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await mockApi(page);
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+
+  await page.getByRole("button", { name: /Render film/ }).click();
+
+  // One cost confirm before any paid render — Draft (frames) vs Full.
+  await expect(page.getByText("Make the film?")).toBeVisible();
+  await expect(page.getByText(/Draft — frames only/)).toBeVisible();
+  await expect(page.getByText(/Full film/)).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: shot("06-budget-gate.png") });
+  expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
+});

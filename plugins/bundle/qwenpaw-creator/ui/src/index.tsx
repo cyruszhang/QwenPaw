@@ -5360,6 +5360,21 @@ function ReelView({
   const [note, setNote] = React.useState("");
   const [directing, setDirecting] = React.useState(false);
   const [log, setLog] = React.useState<any[]>([]);
+  const [budgetOpen, setBudgetOpen] = React.useState(false);
+  const [rendering, setRendering] = React.useState(false);
+
+  // Budget gate: render only after a single cost confirm. Draft = frames
+  // only (Stage 2); Full also animates (Stage 3) — the expensive step.
+  const renderFilm = async (mode: "draft" | "full") => {
+    setBudgetOpen(false);
+    setRendering(true);
+    try {
+      await onRunStageAllParallel?.("2", false);
+      if (mode === "full") await onRunStageAllParallel?.("3", false);
+    } finally {
+      setRendering(false);
+    }
+  };
 
   const frames = new Map<string, any>(
     (projStatus?.stages?.["2"]?.frames ?? []).map((r: any) => [r.name, r]),
@@ -5455,9 +5470,11 @@ function ReelView({
         React.createElement(Button, {
           type: "primary",
           ghost: true,
-          loading: busy && activeStage === "2",
-          onClick: () => onRunStageAllParallel?.("2", false),
-          children: "Roll all frames",
+          loading:
+            (busy && (activeStage === "2" || activeStage === "3")) || rendering,
+          disabled: !scenes.length,
+          onClick: () => setBudgetOpen(true),
+          children: "Render film ▸",
         }),
         React.createElement(Button, {
           type: "text",
@@ -5619,6 +5636,44 @@ function ReelView({
         },
       },
       "Talk to the film. It patches the script and re-shoots only the scenes you changed.",
+    ),
+    // ── budget gate: one cost confirm before any paid render ──
+    React.createElement(
+      Modal,
+      {
+        open: budgetOpen,
+        title: "Make the film?",
+        onCancel: () => setBudgetOpen(false),
+        footer: null,
+        width: 460,
+      },
+      React.createElement(
+        Paragraph,
+        { type: "secondary", style: { marginBottom: 16 } },
+        `${scenes.length} scene${scenes.length === 1 ? "" : "s"} ready. ` +
+          "Frames get painted first; the full film also animates them " +
+          "(the slow, pricier step). Pick how far to go — you only pay " +
+          "for what you run.",
+      ),
+      React.createElement(
+        Space,
+        { direction: "vertical", style: { width: "100%" }, size: 10 },
+        React.createElement(Button, {
+          block: true,
+          size: "large",
+          onClick: () => void renderFilm("draft"),
+          children: `Draft — frames only · ≈ $${forecast?.stage_2_usd ?? 0}`,
+        }),
+        React.createElement(Button, {
+          block: true,
+          size: "large",
+          type: "primary",
+          onClick: () => void renderFilm("full"),
+          children: `Full film — frames + motion · ≈ $${(
+            (forecast?.stage_2_usd ?? 0) + (forecast?.stage_3_usd ?? 0)
+          ).toFixed(2)}`,
+        }),
+      ),
     ),
   );
 }
