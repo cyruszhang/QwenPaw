@@ -438,6 +438,52 @@ test("budget gate never claims $0 when the cost forecast is unavailable", async 
   ).toBeVisible();
 });
 
+test("a Shoot that produces no frame surfaces an error, not silent success", async ({
+  page,
+}) => {
+  // Regression: Stage 2 used to return 200 even when it produced no image
+  // (e.g. a scene whose Stage-0 references were never generated), so a
+  // failed "Shoot" looked like "nothing happened". Now the backend 422s
+  // and the UI shows it (toast + alert), even down in the Reel strip.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST")
+      return route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail:
+            "No frames were produced — generate the reference images " +
+            "first (run the anchors / Stage 0). scene 00: no refs",
+        }),
+      });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Shoot/ }).first().click();
+  // The failure is surfaced (the Alert title), not swallowed.
+  await expect(page.getByText(/frame compose failed/i).first()).toBeVisible();
+  await page.screenshot({ path: shot("12-shoot-error.png") });
+});
+
 test("Stop appears during render and cancels it", async ({ page }) => {
   const calls: string[] = [];
   await page.route("**/mock.local/api/creator/**", async (route) => {

@@ -1597,6 +1597,10 @@ function ProjectPane({
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: `${label} failed`, message: msg });
+      // In-app toast too — the error Alert renders at the panel top, which
+      // is off-screen when the user is down in the Reel strip clicking
+      // "Shoot". Without this a failed run looks like "nothing happened".
+      antMessage.error(`${label} failed: ${msg.slice(0, 160)}`);
       notify(`${label} failed`, msg.slice(0, 200), {
         tag: `stage-${stage}-err`,
         level: "error",

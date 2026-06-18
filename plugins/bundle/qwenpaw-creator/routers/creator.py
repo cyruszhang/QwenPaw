@@ -2000,6 +2000,29 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     only_scene=body.only_scene,
                     scene_ids=generated_ids,
                 )
+            # A frame compose can "succeed" (HTTP 200) while producing no
+            # image — e.g. a scene whose references (Stage 0) were never
+            # generated. Surface that as an explicit error instead of a
+            # silent 200, so the UI doesn't look like "nothing happened".
+            errored = [
+                s for s in (result.get("scenes") or []) if s.get("error")
+            ]
+            if errored and not generated_ids:
+                reasons = "; ".join(
+                    f"scene {s.get('scene_id')}: {s.get('error')}"
+                    for s in errored[:5]
+                )
+                needs_refs = any(s.get("error") == "no refs" for s in errored)
+                hint = (
+                    " — generate the reference images first (run the "
+                    "anchors / Stage 0), or mark the scene standalone"
+                    if needs_refs
+                    else ""
+                )
+                raise HTTPException(
+                    422,
+                    f"No frames were produced{hint}. {reasons}",
+                )
             return result
 
         async def _run_2_5():
