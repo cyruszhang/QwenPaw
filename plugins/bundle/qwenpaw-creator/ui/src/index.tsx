@@ -1086,6 +1086,9 @@ function ProjectPane({
   const [project, setProject] = React.useState<any>(null);
   const [forecast, setForecast] = React.useState<CostForecast | null>(null);
   const [projStatus, setProjStatus] = React.useState<any>(null);
+  // "The Reel" Studio view (new fluid UX) vs the classic stage accordion.
+  // Studio is the default; the classic panel stays one click away.
+  const [studioMode, setStudioMode] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
   const [activeStage, setActiveStage] = React.useState<string | null>(null);
   const [pendingSceneRun, setPendingSceneRun] = React.useState<{
@@ -1222,6 +1225,13 @@ function ProjectPane({
           // Drop running markers when the whole stage finishes.
           setLiveProgress({});
           reload();
+        } else if (ev.kind === "stage_cancelled") {
+          // The stage stopped early on a cancel request.
+          setLiveProgress({});
+          setBusy(false);
+          setActiveStage(null);
+          antMessage.info("Render stopped.");
+          reload();
         } else if (ev.kind === "decompose_start") {
           setDecomposeStreaming(true);
           setDecomposeStream("");
@@ -1293,6 +1303,7 @@ function ProjectPane({
         { tag: "decompose", level: "success" },
       );
       setTabBadge(0, 1);
+      return r.draft;
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: "Decompose failed", message: msg });
@@ -1343,6 +1354,36 @@ function ProjectPane({
     } finally {
       setBusy(false);
       setActiveStage(null);
+    }
+  };
+
+  /**
+   * "Make my film": auto-chain Pass 1 (decompose) → Pass 2 (craft) so the
+   * user lands in the Reel with a full storyboard — no manual beat-gate /
+   * "craft scenes" step. The paid render stages stay behind the Reel's
+   * own controls (a later slice gates them with a budget confirm).
+   */
+  const onMakeFilm = async () => {
+    const draft = await onDecompose();
+    const hasBeats =
+      !!draft && ((draft.beats || []).length || (draft.scenes || []).length);
+    if (hasBeats && !(draft.scenes || []).length) {
+      await onCraft();
+    }
+  };
+
+  /**
+   * Stop a running render. Cooperative — the backend stage loops check
+   * the flag between scenes and stop before starting more (paid) work;
+   * an in-flight shot still finishes. The stage_cancelled SSE event then
+   * clears the busy state.
+   */
+  const onCancel = async () => {
+    try {
+      await apiJson("POST", `/creator/projects/${pid}/cancel`, {});
+      antMessage.info("Stopping after the current shots…");
+    } catch (e: any) {
+      antMessage.error(`Stop failed: ${compactApiError(e)}`);
     }
   };
 
@@ -1686,8 +1727,9 @@ function ProjectPane({
   );
   React.useEffect(() => {
     const hasScenes = (sidebarDraft?.scenes ?? []).length > 0;
-    onStageRowsChange?.(hasScenes ? sidebarStageRows : null);
-  }, [sidebarDraft, sidebarStageRows, onStageRowsChange]);
+    // In Studio mode the stage rail is redundant with the Reel — hide it.
+    onStageRowsChange?.(hasScenes && !studioMode ? sidebarStageRows : null);
+  }, [sidebarDraft, sidebarStageRows, onStageRowsChange, studioMode]);
   React.useEffect(() => () => onStageRowsChange?.(null), [onStageRowsChange]);
 
   if (!project) {
@@ -1742,14 +1784,14 @@ function ProjectPane({
               Tooltip,
               {
                 title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${
-                  forecast.breakdown.characters
-                } chars + ${forecast.breakdown.props ?? 0} props + ${
-                  forecast.breakdown.scene_refs
+                  forecast.breakdown?.characters ?? 0
+                } chars + ${forecast.breakdown?.props ?? 0} props + ${
+                  forecast.breakdown?.scene_refs ?? 0
                 } settings + style). Stage 2 frames ≈ $${
                   forecast.stage_2_usd
-                } (${forecast.breakdown.scenes} scenes). Stage 3 I2V ≈ $${
+                } (${forecast.breakdown?.scenes ?? 0} scenes). Stage 3 I2V ≈ $${
                   forecast.stage_3_usd
-                } (${forecast.breakdown.scenes} clips).`,
+                } (${forecast.breakdown?.scenes ?? 0} clips).`,
               },
               React.createElement(
                 Tag,
@@ -1767,36 +1809,38 @@ function ProjectPane({
         }),
       ),
     },
-    React.createElement(
-      Steps,
-      {
-        current: currentStep,
-        size: "small",
-        style: {
-          margin: "6px 0 22px",
-          padding: "12px 16px",
-          border: "1px solid #f0f0f0",
-          borderRadius: 8,
-          background: "#fcfcfd",
-        },
-      },
-      React.createElement(Step, {
-        title: "Source",
-        icon: React.createElement(CloudUploadOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Storyboard",
-        icon: React.createElement(ScissorOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Anchors",
-        icon: React.createElement(PictureOutlined),
-      }),
-      React.createElement(Step, {
-        title: "Frames",
-        icon: React.createElement(PlayCircleOutlined),
-      }),
-    ),
+    studioMode && hasDraft
+      ? null
+      : React.createElement(
+          Steps,
+          {
+            current: currentStep,
+            size: "small",
+            style: {
+              margin: "6px 0 22px",
+              padding: "12px 16px",
+              border: "1px solid #f0f0f0",
+              borderRadius: 8,
+              background: "#fcfcfd",
+            },
+          },
+          React.createElement(Step, {
+            title: "Source",
+            icon: React.createElement(CloudUploadOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Storyboard",
+            icon: React.createElement(ScissorOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Anchors",
+            icon: React.createElement(PictureOutlined),
+          }),
+          React.createElement(Step, {
+            title: "Frames",
+            icon: React.createElement(PlayCircleOutlined),
+          }),
+        ),
 
     runError
       ? React.createElement(Alert, {
@@ -1864,6 +1908,7 @@ function ProjectPane({
           activeStage,
           status,
           onSubmit: onDecompose,
+          onMakeFilm,
         })
       : null,
 
@@ -1882,47 +1927,86 @@ function ProjectPane({
 
     // Step 2+: Draft viewer + ref/frame galleries
     hasDraft && (draft.scenes || []).length > 0
-      ? React.createElement(DraftPanel, {
-          pid,
-          draft,
-          styles,
-          projStatus,
-          busy,
-          activeStage,
-          pendingSceneRun,
-          forecast,
-          status,
-          onRunStage,
-          onRunStageAllParallel,
-          onAutofix,
-          onDirector,
-          onSaveDraft,
-          onPatchScene,
-          onSelectTake,
-          onReload: reload,
-          onAddAnchor: (kind: AnchorKind) =>
-            setAnchorEditor({
-              open: true,
-              mode: "add",
-              kind,
-              id: "",
-              description: "",
+      ? React.createElement(
+          "div",
+          null,
+          React.createElement(
+            Space,
+            { size: 4, style: { marginBottom: 12 } },
+            React.createElement(Button, {
+              size: "small",
+              type: studioMode ? "primary" : "default",
+              onClick: () => setStudioMode(true),
+              children: "✨ Studio",
             }),
-          onEditAnchor: (kind: AnchorKind, a: any) =>
-            setAnchorEditor({
-              open: true,
-              mode: "update",
-              kind,
-              id: a.id,
-              description: a.description || "",
+            React.createElement(Button, {
+              size: "small",
+              type: studioMode ? "default" : "primary",
+              onClick: () => setStudioMode(false),
+              children: "Classic",
             }),
-          onDeleteAnchor,
-          onEditScene: (sceneId: string) => {
-            const sc = (draft.scenes || []).find((s: any) => s.id === sceneId);
-            if (sc) setSceneEditor(sc);
-          },
-          liveProgress,
-        })
+          ),
+          studioMode
+            ? React.createElement(ReelView, {
+                pid,
+                draft,
+                projStatus,
+                liveProgress,
+                forecast,
+                busy,
+                activeStage,
+                pendingSceneRun,
+                onRunOne: (sid: string) =>
+                  onRunStage("2", { only_scene: sid, overwrite: true }),
+                onRunStageAllParallel,
+                onDirector,
+                onCancel,
+                onSwitchClassic: () => setStudioMode(false),
+              })
+            : React.createElement(DraftPanel, {
+                pid,
+                draft,
+                styles,
+                projStatus,
+                busy,
+                activeStage,
+                pendingSceneRun,
+                forecast,
+                status,
+                onRunStage,
+                onRunStageAllParallel,
+                onAutofix,
+                onDirector,
+                onSaveDraft,
+                onPatchScene,
+                onSelectTake,
+                onReload: reload,
+                onAddAnchor: (kind: AnchorKind) =>
+                  setAnchorEditor({
+                    open: true,
+                    mode: "add",
+                    kind,
+                    id: "",
+                    description: "",
+                  }),
+                onEditAnchor: (kind: AnchorKind, a: any) =>
+                  setAnchorEditor({
+                    open: true,
+                    mode: "update",
+                    kind,
+                    id: a.id,
+                    description: a.description || "",
+                  }),
+                onDeleteAnchor,
+                onEditScene: (sceneId: string) => {
+                  const sc = (draft.scenes || []).find(
+                    (s: any) => s.id === sceneId,
+                  );
+                  if (sc) setSceneEditor(sc);
+                },
+                liveProgress,
+              }),
+        )
       : null,
 
     // Anchor add/edit modal
@@ -4023,6 +4107,91 @@ function StyleSwatchPicker({ styles, value, onChange }: any) {
 
 // ── decompose form ───────────────────────────────────────────────────
 
+// Zero-config entry: lead with one "Make my film" CTA + a Vibe swatch;
+// every other dial lives behind the Advanced toggle (smart defaults do
+// the rest — the LLM auto-extracts era/genre/tone, providers/voice/beat
+// count all default).
+function MakeFilmHero({
+  styles,
+  styleHint,
+  setStyleHint,
+  busy,
+  activeStage,
+  status,
+  onSubmit,
+  onMakeFilm,
+  showAdvanced,
+  setShowAdvanced,
+}: any) {
+  const ready = !!status?.has_dashscope;
+  return React.createElement(
+    "div",
+    { style: { padding: "6px 0 16px" } },
+    React.createElement(
+      Title,
+      { level: 4, style: { marginBottom: 4 } },
+      "Make your film",
+    ),
+    React.createElement(
+      Paragraph,
+      { type: "secondary", style: { marginBottom: 14 } },
+      "We storyboard it, cast it, shoot the frames, animate, and stitch the " +
+        "cut — you just press go. Pick a vibe (optional), then make it.",
+    ),
+    React.createElement(
+      AntText,
+      {
+        strong: true,
+        style: { fontSize: 12, display: "block", marginBottom: 6 },
+      },
+      "Vibe",
+    ),
+    React.createElement(StyleSwatchPicker, {
+      styles,
+      value: styleHint,
+      onChange: setStyleHint,
+    }),
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginTop: 18,
+        },
+      },
+      React.createElement(Button, {
+        type: "primary",
+        size: "large",
+        loading: busy && activeStage === "decompose",
+        disabled: !ready,
+        onClick: onMakeFilm || onSubmit,
+        children: "✨ Make my film",
+      }),
+      React.createElement(Button, {
+        type: "text",
+        size: "small",
+        onClick: () => setShowAdvanced(!showAdvanced),
+        style: { color: "#8b96b4" },
+        children: showAdvanced
+          ? "Hide advanced options ▲"
+          : "⚙ Advanced options ▾",
+      }),
+    ),
+    !ready
+      ? React.createElement(
+          AntText,
+          {
+            type: "warning",
+            style: { fontSize: 11, display: "block", marginTop: 8 },
+          },
+          "DASHSCOPE_API_KEY missing — set it under Environment Variables.",
+        )
+      : null,
+  );
+}
+
 function DecomposeForm({
   duration,
   setDuration,
@@ -4057,7 +4226,9 @@ function DecomposeForm({
   activeStage,
   status,
   onSubmit,
+  onMakeFilm,
 }: any) {
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const styleOptions = (styles ?? []).map((s: StyleEntry) => ({
     label: `${s.display_name}`,
     value: s.id,
@@ -4066,181 +4237,36 @@ function DecomposeForm({
   return React.createElement(
     Form,
     { layout: "vertical" },
+    React.createElement(MakeFilmHero, {
+      styles,
+      styleHint,
+      setStyleHint,
+      busy,
+      activeStage,
+      status,
+      onSubmit,
+      onMakeFilm,
+      showAdvanced,
+      setShowAdvanced,
+    }),
     React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 6 },
-        React.createElement(
-          Form.Item,
-          { label: "Target duration (s)" },
-          React.createElement(InputNumber, {
-            min: 20,
-            max: 600,
-            value: duration,
-            onChange: (v: any) => setDuration(v ?? 60),
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 6 },
-        React.createElement(
-          Form.Item,
-          {
-            label: "Beat count (optional)",
-            extra:
-              "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
-          },
-          React.createElement(InputNumber, {
-            min: 3,
-            max: 60,
-            value: targetScenes ?? null,
-            onChange: (v: any) =>
-              setTargetScenes(v == null ? undefined : Number(v)),
-            placeholder: "auto",
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          {
-            label: "Style hint (optional — LLM picks if blank)",
-          },
-          React.createElement(Select, {
-            allowClear: true,
-            placeholder: "Let the LLM pick",
-            options: styleOptions,
-            value: styleHint,
-            onChange: (v: any) => setStyleHint(v),
-            style: { width: "100%" },
-            optionFilterProp: "label",
-            showSearch: true,
-          }),
-          React.createElement(StyleSwatchPicker, {
-            styles,
-            value: styleHint,
-            onChange: setStyleHint,
-          }),
-        ),
-      ),
-    ),
-    React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Audience" },
-          React.createElement(Input, {
-            value: audience,
-            onChange: (e: any) => setAudience(e.target.value),
-            placeholder: "general / family",
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Narration voice (CosyVoice)" },
-          React.createElement(Select, {
-            value: voice,
-            onChange: setVoice,
-            options: [
-              { label: "longshu_v2 (deep male)", value: "longshu_v2" },
-              { label: "longwan_v2 (warm male)", value: "longwan_v2" },
-              {
-                label: "longxiaoxia_v2 (warm female)",
-                value: "longxiaoxia_v2",
-              },
-              { label: "longxiaochun_v2 (neutral)", value: "longxiaochun_v2" },
-            ],
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-    ),
-
-    React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Image model" },
-          React.createElement(Select, {
-            value: frameProvider,
-            onChange: setFrameProvider,
-            style: { width: "100%" },
-            options: [
-              {
-                value: "gpt-image-2-dashscope",
-                label: "gpt-image-2 (dashscope)",
-              },
-              { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
-              { value: "qwen-image", label: "qwen-image-2.0-pro" },
-            ],
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Video model" },
-          React.createElement(Select, {
-            value: videoProvider,
-            onChange: setVideoProvider,
-            style: { width: "100%" },
-            options: [
-              { value: "wan27", label: "Wan 2.7" },
-              { value: "happyhorse", label: "HappyHorse 2.0" },
-              { value: "seedance", label: "Seedance 2.0" },
-            ],
-          }),
-        ),
-      ),
-    ),
-
-    // Optional story-level constraints. Leave blank → LLM auto-picks.
-    React.createElement(
-      Card,
-      {
-        size: "small",
-        title: React.createElement(
-          AntText,
-          { type: "secondary" },
-          "Story constraints (optional — LLM auto-picks if blank)",
-        ),
-        style: { marginBottom: 12, background: "#fafafa" },
-        bodyStyle: { padding: 12 },
-      },
+      "div",
+      { style: { display: showAdvanced ? "block" : "none" } },
       React.createElement(
         Row,
-        { gutter: 12 },
+        { gutter: 16 },
         React.createElement(
           Col,
           { span: 6 },
           React.createElement(
             Form.Item,
-            { label: "Era" },
-            React.createElement(Input, {
-              value: era,
-              onChange: (e: any) => setEra(e.target.value),
-              placeholder: "1940s",
+            { label: "Target duration (s)" },
+            React.createElement(InputNumber, {
+              min: 20,
+              max: 600,
+              value: duration,
+              onChange: (v: any) => setDuration(v ?? 60),
+              style: { width: "100%" },
             }),
           ),
         ),
@@ -4249,112 +4275,276 @@ function DecomposeForm({
           { span: 6 },
           React.createElement(
             Form.Item,
-            { label: "Country" },
-            React.createElement(Input, {
-              value: country,
-              onChange: (e: any) => setCountry(e.target.value),
-              placeholder: "Cuba",
+            {
+              label: "Beat count (optional)",
+              extra:
+                "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
+            },
+            React.createElement(InputNumber, {
+              min: 3,
+              max: 60,
+              value: targetScenes ?? null,
+              onChange: (v: any) =>
+                setTargetScenes(v == null ? undefined : Number(v)),
+              placeholder: "auto",
+              style: { width: "100%" },
             }),
           ),
         ),
         React.createElement(
           Col,
-          { span: 6 },
+          { span: 12 },
           React.createElement(
             Form.Item,
-            { label: "Genre" },
-            React.createElement(Input, {
-              value: genre,
-              onChange: (e: any) => setGenre(e.target.value),
-              placeholder: "tragedy / triumph / coming-of-age",
+            {
+              label: "Style hint (optional — LLM picks if blank)",
+            },
+            React.createElement(Select, {
+              allowClear: true,
+              placeholder: "Let the LLM pick",
+              options: styleOptions,
+              value: styleHint,
+              onChange: (v: any) => setStyleHint(v),
+              style: { width: "100%" },
+              optionFilterProp: "label",
+              showSearch: true,
             }),
-          ),
-        ),
-        React.createElement(
-          Col,
-          { span: 6 },
-          React.createElement(
-            Form.Item,
-            { label: "Tone" },
-            React.createElement(Input, {
-              value: tone,
-              onChange: (e: any) => setTone(e.target.value),
-              placeholder: "somber / playful / hopeful",
+            React.createElement(StyleSwatchPicker, {
+              styles,
+              value: styleHint,
+              onChange: setStyleHint,
             }),
           ),
         ),
       ),
       React.createElement(
-        Form.Item,
-        {
-          label:
-            "Story anchor (overall narrative context — propagates to every scene)",
-          extra:
-            "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
-        },
-        React.createElement(TextArea, {
-          value: storyAnchor,
-          onChange: (e: any) => setStoryAnchor(e.target.value),
-          placeholder:
-            "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
-          rows: 2,
-        }),
+        Row,
+        { gutter: 16 },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Audience" },
+            React.createElement(Input, {
+              value: audience,
+              onChange: (e: any) => setAudience(e.target.value),
+              placeholder: "general / family",
+            }),
+          ),
+        ),
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Narration voice (CosyVoice)" },
+            React.createElement(Select, {
+              value: voice,
+              onChange: setVoice,
+              options: [
+                { label: "longshu_v2 (deep male)", value: "longshu_v2" },
+                { label: "longwan_v2 (warm male)", value: "longwan_v2" },
+                {
+                  label: "longxiaoxia_v2 (warm female)",
+                  value: "longxiaoxia_v2",
+                },
+                {
+                  label: "longxiaochun_v2 (neutral)",
+                  value: "longxiaochun_v2",
+                },
+              ],
+              style: { width: "100%" },
+            }),
+          ),
+        ),
       ),
-      React.createElement(
-        Form.Item,
-        {
-          label:
-            "World bible — recurring set-design facts (applies to every scene)",
-          extra:
-            "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
-        },
-        React.createElement(TextArea, {
-          value: worldBible,
-          onChange: (e: any) => setWorldBible(e.target.value),
-          placeholder:
-            "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
-          rows: 3,
-        }),
-      ),
-      React.createElement(
-        Form.Item,
-        {
-          label:
-            "Style directives (one per line — applied on top of every scene)",
-          extra:
-            "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
-        },
-        React.createElement(TextArea, {
-          value: styleDirectives,
-          onChange: (e: any) => setStyleDirectives(e.target.value),
-          placeholder:
-            "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
-          rows: 3,
-        }),
-      ),
-    ),
 
-    status && !status.has_dashscope
-      ? React.createElement(Alert, {
-          type: "warning",
-          message:
-            "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
-          showIcon: true,
-          style: { marginBottom: 12 },
-        })
-      : null,
-    React.createElement(
-      Form.Item,
-      null,
-      React.createElement(Button, {
-        type: "primary",
-        icon: React.createElement(ScissorOutlined),
-        loading: busy && activeStage === "decompose",
-        onClick: onSubmit,
-        size: "large",
-        disabled: !status?.has_dashscope,
-        children: "Decompose with LLM",
-      }),
+      React.createElement(
+        Row,
+        { gutter: 16 },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Image model" },
+            React.createElement(Select, {
+              value: frameProvider,
+              onChange: setFrameProvider,
+              style: { width: "100%" },
+              options: [
+                {
+                  value: "gpt-image-2-dashscope",
+                  label: "gpt-image-2 (dashscope)",
+                },
+                { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+                { value: "qwen-image", label: "qwen-image-2.0-pro" },
+              ],
+            }),
+          ),
+        ),
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Video model" },
+            React.createElement(Select, {
+              value: videoProvider,
+              onChange: setVideoProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "wan27", label: "Wan 2.7" },
+                { value: "happyhorse", label: "HappyHorse 2.0" },
+                { value: "seedance", label: "Seedance 2.0" },
+              ],
+            }),
+          ),
+        ),
+      ),
+
+      // Optional story-level constraints. Leave blank → LLM auto-picks.
+      React.createElement(
+        Card,
+        {
+          size: "small",
+          title: React.createElement(
+            AntText,
+            { type: "secondary" },
+            "Story constraints (optional — LLM auto-picks if blank)",
+          ),
+          style: { marginBottom: 12, background: "#fafafa" },
+          bodyStyle: { padding: 12 },
+        },
+        React.createElement(
+          Row,
+          { gutter: 12 },
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Era" },
+              React.createElement(Input, {
+                value: era,
+                onChange: (e: any) => setEra(e.target.value),
+                placeholder: "1940s",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Country" },
+              React.createElement(Input, {
+                value: country,
+                onChange: (e: any) => setCountry(e.target.value),
+                placeholder: "Cuba",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Genre" },
+              React.createElement(Input, {
+                value: genre,
+                onChange: (e: any) => setGenre(e.target.value),
+                placeholder: "tragedy / triumph / coming-of-age",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Tone" },
+              React.createElement(Input, {
+                value: tone,
+                onChange: (e: any) => setTone(e.target.value),
+                placeholder: "somber / playful / hopeful",
+              }),
+            ),
+          ),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "Story anchor (overall narrative context — propagates to every scene)",
+            extra:
+              "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
+          },
+          React.createElement(TextArea, {
+            value: storyAnchor,
+            onChange: (e: any) => setStoryAnchor(e.target.value),
+            placeholder:
+              "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
+            rows: 2,
+          }),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "World bible — recurring set-design facts (applies to every scene)",
+            extra:
+              "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
+          },
+          React.createElement(TextArea, {
+            value: worldBible,
+            onChange: (e: any) => setWorldBible(e.target.value),
+            placeholder:
+              "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
+            rows: 3,
+          }),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "Style directives (one per line — applied on top of every scene)",
+            extra:
+              "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
+          },
+          React.createElement(TextArea, {
+            value: styleDirectives,
+            onChange: (e: any) => setStyleDirectives(e.target.value),
+            placeholder:
+              "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
+            rows: 3,
+          }),
+        ),
+      ),
+
+      status && !status.has_dashscope
+        ? React.createElement(Alert, {
+            type: "warning",
+            message:
+              "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
+            showIcon: true,
+            style: { marginBottom: 12 },
+          })
+        : null,
+      React.createElement(
+        Form.Item,
+        null,
+        React.createElement(Button, {
+          type: "primary",
+          icon: React.createElement(ScissorOutlined),
+          loading: busy && activeStage === "decompose",
+          onClick: onSubmit,
+          size: "large",
+          disabled: !status?.has_dashscope,
+          children: "Decompose with LLM",
+        }),
+      ),
     ),
   );
 }
@@ -4960,6 +5150,562 @@ function DirectorChat({ draft, onDirector }: any) {
           ),
         )
       : null,
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// "The Reel" — the Studio view. A self-assembling horizontal film strip
+// that replaces the stage-by-stage accordion. Each scene is a living
+// tile that climbs a maturity ladder (scripted → framed → in motion) as
+// the existing SSE pipeline events land; you refine by TALKING to the
+// Director bar, which patches the spec and auto-re-rolls only the
+// affected scenes. Rides entirely on existing endpoints + the SSE bus.
+// ═══════════════════════════════════════════════════════════════════
+
+function MaturityLadder({ framed, moving, running }: any) {
+  const rungs = [
+    { on: true, label: "scripted" },
+    { on: framed, label: "framed" },
+    { on: moving, label: "in motion" },
+  ];
+  return React.createElement(
+    "div",
+    { style: { display: "flex", gap: 3, marginTop: 7 } },
+    ...rungs.map((r, i) =>
+      React.createElement("div", {
+        key: i,
+        title: r.label,
+        style: {
+          flex: 1,
+          height: 3,
+          borderRadius: 2,
+          background: r.on ? "#8b6dff" : "rgba(255,255,255,0.13)",
+          boxShadow: running && r.on ? "0 0 7px #8b6dff" : "none",
+          transition: "background .4s, box-shadow .4s",
+        },
+      }),
+    ),
+  );
+}
+
+function SceneTile({
+  pid,
+  scene,
+  frameAsset,
+  shotAsset,
+  live,
+  selected,
+  busyHere,
+  onSelect,
+  onReroll,
+}: any) {
+  const framed = Boolean(frameAsset);
+  const moving = Boolean(shotAsset);
+  const running = busyHere || live?.state === "running";
+  const failed = live?.state === "failed";
+  const frameName = `${scene.id}_${scene.name}_frame.png`;
+  const thumb = framed ? refUrl(pid, frameName, frameAsset?.size) : null;
+  return React.createElement(
+    "div",
+    {
+      onClick: () => onSelect(scene.id),
+      style: {
+        flex: "0 0 176px",
+        cursor: "pointer",
+        borderRadius: 10,
+        overflow: "hidden",
+        border: selected
+          ? "2px solid #8b6dff"
+          : "2px solid rgba(255,255,255,0.06)",
+        background: "#161a27",
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          position: "relative",
+          width: "100%",
+          height: 112,
+          background: thumb
+            ? "#000"
+            : "linear-gradient(135deg,#222a40,#12141f)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        },
+      },
+      thumb
+        ? React.createElement("img", {
+            src: thumb,
+            style: {
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              filter: running ? "saturate(.45) blur(1px)" : "none",
+              transition: "filter .6s",
+            },
+          })
+        : React.createElement(
+            "div",
+            {
+              style: {
+                color: "#7d88a6",
+                fontSize: 10,
+                lineHeight: 1.4,
+                padding: 10,
+                textAlign: "center",
+              },
+            },
+            String(scene.scene_description || scene.name || "").slice(0, 90),
+          ),
+      moving
+        ? React.createElement(
+            Tag,
+            {
+              color: "blue",
+              style: {
+                position: "absolute",
+                top: 6,
+                left: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "▶ clip",
+          )
+        : null,
+      running
+        ? React.createElement(
+            Tag,
+            {
+              color: "processing",
+              style: {
+                position: "absolute",
+                top: 6,
+                right: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "● working",
+          )
+        : null,
+      failed
+        ? React.createElement(
+            Tag,
+            {
+              color: "red",
+              style: {
+                position: "absolute",
+                top: 6,
+                right: 6,
+                margin: 0,
+                fontSize: 9,
+              },
+            },
+            "failed",
+          )
+        : null,
+    ),
+    React.createElement(
+      "div",
+      { style: { padding: "7px 9px 9px" } },
+      React.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 6,
+          },
+        },
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#dfe4f1",
+              fontSize: 11,
+              fontWeight: 600,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            },
+          },
+          `${scene.id} · ${scene.name}`,
+        ),
+        React.createElement(
+          AntText,
+          { style: { color: "#6f7a96", fontSize: 10 } },
+          `${scene.duration || 8}s`,
+        ),
+      ),
+      React.createElement(MaturityLadder, { framed, moving, running }),
+      React.createElement(
+        Tooltip,
+        { title: "Re-shoot this scene" },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          loading: running,
+          icon: React.createElement(ReloadOutlined),
+          onClick: (e: any) => {
+            e.stopPropagation();
+            onReroll(scene.id);
+          },
+          style: { color: "#9aa6c4", padding: "0 4px", marginTop: 4 },
+          children: framed ? "Re-shoot" : "Shoot",
+        }),
+      ),
+    ),
+  );
+}
+
+function ReelView({
+  pid,
+  draft,
+  projStatus,
+  liveProgress,
+  forecast,
+  busy,
+  activeStage,
+  pendingSceneRun,
+  onRunOne,
+  onRunStageAllParallel,
+  onDirector,
+  onCancel,
+  onSwitchClassic,
+}: any) {
+  const scenes: any[] = draft.scenes || [];
+  const [selectedId, setSelectedId] = React.useState<string>(
+    scenes[0]?.id ?? "",
+  );
+  const [note, setNote] = React.useState("");
+  const [directing, setDirecting] = React.useState(false);
+  const [log, setLog] = React.useState<any[]>([]);
+  const [budgetOpen, setBudgetOpen] = React.useState(false);
+  const [rendering, setRendering] = React.useState(false);
+
+  // Budget gate: render only after a single cost confirm. Draft = frames
+  // only (Stage 2); Full also animates (Stage 3) — the expensive step.
+  const renderFilm = async (mode: "draft" | "full") => {
+    setBudgetOpen(false);
+    setRendering(true);
+    try {
+      await onRunStageAllParallel?.("2", false);
+      if (mode === "full") await onRunStageAllParallel?.("3", false);
+    } finally {
+      setRendering(false);
+    }
+  };
+
+  const frames = new Map<string, any>(
+    (projStatus?.stages?.["2"]?.frames ?? []).map((r: any) => [r.name, r]),
+  );
+  const shots = new Map<string, any>(
+    (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
+  );
+  const assetFor = (s: any) => ({
+    frame: frames.get(`${s.id}_${s.name}_frame.png`),
+    shot: shots.get(`${s.id}_${s.name}_raw.mp4`),
+  });
+
+  const nFramed = scenes.filter((s) => assetFor(s).frame).length;
+  const nMoving = scenes.filter((s) => assetFor(s).shot).length;
+  const live = liveProgress || {};
+
+  const selected = scenes.find((s) => s.id === selectedId) || scenes[0];
+  const selAsset = selected ? assetFor(selected) : { frame: null, shot: null };
+
+  const direct = async () => {
+    const msg = note.trim();
+    if (!msg || directing) return;
+    setDirecting(true);
+    try {
+      const r = await onDirector(msg);
+      const changes = r?.changes || [];
+      setLog((p) => [...p, { msg, summary: r?.summary || "", changes }]);
+      setNote("");
+      // Auto-chain the re-roll the user used to do by hand.
+      for (const c of changes) {
+        if (c.scene_id) onRunOne(c.scene_id);
+      }
+      antMessage.success(
+        changes.length
+          ? `Re-shooting ${changes.length} scene${
+              changes.length > 1 ? "s" : ""
+            }…`
+          : "No scenes changed.",
+      );
+    } catch (e: any) {
+      antMessage.error(`Director failed: ${compactApiError(e)}`);
+    } finally {
+      setDirecting(false);
+    }
+  };
+
+  return React.createElement(
+    "div",
+    {
+      style: {
+        background: "#0d1018",
+        borderRadius: 12,
+        padding: 18,
+        color: "#dfe4f1",
+      },
+    },
+    // ── header: title + progress + cost + roll-all + classic toggle ──
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 14,
+        },
+      },
+      React.createElement(
+        Space,
+        { size: 10 },
+        React.createElement(
+          "span",
+          { style: { fontSize: 18, fontWeight: 700 } },
+          "🎬 The Reel",
+        ),
+        React.createElement(
+          AntText,
+          { style: { color: "#8b96b4", fontSize: 12 } },
+          `${nMoving}/${scenes.length} in motion · ${nFramed}/${scenes.length} framed`,
+        ),
+        forecast
+          ? React.createElement(
+              Tag,
+              { color: "gold", style: { margin: 0 } },
+              `≈ $${forecast.total_usd}`,
+            )
+          : null,
+      ),
+      React.createElement(
+        Space,
+        { size: 8 },
+        rendering || (busy && (activeStage === "2" || activeStage === "3"))
+          ? React.createElement(Button, {
+              danger: true,
+              onClick: onCancel,
+              children: "■ Stop",
+            })
+          : null,
+        React.createElement(Button, {
+          type: "primary",
+          ghost: true,
+          loading:
+            (busy && (activeStage === "2" || activeStage === "3")) || rendering,
+          disabled: !scenes.length,
+          onClick: () => setBudgetOpen(true),
+          children: "Render film ▸",
+        }),
+        React.createElement(Button, {
+          type: "text",
+          size: "small",
+          onClick: onSwitchClassic,
+          style: { color: "#8b96b4" },
+          children: "Classic view ↗",
+        }),
+      ),
+    ),
+    // ── hero: the selected scene, big ──
+    selected
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              borderRadius: 10,
+              overflow: "hidden",
+              background: "#000",
+              marginBottom: 14,
+              maxHeight: 360,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            },
+          },
+          selAsset.shot
+            ? React.createElement("video", {
+                src: refUrl(pid, `${selected.id}_${selected.name}_raw.mp4`),
+                controls: true,
+                style: { width: "100%", maxHeight: 360 },
+              })
+            : selAsset.frame
+            ? React.createElement("img", {
+                src: refUrl(
+                  pid,
+                  `${selected.id}_${selected.name}_frame.png`,
+                  selAsset.frame?.size,
+                ),
+                style: { width: "100%", maxHeight: 360, objectFit: "contain" },
+              })
+            : React.createElement(
+                "div",
+                {
+                  style: {
+                    height: 200,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#7d88a6",
+                    padding: 20,
+                    textAlign: "center",
+                  },
+                },
+                String(
+                  selected.scene_description || "Not shot yet — re-shoot it.",
+                ),
+              ),
+        )
+      : null,
+    // ── the strip ──
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          gap: 10,
+          overflowX: "auto",
+          paddingBottom: 8,
+        },
+      },
+      ...scenes.map((s) => {
+        const a = assetFor(s);
+        const busyHere =
+          pendingSceneRun?.sceneId === s.id || live[s.id]?.state === "running";
+        return React.createElement(SceneTile, {
+          key: s.id,
+          pid,
+          scene: s,
+          frameAsset: a.frame,
+          shotAsset: a.shot,
+          live: live[s.id],
+          busyHere,
+          selected: s.id === selectedId,
+          onSelect: setSelectedId,
+          onReroll: onRunOne,
+        });
+      }),
+    ),
+    // ── director bar ──
+    log.length
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              marginTop: 12,
+              maxHeight: 90,
+              overflow: "auto",
+              fontSize: 12,
+            },
+          },
+          ...log
+            .slice(-3)
+            .map((e: any, i: number) =>
+              React.createElement(
+                "div",
+                { key: i, style: { marginBottom: 4 } },
+                React.createElement(
+                  AntText,
+                  { style: { color: "#8b6dff" } },
+                  "› ",
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#aeb6cc" } },
+                  `${e.msg} — `,
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#6f7a96" } },
+                  e.summary || "(no change)",
+                ),
+              ),
+            ),
+        )
+      : null,
+    React.createElement(
+      "div",
+      { style: { display: "flex", gap: 8, marginTop: 12 } },
+      React.createElement(Input, {
+        value: note,
+        onChange: (e: any) => setNote(e.target.value),
+        onPressEnter: () => void direct(),
+        placeholder:
+          'Direct the film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
+        disabled: directing,
+        style: {
+          background: "#161a27",
+          borderColor: "#2a3148",
+          color: "#dfe4f1",
+        },
+      }),
+      React.createElement(Button, {
+        type: "primary",
+        loading: directing,
+        disabled: !note.trim(),
+        onClick: () => void direct(),
+        children: "Direct",
+      }),
+    ),
+    React.createElement(
+      AntText,
+      {
+        style: {
+          color: "#5b647d",
+          fontSize: 10,
+          display: "block",
+          marginTop: 6,
+        },
+      },
+      "Talk to the film. It patches the script and re-shoots only the scenes you changed.",
+    ),
+    // ── budget gate: one cost confirm before any paid render ──
+    React.createElement(
+      Modal,
+      {
+        open: budgetOpen,
+        title: "Make the film?",
+        onCancel: () => setBudgetOpen(false),
+        footer: null,
+        width: 460,
+      },
+      React.createElement(
+        Paragraph,
+        { type: "secondary", style: { marginBottom: 16 } },
+        `${scenes.length} scene${scenes.length === 1 ? "" : "s"} ready. ` +
+          "Frames get painted first; the full film also animates them " +
+          "(the slow, pricier step). Pick how far to go — you only pay " +
+          "for what you run.",
+      ),
+      React.createElement(
+        Space,
+        { direction: "vertical", style: { width: "100%" }, size: 10 },
+        React.createElement(Button, {
+          block: true,
+          size: "large",
+          onClick: () => void renderFilm("draft"),
+          children: `Draft — frames only · ≈ $${forecast?.stage_2_usd ?? 0}`,
+        }),
+        React.createElement(Button, {
+          block: true,
+          size: "large",
+          type: "primary",
+          onClick: () => void renderFilm("full"),
+          children: `Full film — frames + motion · ≈ $${(
+            (forecast?.stage_2_usd ?? 0) + (forecast?.stage_3_usd ?? 0)
+          ).toFixed(2)}`,
+        }),
+      ),
+    ),
   );
 }
 

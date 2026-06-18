@@ -1773,6 +1773,23 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
 
     # ─── stage runner ────────────────────────────────────────────────
 
+    @router.post("/projects/{pid}/cancel")
+    async def cancel_stage(pid: str) -> dict:
+        """Cooperatively cancel the project's running stage. The stage
+        loops check this flag between scenes and stop before starting
+        more (paid) work; an in-flight scene call still finishes.
+        """
+        safe_project_id(pid)
+        try:
+            from progress import (  # type: ignore  # noqa: PLC0415
+                request_cancel,
+            )
+
+            request_cancel(pid)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(500, f"cancel failed: {exc}") from exc
+        return {"ok": True, "project_id": pid, "cancelling": True}
+
     @router.post("/projects/{pid}/stage")
     async def run_stage(pid: str, body: StageRunRequest) -> dict:
         # Entry log + force-flush so we can SEE in qwenpaw.log whether
@@ -1791,6 +1808,15 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 h.flush()
             except Exception:  # noqa: BLE001
                 pass
+        # Fresh run — clear any stale cancel flag from a prior stage.
+        try:
+            from progress import (  # type: ignore  # noqa: PLC0415
+                clear_cancel,
+            )
+
+            clear_cancel(pid)
+        except Exception:  # noqa: BLE001
+            pass
         if body.stage not in (
             "0",
             "0a",

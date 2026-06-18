@@ -53,6 +53,18 @@ def _try_emit(pid: str | None, kind: str, **payload) -> None:
         pass
 
 
+def _is_cancelled(pid: str | None) -> bool:
+    """Best-effort check of the cooperative per-project cancel flag."""
+    if not pid:
+        return False
+    try:
+        from progress import is_cancelled  # type: ignore
+
+        return is_cancelled(pid)
+    except Exception:
+        return False
+
+
 def _load_wan27_tool():
     from tools_loader import load_tool_module  # type: ignore
 
@@ -203,6 +215,14 @@ async def run_stage_03(
     _try_emit(pid, "stage_start", stage="3", total=len(target_scenes))
 
     for scene in target_scenes:
+        if _is_cancelled(pid):
+            logger.info(
+                "[cancel] stage 3 stopping before %s_%s",
+                scene.scene_id, scene.name,
+            )
+            _try_emit(pid, "stage_cancelled", stage="3",
+                      done=generated_count, total=len(produced))
+            break
         target_mp4 = output_dir / f"{scene.scene_id}_{scene.name}_raw.mp4"
         frame_png = output_dir / f"{scene.scene_id}_{scene.name}_frame.png"
 

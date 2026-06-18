@@ -376,6 +376,18 @@ def _try_emit(pid: Optional[str], kind: str, **payload) -> None:
         pass
 
 
+def _is_cancelled(pid: Optional[str]) -> bool:
+    """Best-effort check of the cooperative per-project cancel flag."""
+    if not pid:
+        return False
+    try:
+        from progress import is_cancelled  # type: ignore
+
+        return is_cancelled(pid)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def run_stage_02_v15(
     project_spec: ProjectSpec,
     output_dir: Path,
@@ -415,6 +427,10 @@ async def run_stage_02_v15(
     _try_emit(pid, "stage_start", stage="2", total=len(target_scenes))
 
     for scene in target_scenes:
+        if _is_cancelled(pid):
+            logger.info("[cancel] stage 2 stopping before %s", scene.scene_id)
+            _try_emit(pid, "stage_cancelled", stage="2")
+            break
         _try_emit(pid, "scene_start", stage="2",
                   scene_id=scene.scene_id, name=scene.name)
         target = output_dir / f"{scene.scene_id}_{scene.name}_frame.png"
