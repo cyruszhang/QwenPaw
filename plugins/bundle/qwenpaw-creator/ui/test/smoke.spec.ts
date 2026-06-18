@@ -231,6 +231,63 @@ test("a multi-scene Director edit runs as one coherent render", async ({
   await page.screenshot({ path: shot("10-director-multiscene.png") });
 });
 
+test("a clip left stale by a frame re-shoot is flagged, not played", async ({
+  page,
+}) => {
+  // Regression: re-shooting a frame (Stage 2) leaves the old motion clip
+  // (Stage 3) on disk. The Reel used to still tag it "▶ clip" and play the
+  // outdated video in the hero. With mtimes, a clip older than its frame is
+  // "⟳ clip outdated" and the hero falls back to the new frame.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p === "/projects/demo/status")
+      return j({
+        id: "demo",
+        stages: {
+          "2": {
+            frames: [
+              // scene 00 frame re-shot AFTER its clip -> stale clip
+              { name: "00_open_frame.png", size: 100, mtime: 2000 },
+              // scene 01 frame older than its clip -> valid clip
+              { name: "01_storm_frame.png", size: 100, mtime: 500 },
+            ],
+          },
+          "3": {
+            shots: [
+              { name: "00_open_raw.mp4", size: 200, mtime: 1000 },
+              { name: "01_storm_raw.mp4", size: 200, mtime: 1500 },
+            ],
+          },
+        },
+      });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  // Scene 00 (selected by default) has a stale clip → flagged, not "▶ clip".
+  await expect(page.getByText("⟳ clip outdated")).toBeVisible();
+  // Scene 01's clip is still valid → it keeps the play tag.
+  await expect(page.getByText("▶ clip")).toBeVisible();
+  // The hero must not play the stale clip (falls back to the frame).
+  await expect(page.locator("video")).toHaveCount(0);
+  await page.screenshot({ path: shot("11-stale-clip.png") });
+});
+
 test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));

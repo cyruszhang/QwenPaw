@@ -1726,7 +1726,14 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         if refs_dir.is_dir():
             for f in sorted(refs_dir.iterdir()):
                 if f.is_file() and f.suffix.lower() == ".png":
-                    refs.append({"name": f.name, "size": f.stat().st_size})
+                    st = f.stat()
+                    refs.append(
+                        {
+                            "name": f.name,
+                            "size": st.st_size,
+                            "mtime": st.st_mtime,
+                        },
+                    )
         out["stages"]["0"] = {"refs": refs}
 
         frames: list[dict] = []
@@ -1738,7 +1745,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 if not f.is_file():
                     continue
                 n = f.name
-                entry = {"name": n, "size": f.stat().st_size}
+                st = f.stat()
+                # mtime lets the UI spot a motion clip left stale by a
+                # later frame re-shoot (frame newer than its raw.mp4).
+                entry = {"name": n, "size": st.st_size, "mtime": st.st_mtime}
                 if n.endswith("_frame.png"):
                     frames.append(entry)
                 elif n.endswith("_raw.mp4"):

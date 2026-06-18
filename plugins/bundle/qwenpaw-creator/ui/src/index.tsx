@@ -5227,6 +5227,7 @@ function SceneTile({
   scene,
   frameAsset,
   shotAsset,
+  shotStale,
   live,
   selected,
   busyHere,
@@ -5234,7 +5235,10 @@ function SceneTile({
   onReroll,
 }: any) {
   const framed = Boolean(frameAsset);
-  const moving = Boolean(shotAsset);
+  // A clip left over from a since-replaced frame isn't a real "in motion"
+  // state — show it as needing a re-animate, not a playable clip.
+  const moving = Boolean(shotAsset) && !shotStale;
+  const stale = Boolean(shotAsset) && Boolean(shotStale);
   const running = busyHere || live?.state === "running";
   const failed = live?.state === "failed";
   const frameName = `${scene.id}_${scene.name}_frame.png`;
@@ -5307,6 +5311,26 @@ function SceneTile({
               },
             },
             "▶ clip",
+          )
+        : null,
+      stale
+        ? React.createElement(
+            Tooltip,
+            { title: "The frame changed — re-animate to refresh the clip" },
+            React.createElement(
+              Tag,
+              {
+                color: "orange",
+                style: {
+                  position: "absolute",
+                  top: 6,
+                  left: 6,
+                  margin: 0,
+                  fontSize: 9,
+                },
+              },
+              "⟳ clip outdated",
+            ),
           )
         : null,
       running
@@ -5445,17 +5469,29 @@ function ReelView({
   const shots = new Map<string, any>(
     (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
   );
-  const assetFor = (s: any) => ({
-    frame: frames.get(`${s.id}_${s.name}_frame.png`),
-    shot: shots.get(`${s.id}_${s.name}_raw.mp4`),
-  });
+  const assetFor = (s: any) => {
+    const frame = frames.get(`${s.id}_${s.name}_frame.png`);
+    const shot = shots.get(`${s.id}_${s.name}_raw.mp4`);
+    // A motion clip is animated FROM a frame; if the frame was re-shot
+    // afterwards (newer mtime) the clip no longer matches it — treat it
+    // as stale so we don't play/flaunt an outdated video.
+    const shotStale = Boolean(
+      frame && shot && frame.mtime && shot.mtime && frame.mtime > shot.mtime,
+    );
+    return { frame, shot, shotStale };
+  };
 
   const nFramed = scenes.filter((s) => assetFor(s).frame).length;
-  const nMoving = scenes.filter((s) => assetFor(s).shot).length;
+  const nMoving = scenes.filter((s) => {
+    const a = assetFor(s);
+    return a.shot && !a.shotStale;
+  }).length;
   const live = liveProgress || {};
 
   const selected = scenes.find((s) => s.id === selectedId) || scenes[0];
-  const selAsset = selected ? assetFor(selected) : { frame: null, shot: null };
+  const selAsset = selected
+    ? assetFor(selected)
+    : { frame: null, shot: null, shotStale: false };
 
   const direct = async () => {
     const msg = note.trim();
@@ -5576,7 +5612,7 @@ function ReelView({
               justifyContent: "center",
             },
           },
-          selAsset.shot
+          selAsset.shot && !selAsset.shotStale
             ? React.createElement("video", {
                 src: refUrl(pid, `${selected.id}_${selected.name}_raw.mp4`),
                 controls: true,
@@ -5631,6 +5667,7 @@ function ReelView({
           scene: s,
           frameAsset: a.frame,
           shotAsset: a.shot,
+          shotStale: a.shotStale,
           live: live[s.id],
           busyHere,
           selected: s.id === selectedId,
