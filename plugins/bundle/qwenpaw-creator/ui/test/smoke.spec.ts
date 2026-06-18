@@ -280,3 +280,49 @@ test("Render film opens a budget gate with Draft vs Full", async ({ page }) => {
   await page.screenshot({ path: shot("06-budget-gate.png") });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
+
+test("Stop appears during render and cancels it", async ({ page }) => {
+  const calls: string[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST") {
+      calls.push("stage");
+      await new Promise((r) => setTimeout(r, 3000)); // keep render in flight
+      return j({ ok: true });
+    }
+    if (p.endsWith("/cancel") && method === "POST") {
+      calls.push("cancel");
+      return j({ ok: true, cancelling: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Render film/ }).click();
+  await page.getByRole("button", { name: /Full film/ }).click();
+
+  // The render is in flight → a Stop button appears; clicking it cancels.
+  await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible();
+  await expect(page.getByText("Make the film?")).toBeHidden();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: shot("07-rendering-stop.png") });
+  await page.getByRole("button", { name: /Stop/ }).click();
+  await expect.poll(() => calls).toContain("cancel");
+});

@@ -1225,6 +1225,13 @@ function ProjectPane({
           // Drop running markers when the whole stage finishes.
           setLiveProgress({});
           reload();
+        } else if (ev.kind === "stage_cancelled") {
+          // The stage stopped early on a cancel request.
+          setLiveProgress({});
+          setBusy(false);
+          setActiveStage(null);
+          antMessage.info("Render stopped.");
+          reload();
         } else if (ev.kind === "decompose_start") {
           setDecomposeStreaming(true);
           setDecomposeStream("");
@@ -1362,6 +1369,21 @@ function ProjectPane({
       !!draft && ((draft.beats || []).length || (draft.scenes || []).length);
     if (hasBeats && !(draft.scenes || []).length) {
       await onCraft();
+    }
+  };
+
+  /**
+   * Stop a running render. Cooperative — the backend stage loops check
+   * the flag between scenes and stop before starting more (paid) work;
+   * an in-flight shot still finishes. The stage_cancelled SSE event then
+   * clears the busy state.
+   */
+  const onCancel = async () => {
+    try {
+      await apiJson("POST", `/creator/projects/${pid}/cancel`, {});
+      antMessage.info("Stopping after the current shots…");
+    } catch (e: any) {
+      antMessage.error(`Stop failed: ${compactApiError(e)}`);
     }
   };
 
@@ -1938,6 +1960,7 @@ function ProjectPane({
                   onRunStage("2", { only_scene: sid, overwrite: true }),
                 onRunStageAllParallel,
                 onDirector,
+                onCancel,
                 onSwitchClassic: () => setStudioMode(false),
               })
             : React.createElement(DraftPanel, {
@@ -5351,6 +5374,7 @@ function ReelView({
   onRunOne,
   onRunStageAllParallel,
   onDirector,
+  onCancel,
   onSwitchClassic,
 }: any) {
   const scenes: any[] = draft.scenes || [];
@@ -5467,6 +5491,13 @@ function ReelView({
       React.createElement(
         Space,
         { size: 8 },
+        rendering || (busy && (activeStage === "2" || activeStage === "3"))
+          ? React.createElement(Button, {
+              danger: true,
+              onClick: onCancel,
+              children: "■ Stop",
+            })
+          : null,
         React.createElement(Button, {
           type: "primary",
           ghost: true,

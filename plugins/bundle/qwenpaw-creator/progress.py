@@ -23,6 +23,29 @@ from typing import AsyncIterator, Optional
 logger = logging.getLogger(__name__)
 
 
+# ── Cancellation ────────────────────────────────────────────────────
+# A cooperative cancel flag per project. The /cancel route sets it; the
+# pipeline stage loops check it between scenes and stop before starting
+# more (paid) work. Cooperative, not a hard kill — an in-flight scene
+# call finishes, but no further scenes start.
+_CANCELLED: set = set()
+
+
+def request_cancel(pid: str) -> None:
+    """Ask the running stage for ``pid`` to stop before its next scene."""
+    _CANCELLED.add(pid)
+
+
+def is_cancelled(pid: str) -> bool:
+    """True if a cancel was requested for ``pid`` and not yet cleared."""
+    return pid in _CANCELLED
+
+
+def clear_cancel(pid: str) -> None:
+    """Reset the cancel flag — call at the start of every fresh run."""
+    _CANCELLED.discard(pid)
+
+
 class StreamCoalescer:
     """Throttle streamed text deltas into low-frequency full snapshots.
 
