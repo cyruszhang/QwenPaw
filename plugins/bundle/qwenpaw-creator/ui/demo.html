@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>QwenPaw Creator — "The Reel" demo</title>
+    <!--
+      Standalone, no-backend demo of the new "Reel" Studio UX. Loads the
+      REAL built panel (./dist/index.js) inside a mock of the console host
+      and serves canned /api/creator responses in-page — so you can click
+      around the revamp (Reel, Director bar, budget gate, Stop) without a
+      server or API keys.  Just open this file in a browser:
+          npm run build         # once, to (re)build ./dist/index.js
+          open demo.html        # macOS  (or: xdg-open / drag into a browser)
+    -->
+    <script src="./node_modules/react/umd/react.development.js"></script>
+    <script src="./node_modules/react-dom/umd/react-dom.development.js"></script>
+    <script src="./node_modules/dayjs/dayjs.min.js"></script>
+    <script src="./node_modules/antd/dist/antd.js"></script>
+    <script src="./node_modules/@ant-design/icons/dist/index.umd.js"></script>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+      #banner {
+        background: #0d1018;
+        color: #aeb6cc;
+        font-size: 12px;
+        padding: 6px 16px;
+      }
+      #banner b {
+        color: #8b6dff;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="banner">
+      <b>Demo</b> — real panel, mocked data (no backend). Click the
+      project on the left → the Reel. Try the <b>Director</b> bar,
+      <b>Render film ▸</b> (budget gate), and the <b>Stop</b> button;
+      toggle <b>Classic</b> to see the old accordion.
+    </div>
+    <div id="root"></div>
+
+    <script>
+      // ── host contract ────────────────────────────────────────────
+      window.__capturedRoutes = null;
+      window.QwenPaw = {
+        host: {
+          React: window.React,
+          antd: window.antd,
+          antdIcons: window.icons,
+          getApiUrl: function (p) {
+            return "https://mock.local/api" + p;
+          },
+          getApiToken: function () {
+            return "demo-token";
+          },
+        },
+        registerRoutes: function (id, routes) {
+          window.__capturedRoutes = routes;
+        },
+      };
+
+      // ── SSE stub (the /stage mock pushes progress through it) ─────
+      window.__esInstances = [];
+      window.EventSource = function (url) {
+        this.url = url;
+        this.onmessage = null;
+        this.close = function () {};
+        this.addEventListener = function () {};
+        this.__emit = function (obj) {
+          if (this.onmessage)
+            this.onmessage({ data: JSON.stringify(obj) });
+        };
+        window.__esInstances.push(this);
+      };
+      function emitToAll(obj) {
+        (window.__esInstances || []).forEach(function (es) {
+          if (es.__emit) es.__emit(obj);
+        });
+      }
+
+      // ── in-page mock API ─────────────────────────────────────────
+      var DRAFT = {
+        project_id: "demo",
+        global_config: {},
+        assets: {
+          characters: [{ id: "boy", description: "a young fisherboy" }],
+          props: [],
+          scene_refs: [{ id: "dock", description: "a weathered dock" }],
+          style: { catalog_id: "" },
+        },
+        scenes: [
+          {
+            id: "00",
+            name: "open",
+            duration: 8,
+            scene_description:
+              "A boy stands alone at the end of a misty dock at dawn, looking out to sea.",
+            narration: "Once, by the grey sea, a boy kept watch.",
+            motion_prompt: "slow push-in",
+            uses_characters: ["boy"],
+            uses_scene_ref: "dock",
+          },
+          {
+            id: "01",
+            name: "storm",
+            duration: 12,
+            scene_description:
+              "Black clouds roll in; waves heave against the pilings as the boy grips the rail.",
+            uses_characters: ["boy"],
+          },
+          {
+            id: "02",
+            name: "calm",
+            duration: 9,
+            scene_description:
+              "The storm passes; gold light breaks over a flat, glassy sea.",
+            uses_characters: ["boy"],
+          },
+        ],
+      };
+      var FORECAST = {
+        total_usd: 2.4,
+        stage_0_usd: 0.5,
+        stage_2_usd: 0.9,
+        stage_3_usd: 1.0,
+        breakdown: { characters: 1, props: 0, scene_refs: 1, scenes: 3 },
+      };
+      var STYLES = [
+        { id: "storybook", display_name: "Storybook", description: "soft watercolor" },
+        { id: "noir", display_name: "Noir", description: "moody, high contrast" },
+        { id: "anime", display_name: "Anime", description: "bold, cel-shaded" },
+      ];
+      var DIRECTOR = {
+        ok: true,
+        project_id: "demo",
+        draft: DRAFT,
+        summary: "Set the opening at dusk and gave the boy a red jacket.",
+        changes: [
+          {
+            scene_id: "00",
+            name: "open",
+            fields: ["scene_description", "regen_notes"],
+            reason: "dusk + red jacket",
+          },
+        ],
+      };
+
+      function jsonResponse(body) {
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      var realFetch = window.fetch.bind(window);
+      window.fetch = function (url, opts) {
+        url = String(url);
+        var method = (opts && opts.method) || "GET";
+        if (url.indexOf("mock.local/api/creator") === -1) {
+          return realFetch(url, opts);
+        }
+        var p = url.split("/api/creator")[1].split("?")[0];
+        if (p === "/status")
+          return jsonResponse({ has_dashscope: true, has_openai: true });
+        if (p === "/projects")
+          return jsonResponse({
+            projects: [{ id: "demo", title: "Old Man & The Sea" }],
+          });
+        if (p === "/styles") return jsonResponse({ styles: STYLES });
+        if (p === "/projects/demo")
+          return jsonResponse({
+            meta: { title: "Old Man & The Sea" },
+            draft: DRAFT,
+          });
+        if (p.indexOf("/cost-forecast") !== -1) return jsonResponse(FORECAST);
+        if (p.indexOf("/director") !== -1 && method === "POST")
+          return jsonResponse(DIRECTOR);
+        if (p.indexOf("/cancel") !== -1 && method === "POST") {
+          setTimeout(function () {
+            emitToAll({ kind: "stage_cancelled", stage: "2" });
+          }, 300);
+          return jsonResponse({ ok: true, cancelling: true });
+        }
+        if (p.indexOf("/stage") !== -1 && method === "POST") {
+          // Simulate a paid render: emit a couple of progress events,
+          // then resolve after a beat so the Stop button is reachable.
+          ["00", "01", "02"].forEach(function (sid, i) {
+            setTimeout(function () {
+              emitToAll({ kind: "scene_start", scene_id: sid, stage: "2" });
+            }, 400 + i * 700);
+            setTimeout(function () {
+              emitToAll({
+                kind: "scene_done",
+                scene_id: sid,
+                stage: "2",
+                elapsed_s: 3,
+              });
+            }, 900 + i * 700);
+          });
+          return new Promise(function (r) {
+            setTimeout(function () {
+              r(
+                new Response(JSON.stringify({ ok: true }), { status: 200 }),
+              );
+            }, 3500);
+          });
+        }
+        if (p.indexOf("/status") !== -1)
+          return jsonResponse({ stages: {} });
+        return jsonResponse({});
+      };
+    </script>
+
+    <script src="./dist/index.js"></script>
+
+    <script>
+      (function render() {
+        var routes = window.__capturedRoutes || [];
+        var route = routes[0];
+        var root = window.ReactDOM.createRoot(
+          document.getElementById("root"),
+        );
+        root.render(
+          route && route.component
+            ? window.React.createElement(route.component)
+            : window.React.createElement("div", null, "panel not registered"),
+        );
+      })();
+    </script>
+  </body>
+</html>
