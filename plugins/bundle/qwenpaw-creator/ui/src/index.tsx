@@ -4067,6 +4067,90 @@ function StyleSwatchPicker({ styles, value, onChange }: any) {
 
 // ── decompose form ───────────────────────────────────────────────────
 
+// Zero-config entry: lead with one "Make my film" CTA + a Vibe swatch;
+// every other dial lives behind the Advanced toggle (smart defaults do
+// the rest — the LLM auto-extracts era/genre/tone, providers/voice/beat
+// count all default).
+function MakeFilmHero({
+  styles,
+  styleHint,
+  setStyleHint,
+  busy,
+  activeStage,
+  status,
+  onSubmit,
+  showAdvanced,
+  setShowAdvanced,
+}: any) {
+  const ready = !!status?.has_dashscope;
+  return React.createElement(
+    "div",
+    { style: { padding: "6px 0 16px" } },
+    React.createElement(
+      Title,
+      { level: 4, style: { marginBottom: 4 } },
+      "Make your film",
+    ),
+    React.createElement(
+      Paragraph,
+      { type: "secondary", style: { marginBottom: 14 } },
+      "We storyboard it, cast it, shoot the frames, animate, and stitch the " +
+        "cut — you just press go. Pick a vibe (optional), then make it.",
+    ),
+    React.createElement(
+      AntText,
+      {
+        strong: true,
+        style: { fontSize: 12, display: "block", marginBottom: 6 },
+      },
+      "Vibe",
+    ),
+    React.createElement(StyleSwatchPicker, {
+      styles,
+      value: styleHint,
+      onChange: setStyleHint,
+    }),
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+          marginTop: 18,
+        },
+      },
+      React.createElement(Button, {
+        type: "primary",
+        size: "large",
+        loading: busy && activeStage === "decompose",
+        disabled: !ready,
+        onClick: onSubmit,
+        children: "✨ Make my film",
+      }),
+      React.createElement(Button, {
+        type: "text",
+        size: "small",
+        onClick: () => setShowAdvanced(!showAdvanced),
+        style: { color: "#8b96b4" },
+        children: showAdvanced
+          ? "Hide advanced options ▲"
+          : "⚙ Advanced options ▾",
+      }),
+    ),
+    !ready
+      ? React.createElement(
+          AntText,
+          {
+            type: "warning",
+            style: { fontSize: 11, display: "block", marginTop: 8 },
+          },
+          "DASHSCOPE_API_KEY missing — set it under Environment Variables.",
+        )
+      : null,
+  );
+}
+
 function DecomposeForm({
   duration,
   setDuration,
@@ -4102,6 +4186,7 @@ function DecomposeForm({
   status,
   onSubmit,
 }: any) {
+  const [showAdvanced, setShowAdvanced] = React.useState(false);
   const styleOptions = (styles ?? []).map((s: StyleEntry) => ({
     label: `${s.display_name}`,
     value: s.id,
@@ -4110,181 +4195,35 @@ function DecomposeForm({
   return React.createElement(
     Form,
     { layout: "vertical" },
+    React.createElement(MakeFilmHero, {
+      styles,
+      styleHint,
+      setStyleHint,
+      busy,
+      activeStage,
+      status,
+      onSubmit,
+      showAdvanced,
+      setShowAdvanced,
+    }),
     React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 6 },
-        React.createElement(
-          Form.Item,
-          { label: "Target duration (s)" },
-          React.createElement(InputNumber, {
-            min: 20,
-            max: 600,
-            value: duration,
-            onChange: (v: any) => setDuration(v ?? 60),
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 6 },
-        React.createElement(
-          Form.Item,
-          {
-            label: "Beat count (optional)",
-            extra:
-              "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
-          },
-          React.createElement(InputNumber, {
-            min: 3,
-            max: 60,
-            value: targetScenes ?? null,
-            onChange: (v: any) =>
-              setTargetScenes(v == null ? undefined : Number(v)),
-            placeholder: "auto",
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          {
-            label: "Style hint (optional — LLM picks if blank)",
-          },
-          React.createElement(Select, {
-            allowClear: true,
-            placeholder: "Let the LLM pick",
-            options: styleOptions,
-            value: styleHint,
-            onChange: (v: any) => setStyleHint(v),
-            style: { width: "100%" },
-            optionFilterProp: "label",
-            showSearch: true,
-          }),
-          React.createElement(StyleSwatchPicker, {
-            styles,
-            value: styleHint,
-            onChange: setStyleHint,
-          }),
-        ),
-      ),
-    ),
-    React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Audience" },
-          React.createElement(Input, {
-            value: audience,
-            onChange: (e: any) => setAudience(e.target.value),
-            placeholder: "general / family",
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Narration voice (CosyVoice)" },
-          React.createElement(Select, {
-            value: voice,
-            onChange: setVoice,
-            options: [
-              { label: "longshu_v2 (deep male)", value: "longshu_v2" },
-              { label: "longwan_v2 (warm male)", value: "longwan_v2" },
-              {
-                label: "longxiaoxia_v2 (warm female)",
-                value: "longxiaoxia_v2",
-              },
-              { label: "longxiaochun_v2 (neutral)", value: "longxiaochun_v2" },
-            ],
-            style: { width: "100%" },
-          }),
-        ),
-      ),
-    ),
-
-    React.createElement(
-      Row,
-      { gutter: 16 },
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Image model" },
-          React.createElement(Select, {
-            value: frameProvider,
-            onChange: setFrameProvider,
-            style: { width: "100%" },
-            options: [
-              {
-                value: "gpt-image-2-dashscope",
-                label: "gpt-image-2 (dashscope)",
-              },
-              { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
-              { value: "qwen-image", label: "qwen-image-2.0-pro" },
-            ],
-          }),
-        ),
-      ),
-      React.createElement(
-        Col,
-        { span: 12 },
-        React.createElement(
-          Form.Item,
-          { label: "Video model" },
-          React.createElement(Select, {
-            value: videoProvider,
-            onChange: setVideoProvider,
-            style: { width: "100%" },
-            options: [
-              { value: "wan27", label: "Wan 2.7" },
-              { value: "happyhorse", label: "HappyHorse 2.0" },
-              { value: "seedance", label: "Seedance 2.0" },
-            ],
-          }),
-        ),
-      ),
-    ),
-
-    // Optional story-level constraints. Leave blank → LLM auto-picks.
-    React.createElement(
-      Card,
-      {
-        size: "small",
-        title: React.createElement(
-          AntText,
-          { type: "secondary" },
-          "Story constraints (optional — LLM auto-picks if blank)",
-        ),
-        style: { marginBottom: 12, background: "#fafafa" },
-        bodyStyle: { padding: 12 },
-      },
+      "div",
+      { style: { display: showAdvanced ? "block" : "none" } },
       React.createElement(
         Row,
-        { gutter: 12 },
+        { gutter: 16 },
         React.createElement(
           Col,
           { span: 6 },
           React.createElement(
             Form.Item,
-            { label: "Era" },
-            React.createElement(Input, {
-              value: era,
-              onChange: (e: any) => setEra(e.target.value),
-              placeholder: "1940s",
+            { label: "Target duration (s)" },
+            React.createElement(InputNumber, {
+              min: 20,
+              max: 600,
+              value: duration,
+              onChange: (v: any) => setDuration(v ?? 60),
+              style: { width: "100%" },
             }),
           ),
         ),
@@ -4293,112 +4232,276 @@ function DecomposeForm({
           { span: 6 },
           React.createElement(
             Form.Item,
-            { label: "Country" },
-            React.createElement(Input, {
-              value: country,
-              onChange: (e: any) => setCountry(e.target.value),
-              placeholder: "Cuba",
+            {
+              label: "Beat count (optional)",
+              extra:
+                "Empty = auto from duration. Override to force more/fewer beats — useful for long stories that the LLM would otherwise compress.",
+            },
+            React.createElement(InputNumber, {
+              min: 3,
+              max: 60,
+              value: targetScenes ?? null,
+              onChange: (v: any) =>
+                setTargetScenes(v == null ? undefined : Number(v)),
+              placeholder: "auto",
+              style: { width: "100%" },
             }),
           ),
         ),
         React.createElement(
           Col,
-          { span: 6 },
+          { span: 12 },
           React.createElement(
             Form.Item,
-            { label: "Genre" },
-            React.createElement(Input, {
-              value: genre,
-              onChange: (e: any) => setGenre(e.target.value),
-              placeholder: "tragedy / triumph / coming-of-age",
+            {
+              label: "Style hint (optional — LLM picks if blank)",
+            },
+            React.createElement(Select, {
+              allowClear: true,
+              placeholder: "Let the LLM pick",
+              options: styleOptions,
+              value: styleHint,
+              onChange: (v: any) => setStyleHint(v),
+              style: { width: "100%" },
+              optionFilterProp: "label",
+              showSearch: true,
             }),
-          ),
-        ),
-        React.createElement(
-          Col,
-          { span: 6 },
-          React.createElement(
-            Form.Item,
-            { label: "Tone" },
-            React.createElement(Input, {
-              value: tone,
-              onChange: (e: any) => setTone(e.target.value),
-              placeholder: "somber / playful / hopeful",
+            React.createElement(StyleSwatchPicker, {
+              styles,
+              value: styleHint,
+              onChange: setStyleHint,
             }),
           ),
         ),
       ),
       React.createElement(
-        Form.Item,
-        {
-          label:
-            "Story anchor (overall narrative context — propagates to every scene)",
-          extra:
-            "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
-        },
-        React.createElement(TextArea, {
-          value: storyAnchor,
-          onChange: (e: any) => setStoryAnchor(e.target.value),
-          placeholder:
-            "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
-          rows: 2,
-        }),
+        Row,
+        { gutter: 16 },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Audience" },
+            React.createElement(Input, {
+              value: audience,
+              onChange: (e: any) => setAudience(e.target.value),
+              placeholder: "general / family",
+            }),
+          ),
+        ),
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Narration voice (CosyVoice)" },
+            React.createElement(Select, {
+              value: voice,
+              onChange: setVoice,
+              options: [
+                { label: "longshu_v2 (deep male)", value: "longshu_v2" },
+                { label: "longwan_v2 (warm male)", value: "longwan_v2" },
+                {
+                  label: "longxiaoxia_v2 (warm female)",
+                  value: "longxiaoxia_v2",
+                },
+                {
+                  label: "longxiaochun_v2 (neutral)",
+                  value: "longxiaochun_v2",
+                },
+              ],
+              style: { width: "100%" },
+            }),
+          ),
+        ),
       ),
-      React.createElement(
-        Form.Item,
-        {
-          label:
-            "World bible — recurring set-design facts (applies to every scene)",
-          extra:
-            "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
-        },
-        React.createElement(TextArea, {
-          value: worldBible,
-          onChange: (e: any) => setWorldBible(e.target.value),
-          placeholder:
-            "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
-          rows: 3,
-        }),
-      ),
-      React.createElement(
-        Form.Item,
-        {
-          label:
-            "Style directives (one per line — applied on top of every scene)",
-          extra:
-            "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
-        },
-        React.createElement(TextArea, {
-          value: styleDirectives,
-          onChange: (e: any) => setStyleDirectives(e.target.value),
-          placeholder:
-            "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
-          rows: 3,
-        }),
-      ),
-    ),
 
-    status && !status.has_dashscope
-      ? React.createElement(Alert, {
-          type: "warning",
-          message:
-            "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
-          showIcon: true,
-          style: { marginBottom: 12 },
-        })
-      : null,
-    React.createElement(
-      Form.Item,
-      null,
-      React.createElement(Button, {
-        type: "primary",
-        icon: React.createElement(ScissorOutlined),
-        loading: busy && activeStage === "decompose",
-        onClick: onSubmit,
-        size: "large",
-        disabled: !status?.has_dashscope,
-        children: "Decompose with LLM",
-      }),
+      React.createElement(
+        Row,
+        { gutter: 16 },
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Image model" },
+            React.createElement(Select, {
+              value: frameProvider,
+              onChange: setFrameProvider,
+              style: { width: "100%" },
+              options: [
+                {
+                  value: "gpt-image-2-dashscope",
+                  label: "gpt-image-2 (dashscope)",
+                },
+                { value: "gpt-image-2", label: "gpt-image-2 (openai)" },
+                { value: "qwen-image", label: "qwen-image-2.0-pro" },
+              ],
+            }),
+          ),
+        ),
+        React.createElement(
+          Col,
+          { span: 12 },
+          React.createElement(
+            Form.Item,
+            { label: "Video model" },
+            React.createElement(Select, {
+              value: videoProvider,
+              onChange: setVideoProvider,
+              style: { width: "100%" },
+              options: [
+                { value: "wan27", label: "Wan 2.7" },
+                { value: "happyhorse", label: "HappyHorse 2.0" },
+                { value: "seedance", label: "Seedance 2.0" },
+              ],
+            }),
+          ),
+        ),
+      ),
+
+      // Optional story-level constraints. Leave blank → LLM auto-picks.
+      React.createElement(
+        Card,
+        {
+          size: "small",
+          title: React.createElement(
+            AntText,
+            { type: "secondary" },
+            "Story constraints (optional — LLM auto-picks if blank)",
+          ),
+          style: { marginBottom: 12, background: "#fafafa" },
+          bodyStyle: { padding: 12 },
+        },
+        React.createElement(
+          Row,
+          { gutter: 12 },
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Era" },
+              React.createElement(Input, {
+                value: era,
+                onChange: (e: any) => setEra(e.target.value),
+                placeholder: "1940s",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Country" },
+              React.createElement(Input, {
+                value: country,
+                onChange: (e: any) => setCountry(e.target.value),
+                placeholder: "Cuba",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Genre" },
+              React.createElement(Input, {
+                value: genre,
+                onChange: (e: any) => setGenre(e.target.value),
+                placeholder: "tragedy / triumph / coming-of-age",
+              }),
+            ),
+          ),
+          React.createElement(
+            Col,
+            { span: 6 },
+            React.createElement(
+              Form.Item,
+              { label: "Tone" },
+              React.createElement(Input, {
+                value: tone,
+                onChange: (e: any) => setTone(e.target.value),
+                placeholder: "somber / playful / hopeful",
+              }),
+            ),
+          ),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "Story anchor (overall narrative context — propagates to every scene)",
+            extra:
+              "Short — 20-50 words. Era + theme + arc. Avoid visual prose (those belong in per-scene descriptions).",
+          },
+          React.createElement(TextArea, {
+            value: storyAnchor,
+            onChange: (e: any) => setStoryAnchor(e.target.value),
+            placeholder:
+              "A weathered Cuban fisherman's quiet test of endurance against the sea — a story of dignified persistence, not defeat. 1940s coastal village setting.",
+            rows: 2,
+          }),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "World bible — recurring set-design facts (applies to every scene)",
+            extra:
+              "Short list of invariants: props that recur, exclusive lighting, palette, camera rules. Stops scene-to-scene drift (e.g. wooden sign vs blackboard, morning vs midday). 30-80 words.",
+          },
+          React.createElement(TextArea, {
+            value: worldBible,
+            onChange: (e: any) => setWorldBible(e.target.value),
+            placeholder:
+              "Set design: wooden cottage-style fence; rough dirt paths; chalk-lettered wooden signs (NO blackboards); tomato plants always on the east side; morning sun upper-right; cottagecore palette — pastel greens, soft creams, gentle yellows; medium-wide camera at child eye-level.",
+            rows: 3,
+          }),
+        ),
+        React.createElement(
+          Form.Item,
+          {
+            label:
+              "Style directives (one per line — applied on top of every scene)",
+            extra:
+              "e.g. 'warm amber-rose palette', 'real-world physics, no floating objects', 'same time of day across consecutive scenes'. 5 max — more is noise.",
+          },
+          React.createElement(TextArea, {
+            value: styleDirectives,
+            onChange: (e: any) => setStyleDirectives(e.target.value),
+            placeholder:
+              "warm amber-rose palette, slight desaturation\nreal-world physics, no floating objects\nconsistent low-angle morning light across coastal scenes",
+            rows: 3,
+          }),
+        ),
+      ),
+
+      status && !status.has_dashscope
+        ? React.createElement(Alert, {
+            type: "warning",
+            message:
+              "DASHSCOPE_API_KEY missing — decompose will fail. Set it under Environment Variables.",
+            showIcon: true,
+            style: { marginBottom: 12 },
+          })
+        : null,
+      React.createElement(
+        Form.Item,
+        null,
+        React.createElement(Button, {
+          type: "primary",
+          icon: React.createElement(ScissorOutlined),
+          loading: busy && activeStage === "decompose",
+          onClick: onSubmit,
+          size: "large",
+          disabled: !status?.has_dashscope,
+          children: "Decompose with LLM",
+        }),
+      ),
     ),
   );
 }

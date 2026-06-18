@@ -87,12 +87,36 @@ async function mockApi(page: Page): Promise<void> {
       });
     if (p === "/status") return json({ has_dashscope: true, has_openai: true });
     if (p === "/projects" && method === "GET")
-      return json({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
-    if (p === "/styles") return json({ styles: [] });
+      return json({
+        projects: [
+          { id: "demo", title: "Old Man & The Sea" },
+          { id: "fresh", title: "Fresh story" },
+        ],
+      });
+    if (p === "/styles")
+      return json({
+        styles: [
+          { id: "storybook", display_name: "Storybook", description: "soft" },
+          { id: "noir", display_name: "Noir", description: "moody" },
+          { id: "anime", display_name: "Anime", description: "bold" },
+        ],
+      });
     if (p === "/projects/demo" && method === "GET")
       return json({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
-    if (p === "/projects/demo/cost-forecast") return json(FORECAST);
-    if (p === "/projects/demo/status") return json({ stages: {} });
+    if (p === "/projects/fresh" && method === "GET")
+      return json({
+        meta: { title: "Fresh story" },
+        draft: {
+          project_id: "fresh",
+          scenes: [],
+          beats: [],
+          assets: { characters: [], props: [], scene_refs: [], style: {} },
+          global_config: {},
+        },
+      });
+    if (p.endsWith("/cost-forecast")) return json(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return json({ stages: {} });
     if (p === "/projects/demo/director" && method === "POST")
       return json(DIRECTOR_RESP);
     return json({});
@@ -157,5 +181,27 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await page.getByRole("button", { name: "Classic", exact: true }).click();
   await expect(page.getByText("Meta settings")).toBeVisible();
   await page.screenshot({ path: shot("04-classic.png"), fullPage: true });
+  expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
+});
+
+test("'Make my film' entry hides the dials behind Advanced", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(String(e)));
+  await mockApi(page);
+  await page.goto(harnessUrl);
+
+  await page.getByText("Fresh story").click();
+
+  // One CTA + a Vibe swatch; the 12 dials are hidden by default.
+  await expect(page.getByText("Make your film")).toBeVisible();
+  await page.screenshot({ path: shot("05-make-film.png"), fullPage: true });
+  await expect(page.getByText("Make my film")).toBeVisible();
+  await expect(page.getByText("Target duration (s)")).toBeHidden();
+
+  // Advanced reveals the full form.
+  await page.getByText(/Advanced options/).click();
+  await expect(page.getByText("Target duration (s)")).toBeVisible();
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
