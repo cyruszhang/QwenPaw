@@ -5462,6 +5462,16 @@ function ReelView({
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
   const [scope, setScope] = React.useState<"scene" | "film">("scene");
+  // Voice input: dictate the instruction. Web Speech API where available
+  // (Chrome/Edge/Safari); the mic just hides where it isn't.
+  const [listening, setListening] = React.useState(false);
+  const recogRef = React.useRef<any>(null);
+  const SpeechRec =
+    typeof window !== "undefined"
+      ? (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition
+      : null;
+  const speechSupported = !!SpeechRec;
 
   // Budget gate: render only after a single cost confirm. Draft = frames
   // only (Stage 2); Full also animates (Stage 3) — the expensive step.
@@ -5509,6 +5519,51 @@ function ReelView({
   const selAsset = selected
     ? assetFor(selected)
     : { frame: null, shot: null, shotStale: false };
+
+  const toggleMic = () => {
+    if (!speechSupported) return;
+    if (listening) {
+      try {
+        recogRef.current && recogRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    let rec: any;
+    try {
+      rec = new SpeechRec();
+    } catch {
+      return;
+    }
+    rec.interimResults = true;
+    rec.continuous = false;
+    // Keep anything already typed; dictation appends to it.
+    const base = note ? note.replace(/\s+$/, "") + " " : "";
+    rec.onresult = (ev: any) => {
+      let txt = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        txt += ev.results[i][0].transcript;
+      }
+      setNote(base + txt);
+    };
+    rec.onend = () => {
+      setListening(false);
+      recogRef.current = null;
+    };
+    rec.onerror = () => {
+      setListening(false);
+      recogRef.current = null;
+    };
+    recogRef.current = rec;
+    setListening(true);
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      recogRef.current = null;
+    }
+  };
 
   const direct = async () => {
     const msg = note.trim();
@@ -5780,6 +5835,23 @@ function ReelView({
     React.createElement(
       "div",
       { style: { display: "flex", gap: 8 } },
+      speechSupported
+        ? React.createElement(
+            Tooltip,
+            {
+              title: listening
+                ? "Listening… click to stop"
+                : "Dictate your instruction",
+            },
+            React.createElement(Button, {
+              type: listening ? "primary" : "default",
+              danger: listening,
+              disabled: directing,
+              onClick: toggleMic,
+              children: listening ? "● rec" : "🎤",
+            }),
+          )
+        : null,
       React.createElement(Input, {
         value: note,
         onChange: (e: any) => setNote(e.target.value),

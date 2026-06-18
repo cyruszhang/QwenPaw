@@ -297,6 +297,59 @@ test("the Director is scene-scoped and re-renders frame + motion", async ({
   expect(stages).toContain("3");
 });
 
+test("the Director bar dictates speech into the note when supported", async ({
+  page,
+}) => {
+  // Inject a fake Web Speech API before the bundle loads. Fake BOTH the
+  // unprefixed and webkit names — the panel prefers SpeechRecognition.
+  await page.addInitScript(() => {
+    function Fake(this: Record<string, unknown>) {
+      this.start = () => {
+        setTimeout(() => {
+          const onresult = this.onresult as ((e: unknown) => void) | null;
+          const onend = this.onend as (() => void) | null;
+          if (onresult)
+            onresult({ results: [[{ transcript: "make it at dusk" }]] });
+          if (onend) onend();
+        }, 30);
+      };
+      this.stop = () => {
+        const onend = this.onend as (() => void) | null;
+        if (onend) onend();
+      };
+    }
+    const w = window as unknown as Record<string, unknown>;
+    w.SpeechRecognition = Fake;
+    w.webkitSpeechRecognition = Fake;
+  });
+  await mockApi(page);
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  const mic = page.getByRole("button", { name: "🎤" });
+  await expect(mic).toBeVisible();
+  await mic.click();
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toHaveValue(
+    /make it at dusk/,
+  );
+  await page.screenshot({ path: shot("14-voice-input.png") });
+});
+
+test("the mic is hidden when the browser has no speech API", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    delete w.webkitSpeechRecognition;
+    delete w.SpeechRecognition;
+  });
+  await mockApi(page);
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  // The Director input is there, but no mic button (graceful fallback).
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "🎤" })).toHaveCount(0);
+});
+
 test("a clip left stale by a frame re-shoot is flagged, not played", async ({
   page,
 }) => {
