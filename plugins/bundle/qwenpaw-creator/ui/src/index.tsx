@@ -1372,6 +1372,14 @@ function ProjectPane({
     }
   };
 
+  // Cooperative cancel flag for the parallel render. The backend clears its
+  // own per-project flag at the start of every /stage POST, so for the
+  // per-scene fan-out (one POST per scene) that flag can't stop the run on
+  // its own. This client-side ref is the real brake: onCancel raises it,
+  // the batch loop stops launching new shots, and renderFilm refuses to
+  // start the (pricey) motion stage after a Stop.
+  const cancelRef = React.useRef(false);
+
   /**
    * Stop a running render. Cooperative — the backend stage loops check
    * the flag between scenes and stop before starting more (paid) work;
@@ -1379,6 +1387,9 @@ function ProjectPane({
    * clears the busy state.
    */
   const onCancel = async () => {
+    // Raise the client brake first so any in-flight batch loop stops
+    // launching new shots even if the network call lags.
+    cancelRef.current = true;
     try {
       await apiJson("POST", `/creator/projects/${pid}/cancel`, {});
       antMessage.info("Stopping after the current shots…");
@@ -1467,10 +1478,11 @@ function ProjectPane({
     overwrite: boolean = false,
   ) => {
     const scenes = (draft.scenes || []).map((s: any) => s.id);
-    if (!scenes.length) return;
+    if (!scenes.length) return { done: 0, failed: 0, cancelled: false };
     const gc = draft.global_config || {};
     const conc = Math.max(1, Math.min(5, Number(gc.concurrency) || 5));
     maybeRequestNotificationPermission();
+    cancelRef.current = false;
     setBusy(true);
     setActiveStage(stage);
     setRunError(null);
@@ -1480,6 +1492,9 @@ function ProjectPane({
     const failureMessages: string[] = [];
     try {
       for (let i = 0; i < scenes.length; i += conc) {
+        // Stop launching new shots once the user hits Stop; the batch
+        // already in flight finishes, nothing past it starts.
+        if (cancelRef.current) break;
         const batch = scenes.slice(i, i + conc);
         const results = await Promise.allSettled(
           batch.map((sid: string) =>
@@ -1511,10 +1526,16 @@ function ProjectPane({
           message: unique.join("\n\n"),
         });
       }
-      notify(`Stage ${stage} done`, `${done} succeeded, ${failed} failed.`, {
-        tag: `stage-${stage}`,
-        level: failed > 0 ? "warning" : "success",
-      });
+      notify(
+        cancelRef.current ? `Stage ${stage} stopped` : `Stage ${stage} done`,
+        cancelRef.current
+          ? `${done} shot${done === 1 ? "" : "s"} finished before you stopped.`
+          : `${done} succeeded, ${failed} failed.`,
+        {
+          tag: `stage-${stage}`,
+          level: failed > 0 ? "warning" : "success",
+        },
+      );
       setTabBadge(0, done);
     } catch (e: any) {
       const msg = compactApiError(e);
@@ -1528,6 +1549,7 @@ function ProjectPane({
       setBusy(false);
       setActiveStage(null);
     }
+    return { done, failed, cancelled: cancelRef.current };
   };
 
   const onRunStage = async (stage: string, extra: any = {}) => {
@@ -1948,6 +1970,7 @@ function ProjectPane({
           ),
           studioMode
             ? React.createElement(ReelView, {
+                key: `reel-${pid}`,
                 pid,
                 draft,
                 projStatus,
@@ -1964,6 +1987,7 @@ function ProjectPane({
                 onSwitchClassic: () => setStudioMode(false),
               })
             : React.createElement(DraftPanel, {
+                key: `draft-${pid}`,
                 pid,
                 draft,
                 styles,
@@ -5393,8 +5417,12 @@ function ReelView({
     setBudgetOpen(false);
     setRendering(true);
     try {
-      await onRunStageAllParallel?.("2", false);
-      if (mode === "full") await onRunStageAllParallel?.("3", false);
+      const r = await onRunStageAllParallel?.("2", false);
+      // Don't roll into the pricey motion stage if the user hit Stop
+      // during frames — Stop must mean stop, not "stop, then animate".
+      if (mode === "full" && !r?.cancelled) {
+        await onRunStageAllParallel?.("3", false);
+      }
     } finally {
       setRendering(false);
     }

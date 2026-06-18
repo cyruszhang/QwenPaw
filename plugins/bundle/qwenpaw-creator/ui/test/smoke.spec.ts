@@ -327,6 +327,56 @@ test("Stop appears during render and cancels it", async ({ page }) => {
   await expect.poll(() => calls).toContain("cancel");
 });
 
+test("Stop during a Full render does not roll into the motion stage", async ({
+  page,
+}) => {
+  // Regression: hitting Stop while frames (Stage 2) are rendering must not
+  // proceed to the pricey motion step (Stage 3). The per-scene fan-out plus
+  // the backend clearing its cancel flag per /stage POST means the client
+  // brake is what actually stops it.
+  const stages: string[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST") {
+      const body = route.request().postDataJSON() as { stage?: string };
+      stages.push(String(body?.stage));
+      await new Promise((r) => setTimeout(r, 2500)); // keep frames in flight
+      return j({ ok: true });
+    }
+    if (p.endsWith("/cancel") && method === "POST")
+      return j({ ok: true, cancelling: true });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Render film/ }).click();
+  await page.getByRole("button", { name: /Full film/ }).click();
+  // Stop while the frame stage is still in flight.
+  await page.getByRole("button", { name: /Stop/ }).click();
+  // Let the in-flight frame batch resolve and give renderFilm a chance to
+  // (wrongly) launch Stage 3 if the guard regressed.
+  await page.waitForTimeout(4000);
+  expect(stages).toContain("2");
+  expect(stages).not.toContain("3");
+});
+
 test("a cost-forecast without a breakdown does not crash the panel", async ({
   page,
 }) => {
