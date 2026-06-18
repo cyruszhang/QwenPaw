@@ -238,6 +238,9 @@ def _build_pass1_prompt(
         "5. Order matters — beats will be rendered in array order.\n"
         "6. Do NOT include scene_description, motion_prompt, or "
         "narration text in this pass.\n"
+        "7. Write every beat summary in ONE language — the dominant "
+        "language of the source — and keep it consistent across all "
+        "beats. Never mix languages.\n"
     )
 
     return system, user
@@ -316,7 +319,10 @@ def _build_pass2_beat_prompt(
         "reference images PLUS your scene_description; repeating "
         "anchor details crowds out the action signal.\n\n"
         "Output ONLY valid JSON matching the schema. No markdown, no "
-        "commentary, no array — a single JSON object."
+        "commentary, no array — a single JSON object.\n\n"
+        "Write all prose (scene_description, motion_prompt, narration) in "
+        "ONE language — the one specified in the context below — and keep "
+        "it identical to every other scene. Do not switch languages."
     )
 
     chars_used = beat.get("chars_used") or []
@@ -378,6 +384,44 @@ def _build_pass2_beat_prompt(
         "arrays are fine for must_not_contain / composition.\n"
     )
     return system, user
+
+
+def _dominant_language(text: str) -> "str | None":
+    """Best-effort dominant-language guess from a prose sample.
+
+    Pass 2 fans out one independent LLM call per beat; with nothing
+    pinning the language each call picks its own, which is how a single
+    story ends up with some scenes in English and some in Chinese. We
+    sample the source once and pin every call to one language.
+
+    Returns a concrete directive name when confident, else ``None`` (let
+    the model infer from the source, but still demand consistency).
+    """
+    cjk = sum(1 for ch in text if "一" <= ch <= "鿿")
+    latin = sum(1 for ch in text if ch.isascii() and ch.isalpha())
+    if cjk >= 8 and cjk >= latin:
+        return "Chinese (中文)"
+    if latin >= 8 and latin > cjk * 4:
+        return "English"
+    return None
+
+
+def _language_directive(beats: list, gc: dict) -> str:
+    """One LANGUAGE rule, computed once and shared by every beat call so
+    scene_description / motion_prompt / narration never interleave
+    languages across scenes.
+    """
+    sample = " ".join(str(b.get("summary", "")) for b in beats)
+    sample += " " + str(gc.get("story_anchor") or "")
+    sample += " " + str(gc.get("world_bible") or "")
+    target = _dominant_language(sample) or (
+        "the dominant language of the source story"
+    )
+    return (
+        "LANGUAGE (critical): write scene_description, motion_prompt and "
+        f"narration in {target}. Use this SAME language for EVERY scene — "
+        "never mix or switch languages between scenes."
+    )
 
 
 # ── Public entries ──────────────────────────────────────────────────
@@ -569,6 +613,8 @@ async def craft_scenes(
     gc = draft_with_beats.get("global_config") or {}
     concurrency = max(1, min(8, int(gc.get("concurrency") or 5)))
     anchor_context = _pass2_anchor_context(draft_with_beats)
+    # Pin ONE language across the per-beat fan-out (else EN/ZH interleave).
+    anchor_context += "\n" + _language_directive(beats, gc)
     sem = asyncio.Semaphore(concurrency)
     logger.info(
         "[stage 00 v2 pass 2] crafting %d scene(s), one call per beat "
