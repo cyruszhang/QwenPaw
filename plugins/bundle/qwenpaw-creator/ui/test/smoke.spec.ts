@@ -148,8 +148,9 @@ test("The Reel (Studio) is the default project view", async ({ page }) => {
   // The Reel — not the stage accordion — is the default workspace.
   await expect(page.getByText("The Reel")).toBeVisible();
   await expect(page.getByText(/in motion/)).toBeVisible();
-  await expect(page.getByText("00 · open")).toBeVisible();
-  await expect(page.getByPlaceholder(/Direct the film/i)).toBeVisible();
+  // "00 · open" appears on the tile and the scope chip — first is the tile.
+  await expect(page.getByText("00 · open").first()).toBeVisible();
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
   await page.screenshot({ path: shot("02-studio-reel.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
@@ -162,7 +163,7 @@ test("the Director bar re-shoots from the Reel", async ({ page }) => {
   await page.getByText("Old Man & The Sea").click();
 
   await page
-    .getByPlaceholder(/Direct the film/i)
+    .getByPlaceholder(/Change scene|Direct the/i)
     .fill("make the opening at dusk and give the boy a red jacket");
   await page.getByRole("button", { name: "Direct" }).click();
 
@@ -221,7 +222,7 @@ test("a multi-scene Director edit runs as one coherent render", async ({
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
   await page
-    .getByPlaceholder(/Direct the film/i)
+    .getByPlaceholder(/Change scene|Direct the/i)
     .fill("recut the first two scenes");
   await page.getByRole("button", { name: "Direct" }).click();
   // Fast scene (00) has finished but the slow one (01) is still rendering —
@@ -229,6 +230,71 @@ test("a multi-scene Director edit runs as one coherent render", async ({
   await page.waitForTimeout(1400);
   await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible();
   await page.screenshot({ path: shot("10-director-multiscene.png") });
+});
+
+test("the Director is scene-scoped and re-renders frame + motion", async ({
+  page,
+}) => {
+  // Scene-scoped by default (a tile is selected) with a "Whole film"
+  // toggle, and a Director edit re-shoots the frame AND re-animates the
+  // motion (Stage 2 then Stage 3) so the clip stays in sync.
+  const stages: string[] = [];
+  let directBody = "";
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p === "/projects/demo/director" && method === "POST") {
+      directBody = route.request().postData() || "";
+      return j({
+        ok: true,
+        project_id: "demo",
+        draft: DRAFT,
+        summary: "Made scene 00 at dusk.",
+        changes: [{ scene_id: "00", name: "open", fields: ["x"] }],
+      });
+    }
+    if (p.endsWith("/stage") && method === "POST") {
+      const b = route.request().postDataJSON() as { stage?: string };
+      stages.push(String(b?.stage));
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+
+  // Default scope is the selected scene (00 · open) with a whole-film toggle.
+  await expect(page.getByText("Directing:")).toBeVisible();
+  await expect(page.getByRole("button", { name: /00 · open/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Whole film" })).toBeVisible();
+  await page.screenshot({ path: shot("13-director-scope.png") });
+
+  await page
+    .getByPlaceholder(/Change scene|Direct the/i)
+    .fill("make it at dusk");
+  await page.getByRole("button", { name: "Direct" }).click();
+  await expect(page.getByText(/Made scene 00 at dusk/)).toBeVisible();
+  await page.waitForTimeout(600);
+  // Scope hint reached the backend, and the change rendered BOTH stages.
+  expect(directBody).toContain("Focus on scene 00");
+  expect(stages).toContain("2");
+  expect(stages).toContain("3");
 });
 
 test("a clip left stale by a frame re-shoot is flagged, not played", async ({

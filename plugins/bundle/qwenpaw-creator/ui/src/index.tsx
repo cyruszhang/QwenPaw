@@ -1996,6 +1996,15 @@ function ProjectPane({
                 onRunStageAllParallel,
                 onRerollScenes: (ids: string[]) =>
                   onRunStageAllParallel("2", true, ids),
+                // A Director edit re-shoots the frame AND re-animates the
+                // motion so the playing clip stays in sync — one
+                // coordinated run, and Stop still halts before Stage 3.
+                onRerollScenesFull: async (ids: string[]) => {
+                  const r2 = await onRunStageAllParallel("2", true, ids);
+                  if (!r2?.cancelled) {
+                    await onRunStageAllParallel("3", true, ids);
+                  }
+                },
                 onDirector,
                 onCancel,
                 onSwitchClassic: () => setStudioMode(false),
@@ -5436,6 +5445,7 @@ function ReelView({
   onRunOne,
   onRunStageAllParallel,
   onRerollScenes,
+  onRerollScenesFull,
   onDirector,
   onCancel,
   onSwitchClassic,
@@ -5449,6 +5459,9 @@ function ReelView({
   const [log, setLog] = React.useState<any[]>([]);
   const [budgetOpen, setBudgetOpen] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
+  // Director scope: "scene" targets the selected tile (default — click a
+  // tile, talk to it); "film" lets one instruction touch the whole story.
+  const [scope, setScope] = React.useState<"scene" | "film">("scene");
 
   // Budget gate: render only after a single cost confirm. Draft = frames
   // only (Stage 2); Full also animates (Stage 3) — the expensive step.
@@ -5502,24 +5515,36 @@ function ReelView({
     if (!msg || directing) return;
     setDirecting(true);
     try {
-      const r = await onDirector(msg);
+      // Scene-scoped by default: focus the instruction on the selected
+      // tile so the user can just talk to "this scene". Still lets them
+      // name another scene explicitly (the model honours that over the
+      // focus hint). "Whole film" scope sends the message unscoped.
+      const sel = scenes.find((s) => s.id === selectedId);
+      const scoped =
+        scope === "scene" && sel
+          ? `Focus on scene ${sel.id} (${sel.name}). If I do not name a ` +
+            `different scene, apply this only to scene ${sel.id}. ` +
+            `Instruction: ${msg}`
+          : msg;
+      const r = await onDirector(scoped);
       const changes = r?.changes || [];
       setLog((p) => [...p, { msg, summary: r?.summary || "", changes }]);
       setNote("");
-      // Auto-chain the re-roll the user used to do by hand. Route every
-      // touched scene through ONE coordinated run so the busy/Stop state
-      // stays coherent across a multi-scene edit (vs. firing uncoordinated
-      // per-scene runs that clear `busy` as soon as the first one lands).
+      // Auto-chain the render the user used to do by hand. ONE coordinated
+      // run so busy/Stop stay coherent across a multi-scene edit. Per the
+      // chosen behaviour, a Director edit re-shoots the frame AND
+      // re-animates the motion so the playing clip stays in sync.
       const changedIds = changes.map((c: any) => c.scene_id).filter(Boolean);
       if (changedIds.length) {
-        if (onRerollScenes) onRerollScenes(changedIds);
+        if (onRerollScenesFull) onRerollScenesFull(changedIds);
+        else if (onRerollScenes) onRerollScenes(changedIds);
         else for (const id of changedIds) onRunOne(id);
       }
       antMessage.success(
         changes.length
-          ? `Re-shooting ${changes.length} scene${
+          ? `Re-rendering ${changes.length} scene${
               changes.length > 1 ? "s" : ""
-            }…`
+            } (frame + motion)…`
           : "No scenes changed.",
       );
     } catch (e: any) {
@@ -5717,15 +5742,52 @@ function ReelView({
             ),
         )
       : null,
+    // ── scope toggle: this scene (default) vs the whole film ──
     React.createElement(
       "div",
-      { style: { display: "flex", gap: 8, marginTop: 12 } },
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginTop: 12,
+          marginBottom: 6,
+        },
+      },
+      React.createElement(
+        AntText,
+        { style: { color: "#6f7a96", fontSize: 11 } },
+        "Directing:",
+      ),
+      React.createElement(Button, {
+        size: "small",
+        type: scope === "scene" ? "primary" : "default",
+        ghost: scope === "scene",
+        disabled: !selected,
+        onClick: () => setScope("scene"),
+        children: selected
+          ? `🎬 ${selected.id} · ${selected.name}`
+          : "This scene",
+      }),
+      React.createElement(Button, {
+        size: "small",
+        type: scope === "film" ? "primary" : "default",
+        ghost: scope === "film",
+        onClick: () => setScope("film"),
+        children: "Whole film",
+      }),
+    ),
+    React.createElement(
+      "div",
+      { style: { display: "flex", gap: 8 } },
       React.createElement(Input, {
         value: note,
         onChange: (e: any) => setNote(e.target.value),
         onPressEnter: () => void direct(),
         placeholder:
-          'Direct the film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
+          scope === "scene" && selected
+            ? `Change scene ${selected.id} · ${selected.name} — e.g. "make it at dusk, red jacket"`
+            : 'Direct the whole film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
         disabled: directing,
         style: {
           background: "#161a27",
@@ -5751,7 +5813,9 @@ function ReelView({
           marginTop: 6,
         },
       },
-      "Talk to the film. It patches the script and re-shoots only the scenes you changed.",
+      scope === "scene" && selected
+        ? `Talking to scene ${selected.id}. I edit its script, then re-shoot its frame + motion. Click another tile to direct it, or switch to “Whole film”.`
+        : "Talking to the whole film. I edit the script of the scenes you mean, then re-shoot their frame + motion.",
     ),
     // ── budget gate: one cost confirm before any paid render ──
     React.createElement(
