@@ -5721,16 +5721,25 @@ function ReelView({
           block: true,
           size: "large",
           onClick: () => void renderFilm("draft"),
-          children: `Draft — frames only · ≈ $${forecast?.stage_2_usd ?? 0}`,
+          // Never imply "free" when the forecast failed to load — a
+          // missing estimate is "unavailable", not "$0".
+          children:
+            typeof forecast?.stage_2_usd === "number"
+              ? `Draft — frames only · ≈ $${forecast.stage_2_usd}`
+              : "Draft — frames only · cost estimate unavailable",
         }),
         React.createElement(Button, {
           block: true,
           size: "large",
           type: "primary",
           onClick: () => void renderFilm("full"),
-          children: `Full film — frames + motion · ≈ $${(
-            (forecast?.stage_2_usd ?? 0) + (forecast?.stage_3_usd ?? 0)
-          ).toFixed(2)}`,
+          children:
+            typeof forecast?.stage_2_usd === "number" &&
+            typeof forecast?.stage_3_usd === "number"
+              ? `Full film — frames + motion · ≈ $${(
+                  forecast.stage_2_usd + forecast.stage_3_usd
+                ).toFixed(2)}`
+              : "Full film — frames + motion · cost estimate unavailable",
         }),
       ),
     ),

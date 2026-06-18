@@ -281,6 +281,46 @@ test("Render film opens a budget gate with Draft vs Full", async ({ page }) => {
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
+test("budget gate never claims $0 when the cost forecast is unavailable", async ({
+  page,
+}) => {
+  // Regression: if /cost-forecast fails, the gate used to render "≈ $0",
+  // telling the user a paid render is free. It must say so honestly.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast"))
+      return route.fulfill({ status: 500, body: "{}" }); // forecast failed
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Render film/ }).click();
+  await expect(page.getByText("Make the film?")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: shot("09-budget-no-forecast.png") });
+  // The deceptive "$0" must be gone; an honest fallback takes its place.
+  await expect(page.getByText(/≈ \$0/)).toHaveCount(0);
+  await expect(
+    page.getByText(/cost estimate unavailable/).first(),
+  ).toBeVisible();
+});
+
 test("Stop appears during render and cancels it", async ({ page }) => {
   const calls: string[] = [];
   await page.route("**/mock.local/api/creator/**", async (route) => {
