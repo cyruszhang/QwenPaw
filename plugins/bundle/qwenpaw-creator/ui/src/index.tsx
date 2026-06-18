@@ -1476,8 +1476,16 @@ function ProjectPane({
   const onRunStageAllParallel = async (
     stage: string,
     overwrite: boolean = false,
+    sceneIds: string[] | null = null,
   ) => {
-    const scenes = (draft.scenes || []).map((s: any) => s.id);
+    const allIds = (draft.scenes || []).map((s: any) => s.id);
+    // Optional subset (e.g. just the scenes a Director edit touched) so
+    // multi-scene re-rolls share ONE coordinated busy/Stop lifecycle
+    // instead of firing uncoordinated per-scene runs.
+    const scenes =
+      sceneIds && sceneIds.length
+        ? allIds.filter((id: string) => sceneIds.includes(id))
+        : allIds;
     if (!scenes.length) return { done: 0, failed: 0, cancelled: false };
     const gc = draft.global_config || {};
     const conc = Math.max(1, Math.min(5, Number(gc.concurrency) || 5));
@@ -1982,6 +1990,8 @@ function ProjectPane({
                 onRunOne: (sid: string) =>
                   onRunStage("2", { only_scene: sid, overwrite: true }),
                 onRunStageAllParallel,
+                onRerollScenes: (ids: string[]) =>
+                  onRunStageAllParallel("2", true, ids),
                 onDirector,
                 onCancel,
                 onSwitchClassic: () => setStudioMode(false),
@@ -5397,6 +5407,7 @@ function ReelView({
   pendingSceneRun,
   onRunOne,
   onRunStageAllParallel,
+  onRerollScenes,
   onDirector,
   onCancel,
   onSwitchClassic,
@@ -5455,9 +5466,14 @@ function ReelView({
       const changes = r?.changes || [];
       setLog((p) => [...p, { msg, summary: r?.summary || "", changes }]);
       setNote("");
-      // Auto-chain the re-roll the user used to do by hand.
-      for (const c of changes) {
-        if (c.scene_id) onRunOne(c.scene_id);
+      // Auto-chain the re-roll the user used to do by hand. Route every
+      // touched scene through ONE coordinated run so the busy/Stop state
+      // stays coherent across a multi-scene edit (vs. firing uncoordinated
+      // per-scene runs that clear `busy` as soon as the first one lands).
+      const changedIds = changes.map((c: any) => c.scene_id).filter(Boolean);
+      if (changedIds.length) {
+        if (onRerollScenes) onRerollScenes(changedIds);
+        else for (const id of changedIds) onRunOne(id);
       }
       antMessage.success(
         changes.length

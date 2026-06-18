@@ -171,6 +171,66 @@ test("the Director bar re-shoots from the Reel", async ({ page }) => {
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
+test("a multi-scene Director edit runs as one coherent render", async ({
+  page,
+}) => {
+  // Regression: a Director change touching 2+ scenes used to fire
+  // uncoordinated per-scene runs, so the shared busy/Stop state cleared the
+  // moment the FIRST (fast) scene landed — while others were still
+  // rendering. Now they share one coordinated run, so Stop stays up until
+  // every touched scene finishes.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p === "/projects/demo/director" && method === "POST")
+      return j({
+        ok: true,
+        project_id: "demo",
+        draft: DRAFT,
+        summary: "Recut scenes 0 and 1.",
+        changes: [
+          { scene_id: "00", name: "open", fields: ["scene_description"] },
+          { scene_id: "01", name: "storm", fields: ["scene_description"] },
+        ],
+      });
+    if (p.endsWith("/stage") && method === "POST") {
+      const body = route.request().postDataJSON() as { only_scene?: string };
+      // Scene 00 lands fast; scene 01 stays in flight.
+      const delay = String(body?.only_scene) === "01" ? 3000 : 200;
+      await new Promise((r) => setTimeout(r, delay));
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page
+    .getByPlaceholder(/Direct the film/i)
+    .fill("recut the first two scenes");
+  await page.getByRole("button", { name: "Direct" }).click();
+  // Fast scene (00) has finished but the slow one (01) is still rendering —
+  // Stop must still be available, proving a single coherent run.
+  await page.waitForTimeout(1400);
+  await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible();
+  await page.screenshot({ path: shot("10-director-multiscene.png") });
+});
+
 test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
