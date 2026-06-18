@@ -4,11 +4,19 @@
   "version": "0.2.0",
   "scripts": {
     "build": "vite build",
-    "dev": "vite build --watch"
+    "dev": "vite build --watch",
+    "test:e2e": "vite build && playwright test",
+    "test:e2e:headed": "vite build && playwright test --headed"
   },
   "devDependencies": {
+    "@ant-design/icons": "^5.4.0",
+    "@playwright/test": "^1.47.0",
     "@types/react": "^18.3.3",
     "@vitejs/plugin-react": "^4.3.1",
+    "antd": "^5.20.0",
+    "dayjs": "^1.11.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.5.4",
     "vite": "^5.4.2"
   }
