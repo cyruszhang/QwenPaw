@@ -1296,6 +1296,7 @@ function ProjectPane({
         { tag: "decompose", level: "success" },
       );
       setTabBadge(0, 1);
+      return r.draft;
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: "Decompose failed", message: msg });
@@ -1346,6 +1347,21 @@ function ProjectPane({
     } finally {
       setBusy(false);
       setActiveStage(null);
+    }
+  };
+
+  /**
+   * "Make my film": auto-chain Pass 1 (decompose) → Pass 2 (craft) so the
+   * user lands in the Reel with a full storyboard — no manual beat-gate /
+   * "craft scenes" step. The paid render stages stay behind the Reel's
+   * own controls (a later slice gates them with a budget confirm).
+   */
+  const onMakeFilm = async () => {
+    const draft = await onDecompose();
+    const hasBeats =
+      !!draft && ((draft.beats || []).length || (draft.scenes || []).length);
+    if (hasBeats && !(draft.scenes || []).length) {
+      await onCraft();
     }
   };
 
@@ -1870,6 +1886,7 @@ function ProjectPane({
           activeStage,
           status,
           onSubmit: onDecompose,
+          onMakeFilm,
         })
       : null,
 
@@ -4079,6 +4096,7 @@ function MakeFilmHero({
   activeStage,
   status,
   onSubmit,
+  onMakeFilm,
   showAdvanced,
   setShowAdvanced,
 }: any) {
@@ -4125,7 +4143,7 @@ function MakeFilmHero({
         size: "large",
         loading: busy && activeStage === "decompose",
         disabled: !ready,
-        onClick: onSubmit,
+        onClick: onMakeFilm || onSubmit,
         children: "✨ Make my film",
       }),
       React.createElement(Button, {
@@ -4185,6 +4203,7 @@ function DecomposeForm({
   activeStage,
   status,
   onSubmit,
+  onMakeFilm,
 }: any) {
   const [showAdvanced, setShowAdvanced] = React.useState(false);
   const styleOptions = (styles ?? []).map((s: StyleEntry) => ({
@@ -4203,6 +4222,7 @@ function DecomposeForm({
       activeStage,
       status,
       onSubmit,
+      onMakeFilm,
       showAdvanced,
       setShowAdvanced,
     }),

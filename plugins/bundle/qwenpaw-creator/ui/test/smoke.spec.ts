@@ -205,3 +205,60 @@ test("'Make my film' entry hides the dials behind Advanced", async ({
   await expect(page.getByText("Target duration (s)")).toBeVisible();
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
+
+test("'Make my film' auto-chains decompose → craft", async ({ page }) => {
+  const calls: string[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    const emptyDraft = {
+      project_id: "fresh",
+      scenes: [],
+      beats: [],
+      assets: { characters: [], props: [], scene_refs: [], style: {} },
+      global_config: {},
+    };
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "fresh", title: "Fresh story" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/fresh" && method === "GET")
+      return j({ meta: { title: "Fresh story" }, draft: emptyDraft });
+    if (p.endsWith("/decompose") && method === "POST") {
+      calls.push("decompose");
+      return j({
+        draft: { ...emptyDraft, beats: [{ id: "00", name: "open" }] },
+      });
+    }
+    if (p.endsWith("/craft") && method === "POST") {
+      calls.push("craft");
+      return j({
+        draft: {
+          ...emptyDraft,
+          beats: [{ id: "00", name: "open" }],
+          scenes: [
+            { id: "00", name: "open", duration: 8, scene_description: "x" },
+          ],
+        },
+      });
+    }
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Fresh story").click();
+  await page.getByText("Make my film").click();
+
+  // One click chains Pass 1 then Pass 2 — no manual beat-gate / craft step.
+  await expect.poll(() => calls).toContain("decompose");
+  await expect.poll(() => calls).toContain("craft");
+});
