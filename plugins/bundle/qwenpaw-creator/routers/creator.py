@@ -1726,7 +1726,14 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
         if refs_dir.is_dir():
             for f in sorted(refs_dir.iterdir()):
                 if f.is_file() and f.suffix.lower() == ".png":
-                    refs.append({"name": f.name, "size": f.stat().st_size})
+                    st = f.stat()
+                    refs.append(
+                        {
+                            "name": f.name,
+                            "size": st.st_size,
+                            "mtime": st.st_mtime,
+                        },
+                    )
         out["stages"]["0"] = {"refs": refs}
 
         frames: list[dict] = []
@@ -1738,7 +1745,10 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                 if not f.is_file():
                     continue
                 n = f.name
-                entry = {"name": n, "size": f.stat().st_size}
+                st = f.stat()
+                # mtime lets the UI spot a motion clip left stale by a
+                # later frame re-shoot (frame newer than its raw.mp4).
+                entry = {"name": n, "size": st.st_size, "mtime": st.st_mtime}
                 if n.endswith("_frame.png"):
                     frames.append(entry)
                 elif n.endswith("_raw.mp4"):
@@ -1989,6 +1999,29 @@ def build_router() -> APIRouter:  # noqa: C901, PLR0915
                     draft=draft,
                     only_scene=body.only_scene,
                     scene_ids=generated_ids,
+                )
+            # A frame compose can "succeed" (HTTP 200) while producing no
+            # image — e.g. a scene whose references (Stage 0) were never
+            # generated. Surface that as an explicit error instead of a
+            # silent 200, so the UI doesn't look like "nothing happened".
+            errored = [
+                s for s in (result.get("scenes") or []) if s.get("error")
+            ]
+            if errored and not generated_ids:
+                reasons = "; ".join(
+                    f"scene {s.get('scene_id')}: {s.get('error')}"
+                    for s in errored[:5]
+                )
+                needs_refs = any(s.get("error") == "no refs" for s in errored)
+                hint = (
+                    " — generate the reference images first (run the "
+                    "anchors / Stage 0), or mark the scene standalone"
+                    if needs_refs
+                    else ""
+                )
+                raise HTTPException(
+                    422,
+                    f"No frames were produced{hint}. {reasons}",
                 )
             return result
 

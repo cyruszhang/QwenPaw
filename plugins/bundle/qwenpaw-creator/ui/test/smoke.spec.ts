@@ -148,8 +148,9 @@ test("The Reel (Studio) is the default project view", async ({ page }) => {
   // The Reel — not the stage accordion — is the default workspace.
   await expect(page.getByText("The Reel")).toBeVisible();
   await expect(page.getByText(/in motion/)).toBeVisible();
-  await expect(page.getByText("00 · open")).toBeVisible();
-  await expect(page.getByPlaceholder(/Direct the film/i)).toBeVisible();
+  // "00 · open" appears on the tile and the scope chip — first is the tile.
+  await expect(page.getByText("00 · open").first()).toBeVisible();
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
   await page.screenshot({ path: shot("02-studio-reel.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
@@ -162,13 +163,248 @@ test("the Director bar re-shoots from the Reel", async ({ page }) => {
   await page.getByText("Old Man & The Sea").click();
 
   await page
-    .getByPlaceholder(/Direct the film/i)
+    .getByPlaceholder(/Change scene|Direct the/i)
     .fill("make the opening at dusk and give the boy a red jacket");
   await page.getByRole("button", { name: "Direct" }).click();
 
   await expect(page.getByText(/Set the opening at dusk/)).toBeVisible();
   await page.screenshot({ path: shot("03-director.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
+});
+
+test("a multi-scene Director edit runs as one coherent render", async ({
+  page,
+}) => {
+  // Regression: a Director change touching 2+ scenes used to fire
+  // uncoordinated per-scene runs, so the shared busy/Stop state cleared the
+  // moment the FIRST (fast) scene landed — while others were still
+  // rendering. Now they share one coordinated run, so Stop stays up until
+  // every touched scene finishes.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p === "/projects/demo/director" && method === "POST")
+      return j({
+        ok: true,
+        project_id: "demo",
+        draft: DRAFT,
+        summary: "Recut scenes 0 and 1.",
+        changes: [
+          { scene_id: "00", name: "open", fields: ["scene_description"] },
+          { scene_id: "01", name: "storm", fields: ["scene_description"] },
+        ],
+      });
+    if (p.endsWith("/stage") && method === "POST") {
+      const body = route.request().postDataJSON() as { only_scene?: string };
+      // Scene 00 lands fast; scene 01 stays in flight.
+      const delay = String(body?.only_scene) === "01" ? 3000 : 200;
+      await new Promise((r) => setTimeout(r, delay));
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page
+    .getByPlaceholder(/Change scene|Direct the/i)
+    .fill("recut the first two scenes");
+  await page.getByRole("button", { name: "Direct" }).click();
+  // Fast scene (00) has finished but the slow one (01) is still rendering —
+  // Stop must still be available, proving a single coherent run.
+  await page.waitForTimeout(1400);
+  await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible();
+  await page.screenshot({ path: shot("10-director-multiscene.png") });
+});
+
+test("the Director is scene-scoped and re-renders frame + motion", async ({
+  page,
+}) => {
+  // Scene-scoped by default (a tile is selected) with a "Whole film"
+  // toggle, and a Director edit re-shoots the frame AND re-animates the
+  // motion (Stage 2 then Stage 3) so the clip stays in sync.
+  const stages: string[] = [];
+  let directBody = "";
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p === "/projects/demo/director" && method === "POST") {
+      directBody = route.request().postData() || "";
+      return j({
+        ok: true,
+        project_id: "demo",
+        draft: DRAFT,
+        summary: "Made scene 00 at dusk.",
+        changes: [{ scene_id: "00", name: "open", fields: ["x"] }],
+      });
+    }
+    if (p.endsWith("/stage") && method === "POST") {
+      const b = route.request().postDataJSON() as { stage?: string };
+      stages.push(String(b?.stage));
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+
+  // Default scope is the selected scene (00 · open) with a whole-film toggle.
+  await expect(page.getByText("Directing:")).toBeVisible();
+  await expect(page.getByRole("button", { name: /00 · open/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Whole film" })).toBeVisible();
+  await page.screenshot({ path: shot("13-director-scope.png") });
+
+  await page
+    .getByPlaceholder(/Change scene|Direct the/i)
+    .fill("make it at dusk");
+  await page.getByRole("button", { name: "Direct" }).click();
+  await expect(page.getByText(/Made scene 00 at dusk/)).toBeVisible();
+  await page.waitForTimeout(600);
+  // Scope hint reached the backend, and the change rendered BOTH stages.
+  expect(directBody).toContain("Focus on scene 00");
+  expect(stages).toContain("2");
+  expect(stages).toContain("3");
+});
+
+test("the Director bar dictates speech into the note when supported", async ({
+  page,
+}) => {
+  // Inject a fake Web Speech API before the bundle loads. Fake BOTH the
+  // unprefixed and webkit names — the panel prefers SpeechRecognition.
+  await page.addInitScript(() => {
+    function Fake(this: Record<string, unknown>) {
+      this.start = () => {
+        setTimeout(() => {
+          const onresult = this.onresult as ((e: unknown) => void) | null;
+          const onend = this.onend as (() => void) | null;
+          if (onresult)
+            onresult({ results: [[{ transcript: "make it at dusk" }]] });
+          if (onend) onend();
+        }, 30);
+      };
+      this.stop = () => {
+        const onend = this.onend as (() => void) | null;
+        if (onend) onend();
+      };
+    }
+    const w = window as unknown as Record<string, unknown>;
+    w.SpeechRecognition = Fake;
+    w.webkitSpeechRecognition = Fake;
+  });
+  await mockApi(page);
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  const mic = page.getByRole("button", { name: "🎤" });
+  await expect(mic).toBeVisible();
+  await mic.click();
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toHaveValue(
+    /make it at dusk/,
+  );
+  await page.screenshot({ path: shot("14-voice-input.png") });
+});
+
+test("the mic is hidden when the browser has no speech API", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, unknown>;
+    delete w.webkitSpeechRecognition;
+    delete w.SpeechRecognition;
+  });
+  await mockApi(page);
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  // The Director input is there, but no mic button (graceful fallback).
+  await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: "🎤" })).toHaveCount(0);
+});
+
+test("a clip left stale by a frame re-shoot is flagged, not played", async ({
+  page,
+}) => {
+  // Regression: re-shooting a frame (Stage 2) leaves the old motion clip
+  // (Stage 3) on disk. The Reel used to still tag it "▶ clip" and play the
+  // outdated video in the hero. With mtimes, a clip older than its frame is
+  // "⟳ clip outdated" and the hero falls back to the new frame.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p === "/projects/demo/status")
+      return j({
+        id: "demo",
+        stages: {
+          "2": {
+            frames: [
+              // scene 00 frame re-shot AFTER its clip -> stale clip
+              { name: "00_open_frame.png", size: 100, mtime: 2000 },
+              // scene 01 frame older than its clip -> valid clip
+              { name: "01_storm_frame.png", size: 100, mtime: 500 },
+            ],
+          },
+          "3": {
+            shots: [
+              { name: "00_open_raw.mp4", size: 200, mtime: 1000 },
+              { name: "01_storm_raw.mp4", size: 200, mtime: 1500 },
+            ],
+          },
+        },
+      });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  // Scene 00 (selected by default) has a stale clip → flagged, not "▶ clip".
+  await expect(page.getByText("⟳ clip outdated")).toBeVisible();
+  // Scene 01's clip is still valid → it keeps the play tag.
+  await expect(page.getByText("▶ clip")).toBeVisible();
+  // The hero must not play the stale clip (falls back to the frame).
+  await expect(page.locator("video")).toHaveCount(0);
+  await page.screenshot({ path: shot("11-stale-clip.png") });
 });
 
 test("Classic toggle restores the stage-accordion view", async ({ page }) => {
@@ -281,6 +517,92 @@ test("Render film opens a budget gate with Draft vs Full", async ({ page }) => {
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
+test("budget gate never claims $0 when the cost forecast is unavailable", async ({
+  page,
+}) => {
+  // Regression: if /cost-forecast fails, the gate used to render "≈ $0",
+  // telling the user a paid render is free. It must say so honestly.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast"))
+      return route.fulfill({ status: 500, body: "{}" }); // forecast failed
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Render film/ }).click();
+  await expect(page.getByText("Make the film?")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: shot("09-budget-no-forecast.png") });
+  // The deceptive "$0" must be gone; an honest fallback takes its place.
+  await expect(page.getByText(/≈ \$0/)).toHaveCount(0);
+  await expect(
+    page.getByText(/cost estimate unavailable/).first(),
+  ).toBeVisible();
+});
+
+test("a Shoot that produces no frame surfaces an error, not silent success", async ({
+  page,
+}) => {
+  // Regression: Stage 2 used to return 200 even when it produced no image
+  // (e.g. a scene whose Stage-0 references were never generated), so a
+  // failed "Shoot" looked like "nothing happened". Now the backend 422s
+  // and the UI shows it (toast + alert), even down in the Reel strip.
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST")
+      return route.fulfill({
+        status: 422,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail:
+            "No frames were produced — generate the reference images " +
+            "first (run the anchors / Stage 0). scene 00: no refs",
+        }),
+      });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Shoot/ }).first().click();
+  // The failure is surfaced (the Alert title), not swallowed.
+  await expect(page.getByText(/frame compose failed/i).first()).toBeVisible();
+  await page.screenshot({ path: shot("12-shoot-error.png") });
+});
+
 test("Stop appears during render and cancels it", async ({ page }) => {
   const calls: string[] = [];
   await page.route("**/mock.local/api/creator/**", async (route) => {
@@ -325,6 +647,56 @@ test("Stop appears during render and cancels it", async ({ page }) => {
   await page.screenshot({ path: shot("07-rendering-stop.png") });
   await page.getByRole("button", { name: /Stop/ }).click();
   await expect.poll(() => calls).toContain("cancel");
+});
+
+test("Stop during a Full render does not roll into the motion stage", async ({
+  page,
+}) => {
+  // Regression: hitting Stop while frames (Stage 2) are rendering must not
+  // proceed to the pricey motion step (Stage 3). The per-scene fan-out plus
+  // the backend clearing its cancel flag per /stage POST means the client
+  // brake is what actually stops it.
+  const stages: string[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST") {
+      const body = route.request().postDataJSON() as { stage?: string };
+      stages.push(String(body?.stage));
+      await new Promise((r) => setTimeout(r, 2500)); // keep frames in flight
+      return j({ ok: true });
+    }
+    if (p.endsWith("/cancel") && method === "POST")
+      return j({ ok: true, cancelling: true });
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+  await page.getByRole("button", { name: /Render film/ }).click();
+  await page.getByRole("button", { name: /Full film/ }).click();
+  // Stop while the frame stage is still in flight.
+  await page.getByRole("button", { name: /Stop/ }).click();
+  // Let the in-flight frame batch resolve and give renderFilm a chance to
+  // (wrongly) launch Stage 3 if the guard regressed.
+  await page.waitForTimeout(4000);
+  expect(stages).toContain("2");
+  expect(stages).not.toContain("3");
 });
 
 test("a cost-forecast without a breakdown does not crash the panel", async ({

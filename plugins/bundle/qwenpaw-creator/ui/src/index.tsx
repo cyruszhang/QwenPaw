@@ -1372,6 +1372,14 @@ function ProjectPane({
     }
   };
 
+  // Cooperative cancel flag for the parallel render. The backend clears its
+  // own per-project flag at the start of every /stage POST, so for the
+  // per-scene fan-out (one POST per scene) that flag can't stop the run on
+  // its own. This client-side ref is the real brake: onCancel raises it,
+  // the batch loop stops launching new shots, and renderFilm refuses to
+  // start the (pricey) motion stage after a Stop.
+  const cancelRef = React.useRef(false);
+
   /**
    * Stop a running render. Cooperative — the backend stage loops check
    * the flag between scenes and stop before starting more (paid) work;
@@ -1379,6 +1387,9 @@ function ProjectPane({
    * clears the busy state.
    */
   const onCancel = async () => {
+    // Raise the client brake first so any in-flight batch loop stops
+    // launching new shots even if the network call lags.
+    cancelRef.current = true;
     try {
       await apiJson("POST", `/creator/projects/${pid}/cancel`, {});
       antMessage.info("Stopping after the current shots…");
@@ -1465,12 +1476,21 @@ function ProjectPane({
   const onRunStageAllParallel = async (
     stage: string,
     overwrite: boolean = false,
+    sceneIds: string[] | null = null,
   ) => {
-    const scenes = (draft.scenes || []).map((s: any) => s.id);
-    if (!scenes.length) return;
+    const allIds = (draft.scenes || []).map((s: any) => s.id);
+    // Optional subset (e.g. just the scenes a Director edit touched) so
+    // multi-scene re-rolls share ONE coordinated busy/Stop lifecycle
+    // instead of firing uncoordinated per-scene runs.
+    const scenes =
+      sceneIds && sceneIds.length
+        ? allIds.filter((id: string) => sceneIds.includes(id))
+        : allIds;
+    if (!scenes.length) return { done: 0, failed: 0, cancelled: false };
     const gc = draft.global_config || {};
     const conc = Math.max(1, Math.min(5, Number(gc.concurrency) || 5));
     maybeRequestNotificationPermission();
+    cancelRef.current = false;
     setBusy(true);
     setActiveStage(stage);
     setRunError(null);
@@ -1480,6 +1500,9 @@ function ProjectPane({
     const failureMessages: string[] = [];
     try {
       for (let i = 0; i < scenes.length; i += conc) {
+        // Stop launching new shots once the user hits Stop; the batch
+        // already in flight finishes, nothing past it starts.
+        if (cancelRef.current) break;
         const batch = scenes.slice(i, i + conc);
         const results = await Promise.allSettled(
           batch.map((sid: string) =>
@@ -1511,10 +1534,16 @@ function ProjectPane({
           message: unique.join("\n\n"),
         });
       }
-      notify(`Stage ${stage} done`, `${done} succeeded, ${failed} failed.`, {
-        tag: `stage-${stage}`,
-        level: failed > 0 ? "warning" : "success",
-      });
+      notify(
+        cancelRef.current ? `Stage ${stage} stopped` : `Stage ${stage} done`,
+        cancelRef.current
+          ? `${done} shot${done === 1 ? "" : "s"} finished before you stopped.`
+          : `${done} succeeded, ${failed} failed.`,
+        {
+          tag: `stage-${stage}`,
+          level: failed > 0 ? "warning" : "success",
+        },
+      );
       setTabBadge(0, done);
     } catch (e: any) {
       const msg = compactApiError(e);
@@ -1528,6 +1557,7 @@ function ProjectPane({
       setBusy(false);
       setActiveStage(null);
     }
+    return { done, failed, cancelled: cancelRef.current };
   };
 
   const onRunStage = async (stage: string, extra: any = {}) => {
@@ -1567,6 +1597,10 @@ function ProjectPane({
     } catch (e: any) {
       const msg = compactApiError(e);
       setRunError({ title: `${label} failed`, message: msg });
+      // In-app toast too — the error Alert renders at the panel top, which
+      // is off-screen when the user is down in the Reel strip clicking
+      // "Shoot". Without this a failed run looks like "nothing happened".
+      antMessage.error(`${label} failed: ${msg.slice(0, 160)}`);
       notify(`${label} failed`, msg.slice(0, 200), {
         tag: `stage-${stage}-err`,
         level: "error",
@@ -1948,6 +1982,7 @@ function ProjectPane({
           ),
           studioMode
             ? React.createElement(ReelView, {
+                key: `reel-${pid}`,
                 pid,
                 draft,
                 projStatus,
@@ -1959,11 +1994,23 @@ function ProjectPane({
                 onRunOne: (sid: string) =>
                   onRunStage("2", { only_scene: sid, overwrite: true }),
                 onRunStageAllParallel,
+                onRerollScenes: (ids: string[]) =>
+                  onRunStageAllParallel("2", true, ids),
+                // A Director edit re-shoots the frame AND re-animates the
+                // motion so the playing clip stays in sync — one
+                // coordinated run, and Stop still halts before Stage 3.
+                onRerollScenesFull: async (ids: string[]) => {
+                  const r2 = await onRunStageAllParallel("2", true, ids);
+                  if (!r2?.cancelled) {
+                    await onRunStageAllParallel("3", true, ids);
+                  }
+                },
                 onDirector,
                 onCancel,
                 onSwitchClassic: () => setStudioMode(false),
               })
             : React.createElement(DraftPanel, {
+                key: `draft-${pid}`,
                 pid,
                 draft,
                 styles,
@@ -5193,6 +5240,7 @@ function SceneTile({
   scene,
   frameAsset,
   shotAsset,
+  shotStale,
   live,
   selected,
   busyHere,
@@ -5200,7 +5248,10 @@ function SceneTile({
   onReroll,
 }: any) {
   const framed = Boolean(frameAsset);
-  const moving = Boolean(shotAsset);
+  // A clip left over from a since-replaced frame isn't a real "in motion"
+  // state — show it as needing a re-animate, not a playable clip.
+  const moving = Boolean(shotAsset) && !shotStale;
+  const stale = Boolean(shotAsset) && Boolean(shotStale);
   const running = busyHere || live?.state === "running";
   const failed = live?.state === "failed";
   const frameName = `${scene.id}_${scene.name}_frame.png`;
@@ -5273,6 +5324,26 @@ function SceneTile({
               },
             },
             "▶ clip",
+          )
+        : null,
+      stale
+        ? React.createElement(
+            Tooltip,
+            { title: "The frame changed — re-animate to refresh the clip" },
+            React.createElement(
+              Tag,
+              {
+                color: "orange",
+                style: {
+                  position: "absolute",
+                  top: 6,
+                  left: 6,
+                  margin: 0,
+                  fontSize: 9,
+                },
+              },
+              "⟳ clip outdated",
+            ),
           )
         : null,
       running
@@ -5373,6 +5444,8 @@ function ReelView({
   pendingSceneRun,
   onRunOne,
   onRunStageAllParallel,
+  onRerollScenes,
+  onRerollScenesFull,
   onDirector,
   onCancel,
   onSwitchClassic,
@@ -5386,6 +5459,19 @@ function ReelView({
   const [log, setLog] = React.useState<any[]>([]);
   const [budgetOpen, setBudgetOpen] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
+  // Director scope: "scene" targets the selected tile (default — click a
+  // tile, talk to it); "film" lets one instruction touch the whole story.
+  const [scope, setScope] = React.useState<"scene" | "film">("scene");
+  // Voice input: dictate the instruction. Web Speech API where available
+  // (Chrome/Edge/Safari); the mic just hides where it isn't.
+  const [listening, setListening] = React.useState(false);
+  const recogRef = React.useRef<any>(null);
+  const SpeechRec =
+    typeof window !== "undefined"
+      ? (window as any).SpeechRecognition ||
+        (window as any).webkitSpeechRecognition
+      : null;
+  const speechSupported = !!SpeechRec;
 
   // Budget gate: render only after a single cost confirm. Draft = frames
   // only (Stage 2); Full also animates (Stage 3) — the expensive step.
@@ -5393,8 +5479,12 @@ function ReelView({
     setBudgetOpen(false);
     setRendering(true);
     try {
-      await onRunStageAllParallel?.("2", false);
-      if (mode === "full") await onRunStageAllParallel?.("3", false);
+      const r = await onRunStageAllParallel?.("2", false);
+      // Don't roll into the pricey motion stage if the user hit Stop
+      // during frames — Stop must mean stop, not "stop, then animate".
+      if (mode === "full" && !r?.cancelled) {
+        await onRunStageAllParallel?.("3", false);
+      }
     } finally {
       setRendering(false);
     }
@@ -5406,36 +5496,110 @@ function ReelView({
   const shots = new Map<string, any>(
     (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
   );
-  const assetFor = (s: any) => ({
-    frame: frames.get(`${s.id}_${s.name}_frame.png`),
-    shot: shots.get(`${s.id}_${s.name}_raw.mp4`),
-  });
+  const assetFor = (s: any) => {
+    const frame = frames.get(`${s.id}_${s.name}_frame.png`);
+    const shot = shots.get(`${s.id}_${s.name}_raw.mp4`);
+    // A motion clip is animated FROM a frame; if the frame was re-shot
+    // afterwards (newer mtime) the clip no longer matches it — treat it
+    // as stale so we don't play/flaunt an outdated video.
+    const shotStale = Boolean(
+      frame && shot && frame.mtime && shot.mtime && frame.mtime > shot.mtime,
+    );
+    return { frame, shot, shotStale };
+  };
 
   const nFramed = scenes.filter((s) => assetFor(s).frame).length;
-  const nMoving = scenes.filter((s) => assetFor(s).shot).length;
+  const nMoving = scenes.filter((s) => {
+    const a = assetFor(s);
+    return a.shot && !a.shotStale;
+  }).length;
   const live = liveProgress || {};
 
   const selected = scenes.find((s) => s.id === selectedId) || scenes[0];
-  const selAsset = selected ? assetFor(selected) : { frame: null, shot: null };
+  const selAsset = selected
+    ? assetFor(selected)
+    : { frame: null, shot: null, shotStale: false };
+
+  const toggleMic = () => {
+    if (!speechSupported) return;
+    if (listening) {
+      try {
+        recogRef.current && recogRef.current.stop();
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    let rec: any;
+    try {
+      rec = new SpeechRec();
+    } catch {
+      return;
+    }
+    rec.interimResults = true;
+    rec.continuous = false;
+    // Keep anything already typed; dictation appends to it.
+    const base = note ? note.replace(/\s+$/, "") + " " : "";
+    rec.onresult = (ev: any) => {
+      let txt = "";
+      for (let i = 0; i < ev.results.length; i++) {
+        txt += ev.results[i][0].transcript;
+      }
+      setNote(base + txt);
+    };
+    rec.onend = () => {
+      setListening(false);
+      recogRef.current = null;
+    };
+    rec.onerror = () => {
+      setListening(false);
+      recogRef.current = null;
+    };
+    recogRef.current = rec;
+    setListening(true);
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      recogRef.current = null;
+    }
+  };
 
   const direct = async () => {
     const msg = note.trim();
     if (!msg || directing) return;
     setDirecting(true);
     try {
-      const r = await onDirector(msg);
+      // Scene-scoped by default: focus the instruction on the selected
+      // tile so the user can just talk to "this scene". Still lets them
+      // name another scene explicitly (the model honours that over the
+      // focus hint). "Whole film" scope sends the message unscoped.
+      const sel = scenes.find((s) => s.id === selectedId);
+      const scoped =
+        scope === "scene" && sel
+          ? `Focus on scene ${sel.id} (${sel.name}). If I do not name a ` +
+            `different scene, apply this only to scene ${sel.id}. ` +
+            `Instruction: ${msg}`
+          : msg;
+      const r = await onDirector(scoped);
       const changes = r?.changes || [];
       setLog((p) => [...p, { msg, summary: r?.summary || "", changes }]);
       setNote("");
-      // Auto-chain the re-roll the user used to do by hand.
-      for (const c of changes) {
-        if (c.scene_id) onRunOne(c.scene_id);
+      // Auto-chain the render the user used to do by hand. ONE coordinated
+      // run so busy/Stop stay coherent across a multi-scene edit. Per the
+      // chosen behaviour, a Director edit re-shoots the frame AND
+      // re-animates the motion so the playing clip stays in sync.
+      const changedIds = changes.map((c: any) => c.scene_id).filter(Boolean);
+      if (changedIds.length) {
+        if (onRerollScenesFull) onRerollScenesFull(changedIds);
+        else if (onRerollScenes) onRerollScenes(changedIds);
+        else for (const id of changedIds) onRunOne(id);
       }
       antMessage.success(
         changes.length
-          ? `Re-shooting ${changes.length} scene${
+          ? `Re-rendering ${changes.length} scene${
               changes.length > 1 ? "s" : ""
-            }…`
+            } (frame + motion)…`
           : "No scenes changed.",
       );
     } catch (e: any) {
@@ -5532,7 +5696,7 @@ function ReelView({
               justifyContent: "center",
             },
           },
-          selAsset.shot
+          selAsset.shot && !selAsset.shotStale
             ? React.createElement("video", {
                 src: refUrl(pid, `${selected.id}_${selected.name}_raw.mp4`),
                 controls: true,
@@ -5587,6 +5751,7 @@ function ReelView({
           scene: s,
           frameAsset: a.frame,
           shotAsset: a.shot,
+          shotStale: a.shotStale,
           live: live[s.id],
           busyHere,
           selected: s.id === selectedId,
@@ -5632,15 +5797,69 @@ function ReelView({
             ),
         )
       : null,
+    // ── scope toggle: this scene (default) vs the whole film ──
     React.createElement(
       "div",
-      { style: { display: "flex", gap: 8, marginTop: 12 } },
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          marginTop: 12,
+          marginBottom: 6,
+        },
+      },
+      React.createElement(
+        AntText,
+        { style: { color: "#6f7a96", fontSize: 11 } },
+        "Directing:",
+      ),
+      React.createElement(Button, {
+        size: "small",
+        type: scope === "scene" ? "primary" : "default",
+        ghost: scope === "scene",
+        disabled: !selected,
+        onClick: () => setScope("scene"),
+        children: selected
+          ? `🎬 ${selected.id} · ${selected.name}`
+          : "This scene",
+      }),
+      React.createElement(Button, {
+        size: "small",
+        type: scope === "film" ? "primary" : "default",
+        ghost: scope === "film",
+        onClick: () => setScope("film"),
+        children: "Whole film",
+      }),
+    ),
+    React.createElement(
+      "div",
+      { style: { display: "flex", gap: 8 } },
+      speechSupported
+        ? React.createElement(
+            Tooltip,
+            {
+              title: listening
+                ? "Listening… click to stop"
+                : "Dictate your instruction",
+            },
+            React.createElement(Button, {
+              type: listening ? "primary" : "default",
+              danger: listening,
+              disabled: directing,
+              onClick: toggleMic,
+              children: listening ? "● rec" : "🎤",
+            }),
+          )
+        : null,
       React.createElement(Input, {
         value: note,
         onChange: (e: any) => setNote(e.target.value),
         onPressEnter: () => void direct(),
         placeholder:
-          'Direct the film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
+          scope === "scene" && selected
+            ? `Change scene ${selected.id} · ${selected.name} — e.g. "make it at dusk, red jacket"`
+            : 'Direct the whole film — e.g. "make scene 1 at dusk, give the boy a red jacket"',
         disabled: directing,
         style: {
           background: "#161a27",
@@ -5666,7 +5885,9 @@ function ReelView({
           marginTop: 6,
         },
       },
-      "Talk to the film. It patches the script and re-shoots only the scenes you changed.",
+      scope === "scene" && selected
+        ? `Talking to scene ${selected.id}. I edit its script, then re-shoot its frame + motion. Click another tile to direct it, or switch to “Whole film”.`
+        : "Talking to the whole film. I edit the script of the scenes you mean, then re-shoot their frame + motion.",
     ),
     // ── budget gate: one cost confirm before any paid render ──
     React.createElement(
@@ -5693,16 +5914,25 @@ function ReelView({
           block: true,
           size: "large",
           onClick: () => void renderFilm("draft"),
-          children: `Draft — frames only · ≈ $${forecast?.stage_2_usd ?? 0}`,
+          // Never imply "free" when the forecast failed to load — a
+          // missing estimate is "unavailable", not "$0".
+          children:
+            typeof forecast?.stage_2_usd === "number"
+              ? `Draft — frames only · ≈ $${forecast.stage_2_usd}`
+              : "Draft — frames only · cost estimate unavailable",
         }),
         React.createElement(Button, {
           block: true,
           size: "large",
           type: "primary",
           onClick: () => void renderFilm("full"),
-          children: `Full film — frames + motion · ≈ $${(
-            (forecast?.stage_2_usd ?? 0) + (forecast?.stage_3_usd ?? 0)
-          ).toFixed(2)}`,
+          children:
+            typeof forecast?.stage_2_usd === "number" &&
+            typeof forecast?.stage_3_usd === "number"
+              ? `Full film — frames + motion · ≈ $${(
+                  forecast.stage_2_usd + forecast.stage_3_usd
+                ).toFixed(2)}`
+              : "Full film — frames + motion · cost estimate unavailable",
         }),
       ),
     ),

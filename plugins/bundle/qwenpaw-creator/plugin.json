@@ -1,12 +1,12 @@
 {
   "id": "qwenpaw-creator",
   "name": "QwenPaw Creator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "general",
-  "description": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.2: console panel + Stage 00 script decomposition.",
+  "description": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.3: 'The Reel' Studio UX — self-assembling scene-strip, Director bar, budget gate, honest Stop.",
   "description_i18n": {
-    "zh-CN": "QwenPaw Creator —— 故事书视频、轮播图、品牌发布等下游垂直应用（毕业册、婚礼册、企业年报等）的智能体底座。v0.2：控制台面板 + Stage 00 剧本拆解。",
-    "en-US": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.2: console panel + Stage 00 script decomposition."
+    "zh-CN": "QwenPaw Creator —— 故事书视频、轮播图、品牌发布等下游垂直应用（毕业册、婚礼册、企业年报等）的智能体底座。v0.3：“The Reel” 影棚式工作流 —— 自组装分镜条、导演指令栏、预算确认、随时停止。",
+    "en-US": "Creator vertical — the agentic substrate for storybook video, carousel, brand-launch, and other downstream verticals (Yearbook, Wedding-book, Corporate-annual). v0.3: 'The Reel' Studio UX — self-assembling scene-strip, Director bar, budget gate, honest Stop."
   },
   "author": "QwenPaw Team",
   "entry": {
