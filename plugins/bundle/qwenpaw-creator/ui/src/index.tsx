@@ -1991,6 +1991,7 @@ function ProjectPane({
                 busy,
                 activeStage,
                 pendingSceneRun,
+                onRunStage,
                 onRunOne: (sid: string) =>
                   onRunStage("2", { only_scene: sid, overwrite: true }),
                 onRunStageAllParallel,
@@ -5209,6 +5210,195 @@ function DirectorChat({ draft, onDirector }: any) {
 // affected scenes. Rides entirely on existing endpoints + the SSE bus.
 // ═══════════════════════════════════════════════════════════════════
 
+type ReelRunMode = "storyboard" | "animated" | "final";
+
+interface ReelWorkflowState {
+  sceneCount: number;
+  requiredAnchors: number;
+  readyAnchors: number;
+  anchorsReady: boolean;
+  nFramed: number;
+  nMoving: number;
+  staleClips: number;
+  narrationNeeded: number;
+  narrationReady: boolean;
+  finalReady: boolean;
+  finalStale: boolean;
+  primaryMode: ReelRunMode;
+  primaryLabel: string;
+  statusLine: string;
+}
+
+function stageAssets(projStatus: any, stage: string, key: string): any[] {
+  return projStatus?.stages?.[stage]?.[key] ?? [];
+}
+
+function styleAnchorRequired(draft: any): boolean {
+  const style = draft?.assets?.style;
+  if (!style) return false;
+  return Boolean(
+    style.catalog_id ||
+      style.reference_image ||
+      style.positive_template ||
+      style.negative_prompt,
+  );
+}
+
+function sceneAssetBase(scene: any): string {
+  return `${scene.id}_${scene.name}`;
+}
+
+function expectedFrameName(scene: any): string {
+  return `${sceneAssetBase(scene)}_frame.png`;
+}
+
+function expectedShotName(scene: any): string {
+  return `${sceneAssetBase(scene)}_raw.mp4`;
+}
+
+function expectedAudioName(scene: any): string {
+  return `${sceneAssetBase(scene)}_narration.mp3`;
+}
+
+function assetMap(items: any[]): Map<string, any> {
+  return new Map((items ?? []).map((r: any) => [r.name, r]));
+}
+
+function maxMtime(items: any[]): number {
+  return Math.max(0, ...(items ?? []).map((r: any) => Number(r?.mtime) || 0));
+}
+
+function deriveReelWorkflowState(
+  draft: any,
+  projStatus: any,
+): ReelWorkflowState {
+  const scenes: any[] = draft?.scenes ?? [];
+  const assets = draft?.assets ?? {};
+  const frames = assetMap(stageAssets(projStatus, "2", "frames"));
+  const shots = assetMap(stageAssets(projStatus, "3", "shots"));
+  const audio = assetMap(stageAssets(projStatus, "1", "audio"));
+  const finals = stageAssets(projStatus, "4", "final");
+
+  const requiredAnchors =
+    (assets.characters ?? []).length +
+    (assets.props ?? []).length +
+    (assets.scene_refs ?? []).length +
+    (styleAnchorRequired(draft) ? 1 : 0);
+  const readyAnchors = stageAssets(projStatus, "0", "refs").length;
+  const anchorsReady = requiredAnchors === 0 || readyAnchors >= requiredAnchors;
+
+  let nFramed = 0;
+  let nMoving = 0;
+  let staleClips = 0;
+  for (const scene of scenes) {
+    const frame = frames.get(expectedFrameName(scene));
+    const shot = shots.get(expectedShotName(scene));
+    if (frame) nFramed++;
+    if (frame && shot && Number(frame.mtime) > Number(shot.mtime)) {
+      staleClips++;
+    } else if (shot) {
+      nMoving++;
+    }
+  }
+
+  const narratedScenes = scenes.filter((s: any) => s.has_narration);
+  const narrationNeeded = narratedScenes.length;
+  const narrationDone = narratedScenes.filter((s: any) =>
+    audio.has(expectedAudioName(s)),
+  ).length;
+  const narrationReady =
+    narrationNeeded === 0 || narrationDone >= narrationNeeded;
+
+  const inputMtime = Math.max(
+    maxMtime(stageAssets(projStatus, "3", "shots")),
+    maxMtime(stageAssets(projStatus, "1", "audio")),
+  );
+  const finalMtime = maxMtime(finals);
+  const finalStale = Boolean(
+    finalMtime && inputMtime && inputMtime > finalMtime,
+  );
+  const finalReady = Boolean(finals.length) && !finalStale;
+
+  let primaryMode: ReelRunMode = "storyboard";
+  let primaryLabel = "Shoot storyboard";
+  if (scenes.length === 0) {
+    primaryLabel = "Storyboard first";
+  } else if (!anchorsReady || nFramed < scenes.length) {
+    primaryMode = "storyboard";
+    primaryLabel = !anchorsReady
+      ? "Prep & shoot storyboard"
+      : "Shoot storyboard";
+  } else if (staleClips > 0 || nMoving < scenes.length) {
+    primaryMode = "animated";
+    primaryLabel = staleClips > 0 ? "Refresh clips" : "Animate reel";
+  } else if (!narrationReady || !finalReady) {
+    primaryMode = "final";
+    primaryLabel = finalStale ? "Refresh final cut" : "Assemble final cut";
+  }
+
+  const bits = [
+    requiredAnchors > 0
+      ? `${Math.min(readyAnchors, requiredAnchors)}/${requiredAnchors} anchors`
+      : null,
+    `${nFramed}/${scenes.length} framed`,
+    `${nMoving}/${scenes.length} in motion`,
+    staleClips > 0 ? `${staleClips} outdated` : null,
+    narrationNeeded > 0 ? `${narrationDone}/${narrationNeeded} voiced` : null,
+    finalReady ? "final ready" : finalStale ? "final outdated" : null,
+  ].filter(Boolean);
+
+  return {
+    sceneCount: scenes.length,
+    requiredAnchors,
+    readyAnchors,
+    anchorsReady,
+    nFramed,
+    nMoving,
+    staleClips,
+    narrationNeeded,
+    narrationReady,
+    finalReady,
+    finalStale,
+    primaryMode,
+    primaryLabel,
+    statusLine: bits.join(" · "),
+  };
+}
+
+function reelModeCost(
+  mode: ReelRunMode,
+  workflow: ReelWorkflowState,
+  forecast: CostForecast | null,
+): string {
+  if (!forecast) return "cost estimate unavailable";
+  let cost = 0;
+  if (!workflow.anchorsReady) {
+    const forecastAnchors =
+      (forecast.breakdown?.characters ?? 0) +
+      (forecast.breakdown?.props ?? 0) +
+      (forecast.breakdown?.scene_refs ?? 0) +
+      1;
+    const missingAnchors = Math.max(
+      0,
+      workflow.requiredAnchors - workflow.readyAnchors,
+    );
+    cost +=
+      (forecast.stage_0_usd || 0) *
+      (missingAnchors / Math.max(1, forecastAnchors));
+  }
+  const sceneTotal = Math.max(
+    1,
+    forecast.breakdown?.scenes ?? workflow.sceneCount,
+  );
+  const missingFrames = Math.max(0, workflow.sceneCount - workflow.nFramed);
+  cost += (forecast.stage_2_usd || 0) * (missingFrames / sceneTotal);
+  if (mode === "animated" || mode === "final") {
+    const missingMotion = Math.max(0, workflow.sceneCount - workflow.nMoving);
+    cost += (forecast.stage_3_usd || 0) * (missingMotion / sceneTotal);
+  }
+  return `≈ $${cost.toFixed(2)}`;
+}
+
 function MaturityLadder({ framed, moving, running }: any) {
   const rungs = [
     { on: true, label: "scripted" },
@@ -5254,7 +5444,7 @@ function SceneTile({
   const stale = Boolean(shotAsset) && Boolean(shotStale);
   const running = busyHere || live?.state === "running";
   const failed = live?.state === "failed";
-  const frameName = `${scene.id}_${scene.name}_frame.png`;
+  const frameName = expectedFrameName(scene);
   const thumb = framed ? refUrl(pid, frameName, frameAsset?.size) : null;
   return React.createElement(
     "div",
@@ -5442,6 +5632,7 @@ function ReelView({
   busy,
   activeStage,
   pendingSceneRun,
+  onRunStage,
   onRunOne,
   onRunStageAllParallel,
   onRerollScenes,
@@ -5473,32 +5664,52 @@ function ReelView({
       : null;
   const speechSupported = !!SpeechRec;
 
-  // Budget gate: render only after a single cost confirm. Draft = frames
-  // only (Stage 2); Full also animates (Stage 3) — the expensive step.
-  const renderFilm = async (mode: "draft" | "full") => {
+  const workflow = React.useMemo(
+    () => deriveReelWorkflowState(draft, projStatus),
+    [draft, projStatus],
+  );
+
+  // Budget gate: run the user's intent, while the Reel decides the needed
+  // production stages. Storyboard = anchors + frames. Animated adds motion.
+  // Final cut also creates narration when needed and assembles Stage 4.
+  const renderFilm = async (mode: ReelRunMode) => {
     setBudgetOpen(false);
     setRendering(true);
     try {
-      const r = await onRunStageAllParallel?.("2", false);
-      // Don't roll into the pricey motion stage if the user hit Stop
-      // during frames — Stop must mean stop, not "stop, then animate".
-      if (mode === "full" && !r?.cancelled) {
-        await onRunStageAllParallel?.("3", false);
+      if (
+        mode === "final" &&
+        workflow.narrationNeeded &&
+        !workflow.narrationReady
+      ) {
+        await onRunStage?.("1");
+      }
+      if (!workflow.anchorsReady && workflow.requiredAnchors > 0) {
+        await onRunStage?.("0");
+      }
+
+      const r2 = await onRunStageAllParallel?.("2", false);
+      // Don't roll into pricier downstream work if the user hit Stop or if
+      // frame generation failed; a partial storyboard needs review first.
+      if (r2?.cancelled || r2?.failed) return;
+
+      if (mode === "animated" || mode === "final") {
+        const r3 = await onRunStageAllParallel?.("3", false);
+        if (r3?.cancelled || r3?.failed) return;
+      }
+
+      if (mode === "final") {
+        await onRunStage?.("4", { overwrite: workflow.finalStale });
       }
     } finally {
       setRendering(false);
     }
   };
 
-  const frames = new Map<string, any>(
-    (projStatus?.stages?.["2"]?.frames ?? []).map((r: any) => [r.name, r]),
-  );
-  const shots = new Map<string, any>(
-    (projStatus?.stages?.["3"]?.shots ?? []).map((r: any) => [r.name, r]),
-  );
+  const frames = assetMap(stageAssets(projStatus, "2", "frames"));
+  const shots = assetMap(stageAssets(projStatus, "3", "shots"));
   const assetFor = (s: any) => {
-    const frame = frames.get(`${s.id}_${s.name}_frame.png`);
-    const shot = shots.get(`${s.id}_${s.name}_raw.mp4`);
+    const frame = frames.get(expectedFrameName(s));
+    const shot = shots.get(expectedShotName(s));
     // A motion clip is animated FROM a frame; if the frame was re-shot
     // afterwards (newer mtime) the clip no longer matches it — treat it
     // as stale so we don't play/flaunt an outdated video.
@@ -5508,11 +5719,6 @@ function ReelView({
     return { frame, shot, shotStale };
   };
 
-  const nFramed = scenes.filter((s) => assetFor(s).frame).length;
-  const nMoving = scenes.filter((s) => {
-    const a = assetFor(s);
-    return a.shot && !a.shotStale;
-  }).length;
   const live = liveProgress || {};
 
   const selected = scenes.find((s) => s.id === selectedId) || scenes[0];
@@ -5609,6 +5815,39 @@ function ReelView({
     }
   };
 
+  const modeButton = (mode: ReelRunMode, label: string, detail: string) =>
+    React.createElement(Button, {
+      block: true,
+      size: "large",
+      type: workflow.primaryMode === mode ? "primary" : "default",
+      onClick: () => void renderFilm(mode),
+      style: { height: "auto", padding: "10px 14px", textAlign: "left" },
+      children: React.createElement(
+        "div",
+        {
+          style: { display: "flex", justifyContent: "space-between", gap: 12 },
+        },
+        React.createElement(
+          "span",
+          null,
+          React.createElement("strong", null, label),
+          React.createElement(
+            AntText,
+            {
+              type: "secondary",
+              style: { display: "block", fontSize: 12, marginTop: 2 },
+            },
+            detail,
+          ),
+        ),
+        React.createElement(
+          "span",
+          null,
+          reelModeCost(mode, workflow, forecast),
+        ),
+      ),
+    });
+
   return React.createElement(
     "div",
     {
@@ -5642,7 +5881,7 @@ function ReelView({
         React.createElement(
           AntText,
           { style: { color: "#8b96b4", fontSize: 12 } },
-          `${nMoving}/${scenes.length} in motion · ${nFramed}/${scenes.length} framed`,
+          workflow.statusLine,
         ),
         forecast
           ? React.createElement(
@@ -5669,7 +5908,7 @@ function ReelView({
             (busy && (activeStage === "2" || activeStage === "3")) || rendering,
           disabled: !scenes.length,
           onClick: () => setBudgetOpen(true),
-          children: "Render film ▸",
+          children: `${workflow.primaryLabel} ▸`,
         }),
         React.createElement(Button, {
           type: "text",
@@ -5698,7 +5937,7 @@ function ReelView({
           },
           selAsset.shot && !selAsset.shotStale
             ? React.createElement("video", {
-                src: refUrl(pid, `${selected.id}_${selected.name}_raw.mp4`),
+                src: refUrl(pid, expectedShotName(selected)),
                 controls: true,
                 style: { width: "100%", maxHeight: 360 },
               })
@@ -5706,7 +5945,7 @@ function ReelView({
             ? React.createElement("img", {
                 src: refUrl(
                   pid,
-                  `${selected.id}_${selected.name}_frame.png`,
+                  expectedFrameName(selected),
                   selAsset.frame?.size,
                 ),
                 style: { width: "100%", maxHeight: 360, objectFit: "contain" },
@@ -5894,46 +6133,49 @@ function ReelView({
       Modal,
       {
         open: budgetOpen,
-        title: "Make the film?",
+        title: "Choose the next pass",
         onCancel: () => setBudgetOpen(false),
         footer: null,
-        width: 460,
+        width: 520,
       },
       React.createElement(
         Paragraph,
         { type: "secondary", style: { marginBottom: 16 } },
-        `${scenes.length} scene${scenes.length === 1 ? "" : "s"} ready. ` +
-          "Frames get painted first; the full film also animates them " +
-          "(the slow, pricier step). Pick how far to go — you only pay " +
-          "for what you run.",
+        `${scenes.length} scene${scenes.length === 1 ? "" : "s"} · ` +
+          (workflow.statusLine || "ready"),
       ),
       React.createElement(
         Space,
         { direction: "vertical", style: { width: "100%" }, size: 10 },
-        React.createElement(Button, {
-          block: true,
-          size: "large",
-          onClick: () => void renderFilm("draft"),
-          // Never imply "free" when the forecast failed to load — a
-          // missing estimate is "unavailable", not "$0".
-          children:
-            typeof forecast?.stage_2_usd === "number"
-              ? `Draft — frames only · ≈ $${forecast.stage_2_usd}`
-              : "Draft — frames only · cost estimate unavailable",
-        }),
-        React.createElement(Button, {
-          block: true,
-          size: "large",
-          type: "primary",
-          onClick: () => void renderFilm("full"),
-          children:
-            typeof forecast?.stage_2_usd === "number" &&
-            typeof forecast?.stage_3_usd === "number"
-              ? `Full film — frames + motion · ≈ $${(
-                  forecast.stage_2_usd + forecast.stage_3_usd
-                ).toFixed(2)}`
-              : "Full film — frames + motion · cost estimate unavailable",
-        }),
+        // Never imply "free" when the forecast failed to load — a
+        // missing estimate is "unavailable", not "$0".
+        modeButton(
+          "storyboard",
+          "Storyboard draft",
+          workflow.anchorsReady
+            ? "Create missing frames"
+            : "Create anchors, then missing frames",
+        ),
+        modeButton(
+          "animated",
+          "Animated reel",
+          workflow.anchorsReady
+            ? "Create missing frames, then motion clips"
+            : "Create anchors, frames, then motion clips",
+        ),
+        modeButton(
+          "final",
+          "Final cut",
+          [
+            workflow.narrationNeeded ? "narration" : null,
+            workflow.anchorsReady ? null : "anchors",
+            "frames",
+            "motion",
+            "assembly",
+          ]
+            .filter(Boolean)
+            .join(", "),
+        ),
       ),
     ),
   );
