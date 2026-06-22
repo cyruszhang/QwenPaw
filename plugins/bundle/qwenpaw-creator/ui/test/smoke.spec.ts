@@ -59,6 +59,51 @@ const FORECAST = {
   breakdown: { characters: 1, props: 0, scene_refs: 1, scenes: 3 },
 };
 
+const DONE_DRAFT = {
+  ...DRAFT,
+  scenes: DRAFT.scenes.map((s) => ({ ...s, has_narration: true })),
+};
+
+const DONE_STATUS = {
+  stages: {
+    "0": { refs: [{ name: "boy.png" }, { name: "dock.png" }] },
+    "1": {
+      audio: DONE_DRAFT.scenes.map((s) => ({
+        name: `${s.id}_${s.name}_narration.mp3`,
+        size: 100,
+        mtime: 1500,
+      })),
+    },
+    "2": {
+      frames: DONE_DRAFT.scenes.map((s) => ({
+        name: `${s.id}_${s.name}_frame.png`,
+        size: 100,
+        mtime: 1000,
+      })),
+    },
+    "3": {
+      shots: DONE_DRAFT.scenes.map((s) => ({
+        name: `${s.id}_${s.name}_raw.mp4`,
+        size: 200,
+        mtime: 2000,
+      })),
+    },
+    "4": { final: [{ name: "demo_final.mp4", size: 300, mtime: 3000 }] },
+  },
+};
+
+const STALE_DONE_STATUS = {
+  stages: {
+    ...DONE_STATUS.stages,
+    "2": {
+      frames: DONE_STATUS.stages["2"].frames.map((frame, index) =>
+        index === 0 ? { ...frame, mtime: 4000 } : frame,
+      ),
+    },
+    "4": { final: [{ name: "demo_final.mp4", size: 300, mtime: 5000 }] },
+  },
+};
+
 const DIRECTOR_RESP = {
   ok: true,
   project_id: "demo",
@@ -416,6 +461,14 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
 
   await page.getByRole("button", { name: "Classic", exact: true }).click();
   await expect(page.getByText("Meta settings")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run anchors" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Run narration" }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run frames" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run motion" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run final" })).toBeVisible();
+  await expect(page.getByText("Animate missing")).toHaveCount(0);
   await page.screenshot({ path: shot("04-classic.png"), fullPage: true });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
@@ -523,6 +576,121 @@ test("Reel CTA opens an intent gate with Storyboard, Animated, and Final", async
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
+test("completed Reel shows ready state instead of zero-cost render choices", async ({
+  page,
+}) => {
+  const stagePosts: unknown[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "done", title: "Finished film" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/done" && method === "GET")
+      return j({ meta: { title: "Finished film" }, draft: DONE_DRAFT });
+    if (p === "/projects/done/status") return j(DONE_STATUS);
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p === "/projects/done/stage" && method === "POST") {
+      stagePosts.push(route.request().postDataJSON());
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Finished film").click();
+
+  await expect(page.getByRole("button", { name: /Final ready/ })).toBeVisible();
+  await page.getByRole("button", { name: /Final ready/ }).click();
+  await expect(page.getByText("Final cut is ready").first()).toBeVisible();
+  await expect(page.getByText(/No missing anchors/)).toBeVisible();
+  await expect(page.getByText(/≈ \$0\.00/)).toHaveCount(0);
+  await expect(page.getByText("Storyboard draft")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: /Tweak with Director/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Re-render anyway/ }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: /Re-render anyway/ }).click();
+  await expect(page.getByText("Re-render final cut?")).toBeVisible();
+  expect(stagePosts).toEqual([]);
+  await page.getByRole("button", { name: /^Cancel$/ }).click();
+  await expect(page.getByText("Re-render final cut?")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Tweak with Director/ }).click();
+  await expect(
+    page.getByRole("button", { name: /Tweak with Director/ }),
+  ).toBeHidden();
+  await expect(page.getByPlaceholder(/Change scene/)).toBeFocused();
+
+  await page.getByRole("button", { name: /Final ready/ }).click();
+  await page.getByRole("button", { name: /Re-render anyway/ }).click();
+  await page.getByRole("button", { name: /Re-render final cut/ }).click();
+  await expect
+    .poll(() => stagePosts)
+    .toEqual([{ stage: "4", overwrite: true }]);
+});
+
+test("stale Reel clips hide no-op Storyboard and refresh with overwrite", async ({
+  page,
+}) => {
+  const stagePosts: unknown[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "stale", title: "Stale film" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/stale" && method === "GET")
+      return j({ meta: { title: "Stale film" }, draft: DONE_DRAFT });
+    if (p === "/projects/stale/status") return j(STALE_DONE_STATUS);
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p === "/projects/stale/stage" && method === "POST") {
+      stagePosts.push(route.request().postDataJSON());
+      return j({ ok: true });
+    }
+    return j({});
+  });
+  await page.goto(harnessUrl);
+  await page.getByText("Stale film").click();
+
+  await expect(page.getByText(/1 outdated/).first()).toBeVisible();
+  await expect(page.getByText(/final outdated/).first()).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Refresh clips/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Refresh clips/ }).click();
+
+  await expect(page.getByText("Choose the next pass")).toBeVisible();
+  await expect(page.getByText("Storyboard draft")).toHaveCount(0);
+  await expect(page.getByText("Animated reel")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Final cut/ })).toBeVisible();
+  await expect(page.getByText("Final cut is ready")).toHaveCount(0);
+  await expect(page.getByText(/≈ \$0\.00/)).toHaveCount(0);
+
+  await page.getByRole("button", { name: /Animated reel/ }).click();
+  await expect
+    .poll(() => stagePosts)
+    .toEqual([{ stage: "3", only_scene: "00", overwrite: true }]);
+});
+
 test("budget gate never claims $0 when the cost forecast is unavailable", async ({
   page,
 }) => {
@@ -561,9 +729,7 @@ test("budget gate never claims $0 when the cost forecast is unavailable", async 
   await page.screenshot({ path: shot("09-budget-no-forecast.png") });
   // The deceptive "$0" must be gone; an honest fallback takes its place.
   await expect(page.getByText(/≈ \$0/)).toHaveCount(0);
-  await expect(
-    page.getByText(/cost estimate unavailable/).first(),
-  ).toBeVisible();
+  await expect(page.getByText(/estimate unavailable/).first()).toBeVisible();
 });
 
 test("a Shoot that produces no frame surfaces an error, not silent success", async ({

@@ -5220,10 +5220,18 @@ interface ReelWorkflowState {
   nFramed: number;
   nMoving: number;
   staleClips: number;
+  missingAnchors: number;
+  missingFrames: number;
+  missingMotion: number;
+  missingFrameSceneIds: string[];
+  staleClipSceneIds: string[];
+  motionSceneIds: string[];
   narrationNeeded: number;
   narrationReady: boolean;
+  hasFinal: boolean;
   finalReady: boolean;
   finalStale: boolean;
+  readyForReview: boolean;
   primaryMode: ReelRunMode;
   primaryLabel: string;
   statusLine: string;
@@ -5290,14 +5298,21 @@ function deriveReelWorkflowState(
   let nFramed = 0;
   let nMoving = 0;
   let staleClips = 0;
+  const missingFrameSceneIds: string[] = [];
+  const staleClipSceneIds: string[] = [];
+  const motionSceneIds: string[] = [];
   for (const scene of scenes) {
     const frame = frames.get(expectedFrameName(scene));
     const shot = shots.get(expectedShotName(scene));
     if (frame) nFramed++;
+    else missingFrameSceneIds.push(String(scene.id));
     if (frame && shot && Number(frame.mtime) > Number(shot.mtime)) {
       staleClips++;
-    } else if (shot) {
+      staleClipSceneIds.push(String(scene.id));
+    } else if (frame && shot) {
       nMoving++;
+    } else {
+      motionSceneIds.push(String(scene.id));
     }
   }
 
@@ -5309,26 +5324,53 @@ function deriveReelWorkflowState(
   const narrationReady =
     narrationNeeded === 0 || narrationDone >= narrationNeeded;
 
+  const missingAnchors = Math.max(0, requiredAnchors - readyAnchors);
+  const missingFrames = Math.max(0, scenes.length - nFramed);
+  const missingMotion = Math.max(0, scenes.length - nMoving);
   const inputMtime = Math.max(
+    maxMtime(stageAssets(projStatus, "2", "frames")),
     maxMtime(stageAssets(projStatus, "3", "shots")),
     maxMtime(stageAssets(projStatus, "1", "audio")),
   );
   const finalMtime = maxMtime(finals);
+  const hasFinal = Boolean(finals.length);
   const finalStale = Boolean(
-    finalMtime && inputMtime && inputMtime > finalMtime,
+    hasFinal &&
+      ((inputMtime && inputMtime > finalMtime) ||
+        missingFrames > 0 ||
+        missingMotion > 0 ||
+        staleClips > 0 ||
+        !narrationReady),
   );
-  const finalReady = Boolean(finals.length) && !finalStale;
+  const finalReady = Boolean(
+    hasFinal &&
+      !finalStale &&
+      missingFrames === 0 &&
+      missingMotion === 0 &&
+      staleClips === 0 &&
+      narrationReady,
+  );
+  const readyForReview = Boolean(
+    scenes.length &&
+      anchorsReady &&
+      missingFrames === 0 &&
+      missingMotion === 0 &&
+      finalReady,
+  );
 
   let primaryMode: ReelRunMode = "storyboard";
   let primaryLabel = "Shoot storyboard";
   if (scenes.length === 0) {
     primaryLabel = "Storyboard first";
-  } else if (!anchorsReady || nFramed < scenes.length) {
+  } else if (readyForReview) {
+    primaryMode = "final";
+    primaryLabel = "Final ready";
+  } else if (!anchorsReady || missingFrames > 0) {
     primaryMode = "storyboard";
     primaryLabel = !anchorsReady
       ? "Prep & shoot storyboard"
       : "Shoot storyboard";
-  } else if (staleClips > 0 || nMoving < scenes.length) {
+  } else if (staleClips > 0 || missingMotion > 0) {
     primaryMode = "animated";
     primaryLabel = staleClips > 0 ? "Refresh clips" : "Animate reel";
   } else if (!narrationReady || !finalReady) {
@@ -5355,10 +5397,18 @@ function deriveReelWorkflowState(
     nFramed,
     nMoving,
     staleClips,
+    missingAnchors,
+    missingFrames,
+    missingMotion,
+    missingFrameSceneIds,
+    staleClipSceneIds,
+    motionSceneIds,
     narrationNeeded,
     narrationReady,
+    hasFinal,
     finalReady,
     finalStale,
+    readyForReview,
     primaryMode,
     primaryLabel,
     statusLine: bits.join(" · "),
@@ -5370,31 +5420,25 @@ function reelModeCost(
   workflow: ReelWorkflowState,
   forecast: CostForecast | null,
 ): string {
-  if (!forecast) return "cost estimate unavailable";
+  if (!forecast) return "estimate unavailable";
   let cost = 0;
-  if (!workflow.anchorsReady) {
+  if (workflow.missingAnchors > 0) {
     const forecastAnchors =
       (forecast.breakdown?.characters ?? 0) +
       (forecast.breakdown?.props ?? 0) +
       (forecast.breakdown?.scene_refs ?? 0) +
       1;
-    const missingAnchors = Math.max(
-      0,
-      workflow.requiredAnchors - workflow.readyAnchors,
-    );
     cost +=
       (forecast.stage_0_usd || 0) *
-      (missingAnchors / Math.max(1, forecastAnchors));
+      (workflow.missingAnchors / Math.max(1, forecastAnchors));
   }
   const sceneTotal = Math.max(
     1,
     forecast.breakdown?.scenes ?? workflow.sceneCount,
   );
-  const missingFrames = Math.max(0, workflow.sceneCount - workflow.nFramed);
-  cost += (forecast.stage_2_usd || 0) * (missingFrames / sceneTotal);
+  cost += (forecast.stage_2_usd || 0) * (workflow.missingFrames / sceneTotal);
   if (mode === "animated" || mode === "final") {
-    const missingMotion = Math.max(0, workflow.sceneCount - workflow.nMoving);
-    cost += (forecast.stage_3_usd || 0) * (missingMotion / sceneTotal);
+    cost += (forecast.stage_3_usd || 0) * (workflow.missingMotion / sceneTotal);
   }
   return `≈ $${cost.toFixed(2)}`;
 }
@@ -5649,6 +5693,9 @@ function ReelView({
   const [directing, setDirecting] = React.useState(false);
   const [log, setLog] = React.useState<any[]>([]);
   const [budgetOpen, setBudgetOpen] = React.useState(false);
+  const [focusDirectorAfterBudget, setFocusDirectorAfterBudget] =
+    React.useState(false);
+  const [readyOverrideConfirm, setReadyOverrideConfirm] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
@@ -5657,23 +5704,57 @@ function ReelView({
   // (Chrome/Edge/Safari); the mic just hides where it isn't.
   const [listening, setListening] = React.useState(false);
   const recogRef = React.useRef<any>(null);
+  const directorInputRef = React.useRef<any>(null);
   const SpeechRec =
     typeof window !== "undefined"
       ? (window as any).SpeechRecognition ||
         (window as any).webkitSpeechRecognition
       : null;
   const speechSupported = !!SpeechRec;
+  React.useEffect(() => {
+    if (budgetOpen || !focusDirectorAfterBudget) return undefined;
+    const timer = window.setTimeout(() => {
+      const target = directorInputRef.current;
+      if (target?.focus) target.focus();
+      else target?.input?.focus?.();
+      setFocusDirectorAfterBudget(false);
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [budgetOpen, focusDirectorAfterBudget]);
 
   const workflow = React.useMemo(
     () => deriveReelWorkflowState(draft, projStatus),
     [draft, projStatus],
   );
+  const uniqSceneIds = (...groups: string[][]): string[] =>
+    Array.from(new Set(groups.flat().filter(Boolean)));
+  const storyboardSceneIds = workflow.missingFrameSceneIds;
+  const animationSceneIds = uniqSceneIds(
+    workflow.motionSceneIds,
+    workflow.staleClipSceneIds,
+    workflow.missingFrameSceneIds,
+  );
+  const hasStoryboardWork =
+    workflow.missingAnchors > 0 || workflow.missingFrames > 0;
+  const hasAnimationWork =
+    workflow.missingFrames > 0 ||
+    workflow.missingMotion > 0 ||
+    workflow.staleClips > 0;
+  const hasFinalWork =
+    hasAnimationWork ||
+    !workflow.narrationReady ||
+    !workflow.finalReady ||
+    workflow.finalStale;
+  const closeBudget = () => {
+    setReadyOverrideConfirm(false);
+    setBudgetOpen(false);
+  };
 
   // Budget gate: run the user's intent, while the Reel decides the needed
   // production stages. Storyboard = anchors + frames. Animated adds motion.
   // Final cut also creates narration when needed and assembles Stage 4.
   const renderFilm = async (mode: ReelRunMode) => {
-    setBudgetOpen(false);
+    closeBudget();
     setRendering(true);
     try {
       if (
@@ -5687,19 +5768,45 @@ function ReelView({
         await onRunStage?.("0");
       }
 
-      const r2 = await onRunStageAllParallel?.("2", false);
-      // Don't roll into pricier downstream work if the user hit Stop or if
-      // frame generation failed; a partial storyboard needs review first.
-      if (r2?.cancelled || r2?.failed) return;
+      if (storyboardSceneIds.length) {
+        const r2 = await onRunStageAllParallel?.(
+          "2",
+          false,
+          storyboardSceneIds,
+        );
+        // Don't roll into pricier downstream work if the user hit Stop or if
+        // frame generation failed; a partial storyboard needs review first.
+        if (r2?.cancelled || r2?.failed) return;
+      }
 
       if (mode === "animated" || mode === "final") {
-        const r3 = await onRunStageAllParallel?.("3", false);
-        if (r3?.cancelled || r3?.failed) return;
+        if (animationSceneIds.length) {
+          const r3 = await onRunStageAllParallel?.(
+            "3",
+            workflow.staleClipSceneIds.length > 0 ||
+              workflow.missingFrameSceneIds.length > 0,
+            animationSceneIds,
+          );
+          if (r3?.cancelled || r3?.failed) return;
+        }
       }
 
       if (mode === "final") {
         await onRunStage?.("4", { overwrite: workflow.finalStale });
       }
+    } finally {
+      setRendering(false);
+    }
+  };
+  const tweakReadyCut = () => {
+    setFocusDirectorAfterBudget(true);
+    closeBudget();
+  };
+  const rebuildReadyCut = async () => {
+    closeBudget();
+    setRendering(true);
+    try {
+      await onRunStage?.("4", { overwrite: true });
     } finally {
       setRendering(false);
     }
@@ -5815,38 +5922,144 @@ function ReelView({
     }
   };
 
-  const modeButton = (mode: ReelRunMode, label: string, detail: string) =>
-    React.createElement(Button, {
-      block: true,
-      size: "large",
-      type: workflow.primaryMode === mode ? "primary" : "default",
+  const unit = (count: number, singular: string, plural?: string) =>
+    `${count} ${count === 1 ? singular : plural || `${singular}s`}`;
+  const joinList = (parts: Array<string | null>) => {
+    const xs = parts.filter(Boolean) as string[];
+    if (xs.length <= 1) return xs.join("");
+    if (xs.length === 2) return `${xs[0]} and ${xs[1]}`;
+    return `${xs.slice(0, -1).join(", ")}, and ${xs[xs.length - 1]}`;
+  };
+  const compactList = (parts: Array<string | null>) =>
+    (parts.filter(Boolean) as string[]).join(", ");
+  const createStep = (parts: Array<string | null>) => {
+    const xs = parts.filter(Boolean);
+    return xs.length ? `Create ${compactList(xs)}` : null;
+  };
+  const lowerFirst = (text: string | null) =>
+    text ? text.charAt(0).toLowerCase() + text.slice(1) : null;
+  const joinSteps = (steps: Array<string | null>) =>
+    (steps.filter(Boolean) as string[])
+      .map((step, index) => (index === 0 ? step : lowerFirst(step)))
+      .join(", then ");
+  const storyboardUnits = [
+    workflow.missingAnchors > 0
+      ? unit(workflow.missingAnchors, "anchor")
+      : null,
+    workflow.missingFrames > 0 ? unit(workflow.missingFrames, "frame") : null,
+  ];
+  const storyboardDetail = `Create ${joinList(storyboardUnits)}`;
+  const motionDetail =
+    workflow.staleClips > 0 && workflow.missingMotion > workflow.staleClips
+      ? `Create or refresh ${unit(workflow.missingMotion, "motion clip")}`
+      : workflow.staleClips > 0
+      ? `Refresh ${unit(workflow.staleClips, "outdated clip")}`
+      : workflow.missingMotion > 0
+      ? `Create ${unit(workflow.missingMotion, "motion clip")}`
+      : null;
+  const animatedDetail = joinSteps([createStep(storyboardUnits), motionDetail]);
+  const hasFinalPrepWork = hasAnimationWork || !workflow.narrationReady;
+  const finalCutAction = !workflow.hasFinal
+    ? `${hasFinalPrepWork ? "assemble" : "Assemble"} final cut`
+    : workflow.finalStale
+    ? `${hasFinalPrepWork ? "refresh" : "Refresh"} final cut`
+    : !workflow.finalReady
+    ? `${hasFinalPrepWork ? "assemble" : "Assemble"} final cut`
+    : null;
+  const finalCreateUnits = [
+    !workflow.narrationReady ? "narration" : null,
+    ...storyboardUnits,
+  ];
+  const finalDetail = joinSteps([
+    createStep(finalCreateUnits),
+    motionDetail,
+    finalCutAction,
+  ]);
+  const modeButton = (mode: ReelRunMode, label: string, detail: string) => {
+    const selected = workflow.primaryMode === mode;
+    const estimate = reelModeCost(mode, workflow, forecast);
+    const estimateUnavailable = !forecast;
+    return React.createElement("button", {
+      type: "button",
       onClick: () => void renderFilm(mode),
-      style: { height: "auto", padding: "10px 14px", textAlign: "left" },
+      style: {
+        width: "100%",
+        minHeight: 74,
+        padding: "14px 18px",
+        borderRadius: 10,
+        border: selected ? "1px solid #f97316" : "1px solid #e6e8ec",
+        background: selected ? "#fff7ed" : "#ffffff",
+        boxShadow: selected ? "inset 4px 0 0 #f97316" : "none",
+        cursor: "pointer",
+        textAlign: "left",
+        font: "inherit",
+      },
       children: React.createElement(
         "div",
         {
-          style: { display: "flex", justifyContent: "space-between", gap: 12 },
+          style: {
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) auto",
+            alignItems: "start",
+            gap: 16,
+          },
         },
         React.createElement(
-          "span",
-          null,
-          React.createElement("strong", null, label),
+          "div",
+          { style: { minWidth: 0 } },
           React.createElement(
-            AntText,
+            "strong",
             {
-              type: "secondary",
-              style: { display: "block", fontSize: 12, marginTop: 2 },
+              style: {
+                color: "#1f2328",
+                display: "block",
+                fontSize: 17,
+                lineHeight: 1.25,
+              },
+            },
+            label,
+          ),
+          React.createElement(
+            "span",
+            {
+              style: {
+                color: "#6b7280",
+                display: "block",
+                fontSize: 13,
+                lineHeight: 1.35,
+                marginTop: 5,
+                overflowWrap: "anywhere",
+                whiteSpace: "normal",
+              },
             },
             detail,
           ),
         ),
         React.createElement(
           "span",
-          null,
-          reelModeCost(mode, workflow, forecast),
+          {
+            style: {
+              color: "#1f2328",
+              fontSize: estimateUnavailable ? 14 : 17,
+              fontWeight: 700,
+              lineHeight: 1.25,
+              whiteSpace: "nowrap",
+            },
+          },
+          estimate,
         ),
       ),
     });
+  };
+  const modeButtons = [
+    hasStoryboardWork
+      ? modeButton("storyboard", "Storyboard draft", storyboardDetail)
+      : null,
+    hasAnimationWork
+      ? modeButton("animated", "Animated reel", animatedDetail)
+      : null,
+    hasFinalWork ? modeButton("final", "Final cut", finalDetail) : null,
+  ].filter(Boolean);
 
   return React.createElement(
     "div",
@@ -5907,7 +6120,10 @@ function ReelView({
           loading:
             (busy && (activeStage === "2" || activeStage === "3")) || rendering,
           disabled: !scenes.length,
-          onClick: () => setBudgetOpen(true),
+          onClick: () => {
+            setReadyOverrideConfirm(false);
+            setBudgetOpen(true);
+          },
           children: `${workflow.primaryLabel} ▸`,
         }),
         React.createElement(Button, {
@@ -6092,6 +6308,7 @@ function ReelView({
           )
         : null,
       React.createElement(Input, {
+        ref: directorInputRef,
         value: note,
         onChange: (e: any) => setNote(e.target.value),
         onPressEnter: () => void direct(),
@@ -6133,8 +6350,11 @@ function ReelView({
       Modal,
       {
         open: budgetOpen,
-        title: "Choose the next pass",
-        onCancel: () => setBudgetOpen(false),
+        focusTriggerAfterClose: false,
+        title: workflow.readyForReview
+          ? "Final cut is ready"
+          : "Choose the next pass",
+        onCancel: closeBudget,
         footer: null,
         width: 520,
       },
@@ -6144,39 +6364,91 @@ function ReelView({
         `${scenes.length} scene${scenes.length === 1 ? "" : "s"} · ` +
           (workflow.statusLine || "ready"),
       ),
-      React.createElement(
-        Space,
-        { direction: "vertical", style: { width: "100%" }, size: 10 },
-        // Never imply "free" when the forecast failed to load — a
-        // missing estimate is "unavailable", not "$0".
-        modeButton(
-          "storyboard",
-          "Storyboard draft",
-          workflow.anchorsReady
-            ? "Create missing frames"
-            : "Create anchors, then missing frames",
-        ),
-        modeButton(
-          "animated",
-          "Animated reel",
-          workflow.anchorsReady
-            ? "Create missing frames, then motion clips"
-            : "Create anchors, frames, then motion clips",
-        ),
-        modeButton(
-          "final",
-          "Final cut",
-          [
-            workflow.narrationNeeded ? "narration" : null,
-            workflow.anchorsReady ? null : "anchors",
-            "frames",
-            "motion",
-            "assembly",
-          ]
-            .filter(Boolean)
-            .join(", "),
-        ),
-      ),
+      workflow.readyForReview
+        ? React.createElement(
+            Space,
+            { direction: "vertical", style: { width: "100%" }, size: 12 },
+            React.createElement(Alert, {
+              type: "success",
+              showIcon: true,
+              message: "Final cut is ready",
+              description:
+                "No missing anchors, frames, motion, narration, or assembly. You can still tweak with Director or re-shoot a scene; changes will mark the final cut outdated until it is rebuilt.",
+            }),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gap: 10,
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  width: "100%",
+                },
+              },
+              React.createElement(Button, {
+                block: true,
+                size: "large",
+                type: "primary",
+                onClick: tweakReadyCut,
+                children: "Tweak with Director",
+              }),
+              React.createElement(Button, {
+                block: true,
+                size: "large",
+                onClick: () => setReadyOverrideConfirm(true),
+                children: "Re-render anyway",
+              }),
+            ),
+            readyOverrideConfirm
+              ? React.createElement(
+                  Space,
+                  {
+                    direction: "vertical",
+                    style: { width: "100%" },
+                    size: 10,
+                  },
+                  React.createElement(Alert, {
+                    type: "warning",
+                    showIcon: true,
+                    message: "Re-render final cut?",
+                    description:
+                      "This will overwrite the current final video using the existing frames, motion clips, and narration.",
+                  }),
+                  React.createElement(
+                    "div",
+                    {
+                      style: {
+                        display: "grid",
+                        gap: 10,
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        width: "100%",
+                      },
+                    },
+                    React.createElement(Button, {
+                      block: true,
+                      size: "large",
+                      onClick: () => setReadyOverrideConfirm(false),
+                      children: "Cancel",
+                    }),
+                    React.createElement(Button, {
+                      block: true,
+                      size: "large",
+                      danger: true,
+                      loading: rendering || (busy && activeStage === "4"),
+                      onClick: () => void rebuildReadyCut(),
+                      children: "Re-render final cut",
+                    }),
+                  ),
+                )
+              : null,
+          )
+        : React.createElement(
+            Space,
+            { direction: "vertical", style: { width: "100%" }, size: 10 },
+            // Never imply "free" when the forecast failed to load — a
+            // missing estimate is "unavailable", not "$0".
+            ...modeButtons,
+          ),
     ),
   );
 }
@@ -6246,6 +6518,27 @@ function DraftPanel({
           .trim()
       : "no style",
   ].join(" · ");
+  const classicPrimary = (props: any) =>
+    React.createElement(Button, {
+      ...props,
+      style: {
+        minWidth: 116,
+        background: props?.disabled ? "#f5f5f5" : "#ff7a00",
+        borderColor: props?.disabled ? "#d9d9d9" : "#ff7a00",
+        color: props?.disabled ? "rgba(0,0,0,0.25)" : "#1f2328",
+        fontWeight: 600,
+        boxShadow: "none",
+        ...(props?.style || {}),
+      },
+    });
+  const classicSecondary = (props: any) =>
+    React.createElement(Button, {
+      ...props,
+      style: {
+        minWidth: 92,
+        ...(props?.style || {}),
+      },
+    });
 
   // Load the on-disk YAML text (preserves comments + formatting)
   // whenever the user opens the editor.
@@ -6515,19 +6808,22 @@ function DraftPanel({
             React.createElement(
               Tooltip,
               { title: keyMissing ? missingLabel : "" },
-              React.createElement(Button, {
-                type: "primary",
+              classicPrimary({
                 loading: busy && activeStage?.startsWith("0"),
                 disabled: keyMissing,
                 onClick: () => onRunStage("0"),
-                children: "Generate anchors",
+                children: "Run anchors",
               }),
             ),
-            React.createElement(Button, {
-              size: "small",
-              icon: React.createElement(ReloadOutlined),
-              onClick: onReload,
-            }),
+            React.createElement(
+              Tooltip,
+              { title: "Refresh stage status" },
+              React.createElement(Button, {
+                size: "small",
+                icon: React.createElement(ReloadOutlined),
+                onClick: onReload,
+              }),
+            ),
           );
         })(),
       },
@@ -6596,12 +6892,11 @@ function DraftPanel({
         costUsd: 0,
         open: openStage === "stage-1",
         onToggle: toggleStage,
-        extra: React.createElement(Button, {
-          type: "primary",
+        extra: classicPrimary({
           loading: busy && activeStage === "1",
           disabled: !status?.has_dashscope,
           onClick: () => onRunStage("1"),
-          children: "Create audio",
+          children: "Run narration",
         }),
       },
       React.createElement(AudioGallery, {
@@ -6670,24 +6965,23 @@ function DraftPanel({
               {
                 title: keyMissing
                   ? missingLabel
-                  : `Create missing frames. Up to ${conc} run in parallel.`,
+                  : `Run missing frames. Up to ${conc} run in parallel.`,
               },
-              React.createElement(Button, {
-                type: "primary",
+              classicPrimary({
                 loading: busy && activeStage === "2",
                 disabled: keyMissing,
                 onClick: () => onRunStageAllParallel("2", false),
-                children: "Create missing",
+                children: "Run frames",
               }),
             ),
             React.createElement(
               Tooltip,
               { title: validateTitle },
-              React.createElement(Button, {
+              classicSecondary({
                 loading: busy && activeStage === "2.5",
                 disabled: validateDisabled,
                 onClick: () => onRunStage("2.5"),
-                children: "Review frames",
+                children: "Review",
               }),
             ),
             React.createElement(
@@ -6698,15 +6992,13 @@ function DraftPanel({
                     ? `Regenerate ${failingCount} flagged frame(s) with correction notes.`
                     : "Review frames first; flagged frames can be repaired here.",
               },
-              React.createElement(Button, {
+              classicSecondary({
                 loading: busy && activeStage === "autofix",
                 disabled: validateDisabled || failingCount === 0,
                 danger: failingCount > 0,
                 onClick: () => onAutofix?.(2),
                 children:
-                  failingCount > 0
-                    ? `Repair flagged ${failingCount}`
-                    : "Repair flagged",
+                  failingCount > 0 ? `Repair ${failingCount}` : "Repair",
               }),
             ),
           );
@@ -6742,9 +7034,7 @@ function DraftPanel({
         costUsd: forecast?.stage_3_usd,
         open: openStage === "stage-3",
         onToggle: toggleStage,
-        extra: React.createElement(Button, {
-          type: "primary",
-          danger: true,
+        extra: classicPrimary({
           loading: busy && activeStage === "3",
           disabled: !status?.has_dashscope,
           onClick: () => {
@@ -6755,21 +7045,20 @@ function DraftPanel({
             );
             const wallMin = Math.ceil((n / conc) * 10);
             Modal.confirm({
-              title: "Animate missing scenes?",
+              title: "Run motion?",
               content:
                 `Each scene calls the chosen video model (~$0.50, 5-15 min). ` +
                 `${n} scenes at concurrency ${conc} ≈ $${
                   forecast?.stage_3_usd ?? "?"
                 }` +
                 ` and ~${wallMin} min wall-clock. Keep this browser tab open.`,
-              okType: "danger",
-              okText: `Animate missing`,
+              okText: "Run motion",
               onOk: () => {
                 void onRunStageAllParallel("3", false);
               },
             });
           },
-          children: "Animate missing",
+          children: "Run motion",
         }),
       },
       React.createElement(ShotGallery, {
@@ -6801,11 +7090,10 @@ function DraftPanel({
         costUsd: 0,
         open: openStage === "stage-4",
         onToggle: toggleStage,
-        extra: React.createElement(Button, {
-          type: "primary",
+        extra: classicPrimary({
           loading: busy && activeStage === "4",
           onClick: () => onRunStage("4"),
-          children: "Assemble film",
+          children: "Run final",
         }),
       },
       React.createElement(FinalGallery, {
