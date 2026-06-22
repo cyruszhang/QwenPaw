@@ -2007,6 +2007,7 @@ function ProjectPane({
                   }
                 },
                 onDirector,
+                onSaveDraft,
                 onCancel,
                 onSwitchClassic: () => setStudioMode(false),
               })
@@ -3482,6 +3483,128 @@ function activeStatesForChange(
     });
   });
   return [...active.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function normalizeIdList(value: any): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v || "").trim()).filter(Boolean);
+  }
+  const single = String(value || "").trim();
+  return single ? [single] : [];
+}
+
+function draftContinuityEntities(draft: any): any[] {
+  const chars: any[] = draft?.assets?.characters ?? [];
+  const props: any[] = draft?.assets?.props ?? [];
+  const refs: any[] = draft?.assets?.scene_refs ?? [];
+  return [
+    ...chars.map((c: any) => ({
+      id: String(c.id || "").trim(),
+      kind: "character",
+      label: humanizeId(c.id),
+    })),
+    ...props.map((p: any) => ({
+      id: String(p.id || "").trim(),
+      kind: "prop",
+      label: humanizeId(p.id),
+    })),
+    ...refs.map((r: any) => ({
+      id: String(r.id || "").trim(),
+      kind: "scene_ref",
+      label: humanizeId(r.id),
+    })),
+  ].filter((e: any) => e.id);
+}
+
+function sceneContinuityEntityIds(scene: any): string[] {
+  return Array.from(
+    new Set([
+      ...normalizeIdList(scene?.uses_characters),
+      ...normalizeIdList(scene?.uses_props),
+      ...normalizeIdList(scene?.uses_scene_ref),
+    ]),
+  );
+}
+
+function sceneUsesContinuityEntity(scene: any, entityId: string): boolean {
+  return sceneContinuityEntityIds(scene).includes(entityId);
+}
+
+function continuityGroupsForScene(draft: any, scene: any): any[] {
+  if (!scene) return [];
+  const entities = draftContinuityEntities(draft);
+  const entityById = new Map(entities.map((e: any) => [e.id, e]));
+  const ids = sceneContinuityEntityIds(scene);
+  return ids
+    .map((id) => {
+      const entity = entityById.get(id) || {
+        id,
+        kind: "entity",
+        label: humanizeId(id),
+      };
+      return {
+        entity,
+        states: activeStatesForChange(
+          draft?.state_changes || [],
+          id,
+          sceneIdOf(scene),
+        ),
+      };
+    })
+    .filter((group: any) => group.entity?.id);
+}
+
+function affectedScenesForContinuityChange(
+  draft: any,
+  entityId: string,
+  atScene: string,
+): any[] {
+  const scenes: any[] = draft?.scenes ?? [];
+  return scenes.filter((scene: any) => {
+    const sid = sceneIdOf(scene);
+    return sid && sid >= atScene && sceneUsesContinuityEntity(scene, entityId);
+  });
+}
+
+function preferredContinuityEntity(draft: any, scene: any): string {
+  const sceneIds = sceneContinuityEntityIds(scene);
+  if (sceneIds.length) return sceneIds[0];
+  return draftContinuityEntities(draft)[0]?.id || "";
+}
+
+function looksLikeContinuityIntent(text: string): boolean {
+  return /(?:from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward|for\s+the\s+rest|keeps?\s+|continues?\s+|until\s+scene|after\s+this)/i.test(
+    text,
+  );
+}
+
+function stateTitleFromInstruction(text: string): string {
+  const cleaned = String(text || "")
+    .replace(
+      /^\s*(?:from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward),?\s*/i,
+      "",
+    )
+    .replace(/^\s*(?:make|have|give)\s+/i, "")
+    .replace(/^\s*(?:he|she|they|it|him|her|them|the\s+\w+)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return compactText(cleaned || text, 48);
+}
+
+function continuityChangeCount(draft: any): number {
+  return (draft?.state_changes || []).filter(
+    (c: any) =>
+      c?.entity &&
+      c?.at_scene &&
+      ((c.add && c.add.length) || (c.remove && c.remove.length) || c.reset),
+  ).length;
+}
+
+function continuityEntityKindLabel(kind: string): string {
+  if (kind === "character") return "character";
+  if (kind === "prop") return "prop";
+  if (kind === "scene_ref") return "setting";
+  return "entity";
 }
 
 function StateTimelineCard({ draft, onSaveDraft }: any) {
@@ -5667,6 +5790,151 @@ function SceneTile({
   );
 }
 
+function ReelContinuityRail({ draft, scene, onChangeState }: any) {
+  if (!scene) return null;
+  const groups = continuityGroupsForScene(draft, scene);
+  const hasActiveState = groups.some((g: any) => (g.states || []).length);
+  return React.createElement(
+    "div",
+    {
+      style: {
+        border: "1px solid #283147",
+        background: "#111722",
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 14,
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          marginBottom: groups.length ? 10 : 0,
+        },
+      },
+      React.createElement(
+        Space,
+        { size: 8 },
+        React.createElement(
+          AntText,
+          { style: { color: "#f3f4f6", fontWeight: 700 } },
+          "Continuity",
+        ),
+        React.createElement(
+          Tag,
+          {
+            color: hasActiveState ? "success" : "default",
+            style: { margin: 0 },
+          },
+          hasActiveState ? "state visible" : "canonical",
+        ),
+      ),
+      React.createElement(Button, {
+        size: "small",
+        onClick: onChangeState,
+        style: {
+          borderColor: "#f97316",
+          color: "#ffb072",
+          background: "rgba(249,115,22,0.08)",
+        },
+        children: "Change state from here",
+      }),
+    ),
+    groups.length
+      ? React.createElement(
+          "div",
+          { style: { display: "grid", gap: 8 } },
+          ...groups.map((group: any) =>
+            React.createElement(
+              "div",
+              {
+                key: group.entity.id,
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "116px minmax(0, 1fr)",
+                  gap: 10,
+                  alignItems: "start",
+                  minWidth: 0,
+                },
+              },
+              React.createElement(
+                "div",
+                { style: { minWidth: 0 } },
+                React.createElement(
+                  AntText,
+                  {
+                    style: {
+                      color: "#dfe4f1",
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                    title: group.entity.id,
+                  },
+                  group.entity.label || group.entity.id,
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#68748d", fontSize: 10 } },
+                  continuityEntityKindLabel(group.entity.kind),
+                ),
+              ),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    minWidth: 0,
+                  },
+                },
+                ...((group.states || []).length
+                  ? (group.states || []).map((state: any) =>
+                      React.createElement(
+                        Tag,
+                        {
+                          key: state.id,
+                          color: "orange",
+                          style: {
+                            margin: 0,
+                            maxWidth: "100%",
+                            whiteSpace: "normal",
+                            overflowWrap: "anywhere",
+                          },
+                        },
+                        state.title || state.id,
+                      ),
+                    )
+                  : [
+                      React.createElement(
+                        Tag,
+                        {
+                          key: "canonical",
+                          style: { margin: 0, color: "#8791a8" },
+                        },
+                        "canonical state",
+                      ),
+                    ]),
+              ),
+            ),
+          ),
+        )
+      : React.createElement(
+          AntText,
+          { style: { color: "#68748d", fontSize: 12 } },
+          "No referenced character, prop, or setting on this scene yet.",
+        ),
+  );
+}
+
 function ReelView({
   pid,
   draft,
@@ -5682,6 +5950,7 @@ function ReelView({
   onRerollScenes,
   onRerollScenesFull,
   onDirector,
+  onSaveDraft,
   onCancel,
   onSwitchClassic,
 }: any) {
@@ -5697,6 +5966,8 @@ function ReelView({
     React.useState(false);
   const [readyOverrideConfirm, setReadyOverrideConfirm] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
+  const [continuityDraft, setContinuityDraft] = React.useState<any>(null);
+  const [continuitySaving, setContinuitySaving] = React.useState(false);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
   const [scope, setScope] = React.useState<"scene" | "film">("scene");
@@ -5832,6 +6103,33 @@ function ReelView({
   const selAsset = selected
     ? assetFor(selected)
     : { frame: null, shot: null, shotStale: false };
+  const continuityN = continuityChangeCount(draft);
+  const reelStatusLine = [
+    workflow.statusLine,
+    continuityN > 0
+      ? `${continuityN} continuity change${continuityN === 1 ? "" : "s"}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const continuityEntities = draftContinuityEntities(draft);
+  const continuityEntityOptions = continuityEntities.map((e: any) => ({
+    value: e.id,
+    label: `${continuityEntityKindLabel(e.kind)}: ${e.id}`,
+  }));
+  const continuitySceneOptions = scenes
+    .map((scene: any) => ({
+      value: sceneIdOf(scene),
+      label: sceneLabel(scene),
+    }))
+    .filter((option: any) => option.value);
+  const affectedContinuityScenes = continuityDraft
+    ? affectedScenesForContinuityChange(
+        draft,
+        continuityDraft.entity,
+        continuityDraft.at_scene,
+      )
+    : [];
 
   const toggleMic = () => {
     if (!speechSupported) return;
@@ -5878,9 +6176,115 @@ function ReelView({
     }
   };
 
-  const direct = async () => {
+  const openContinuityDraft = (instruction: string = "") => {
+    if (!selected) {
+      antMessage.warning("Pick a scene first.");
+      return;
+    }
+    const entity = preferredContinuityEntity(draft, selected);
+    if (!entity) {
+      antMessage.warning(
+        "Add or reference a character, prop, or setting before changing state.",
+      );
+      return;
+    }
+    const title = stateTitleFromInstruction(instruction);
+    const content = title || instruction.trim();
+    setContinuityDraft({
+      entity,
+      at_scene: sceneIdOf(selected),
+      title,
+      content,
+      note: instruction.trim(),
+    });
+  };
+
+  const applyContinuityDraft = async () => {
+    if (!continuityDraft || continuitySaving) return;
+    if (!onSaveDraft) {
+      antMessage.warning("State changes are unavailable in this view.");
+      return;
+    }
+    const entity = String(continuityDraft.entity || "").trim();
+    const atScene = String(continuityDraft.at_scene || "").trim();
+    const title = String(continuityDraft.title || "").trim();
+    const content = String(continuityDraft.content || "").trim();
+    if (!entity || !atScene || !title || !content) {
+      antMessage.warning(
+        "Entity, start scene, title, and prompt are required.",
+      );
+      return;
+    }
+    const affectedIds = affectedContinuityScenes
+      .map((scene: any) => sceneIdOf(scene))
+      .filter(Boolean);
+    if (!affectedIds.length) {
+      antMessage.warning(
+        "No downstream scenes reference that entity. Add it to a scene first.",
+      );
+      return;
+    }
+    setContinuitySaving(true);
+    try {
+      const change = {
+        entity,
+        at_scene: atScene,
+        add: [
+          {
+            id: slugStateId(title),
+            title,
+            content,
+          },
+        ],
+        remove: [],
+        reset: false,
+        note: String(continuityDraft.note || content).trim(),
+      };
+      const nextDraft = JSON.parse(JSON.stringify(draft));
+      nextDraft.state_changes = [...(nextDraft.state_changes || []), change];
+      await onSaveDraft?.(nextDraft, { quiet: true });
+      setContinuityDraft(null);
+      setNote("");
+      setLog((p) => [
+        ...p,
+        {
+          msg: content,
+          summary: `Added ongoing state for ${entity}; re-rendering ${
+            affectedIds.length
+          } affected scene${affectedIds.length === 1 ? "" : "s"}.`,
+          changes: affectedIds.map((sceneId: string) => ({
+            scene_id: sceneId,
+          })),
+        },
+      ]);
+      if (onRerollScenesFull) await onRerollScenesFull(affectedIds);
+      else if (onRerollScenes) await onRerollScenes(affectedIds);
+      else for (const id of affectedIds) await onRunOne(id);
+      antMessage.success(
+        `Continuity saved; re-rendering ${affectedIds.length} affected scene${
+          affectedIds.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (e: any) {
+      antMessage.error(`Continuity update failed: ${compactApiError(e)}`);
+    } finally {
+      setContinuitySaving(false);
+    }
+  };
+
+  const direct = async (bypassContinuity: boolean = false) => {
     const msg = note.trim();
     if (!msg || directing) return;
+    if (
+      !bypassContinuity &&
+      scope === "scene" &&
+      selected &&
+      continuityEntities.length &&
+      looksLikeContinuityIntent(msg)
+    ) {
+      openContinuityDraft(msg);
+      return;
+    }
     setDirecting(true);
     try {
       // Scene-scoped by default: focus the instruction on the selected
@@ -6094,7 +6498,7 @@ function ReelView({
         React.createElement(
           AntText,
           { style: { color: "#8b96b4", fontSize: 12 } },
-          workflow.statusLine,
+          reelStatusLine,
         ),
         forecast
           ? React.createElement(
@@ -6184,6 +6588,13 @@ function ReelView({
                 ),
               ),
         )
+      : null,
+    selected
+      ? React.createElement(ReelContinuityRail, {
+          draft,
+          scene: selected,
+          onChangeState: () => openContinuityDraft(note.trim()),
+        })
       : null,
     // ── the strip ──
     React.createElement(
@@ -6324,6 +6735,17 @@ function ReelView({
         },
       }),
       React.createElement(Button, {
+        disabled: !selected || directing,
+        onClick: () => openContinuityDraft(note.trim()),
+        style: {
+          borderColor: "#f97316",
+          background: "#f97316",
+          color: "#111827",
+          fontWeight: 700,
+        },
+        children: "Change state",
+      }),
+      React.createElement(Button, {
         type: "primary",
         loading: directing,
         disabled: !note.trim(),
@@ -6362,7 +6784,7 @@ function ReelView({
         Paragraph,
         { type: "secondary", style: { marginBottom: 16 } },
         `${scenes.length} scene${scenes.length === 1 ? "" : "s"} · ` +
-          (workflow.statusLine || "ready"),
+          (reelStatusLine || "ready"),
       ),
       workflow.readyForReview
         ? React.createElement(
@@ -6448,7 +6870,202 @@ function ReelView({
             // Never imply "free" when the forecast failed to load — a
             // missing estimate is "unavailable", not "$0".
             ...modeButtons,
+            continuityN > 0 && (hasStoryboardWork || hasAnimationWork)
+              ? React.createElement(Alert, {
+                  key: "continuity-scope",
+                  type: "success",
+                  showIcon: true,
+                  message: "Ready scenes stay untouched",
+                  description:
+                    "The Reel only runs scenes that are missing or stale; continuity edits re-render the scenes that reference the changed entity.",
+                })
+              : null,
           ),
+    ),
+    React.createElement(
+      Modal,
+      {
+        open: Boolean(continuityDraft),
+        title: "Apply as ongoing continuity?",
+        okText: "Apply continuity change",
+        confirmLoading: continuitySaving,
+        onCancel: () => setContinuityDraft(null),
+        onOk: () => void applyContinuityDraft(),
+        footer: [
+          React.createElement(Button, {
+            key: "cancel",
+            onClick: () => setContinuityDraft(null),
+            children: "Cancel",
+          }),
+          React.createElement(Button, {
+            key: "scene",
+            disabled: !note.trim() || continuitySaving,
+            onClick: () => {
+              setContinuityDraft(null);
+              void direct(true);
+            },
+            children: "Make scene-only edit",
+          }),
+          React.createElement(Button, {
+            key: "apply",
+            type: "primary",
+            loading: continuitySaving,
+            onClick: () => void applyContinuityDraft(),
+            style: { background: "#f97316" },
+            children: "Apply continuity change",
+          }),
+        ],
+        width: 660,
+      },
+      continuityDraft
+        ? React.createElement(
+            Space,
+            { direction: "vertical", size: 14, style: { width: "100%" } },
+            React.createElement(
+              Paragraph,
+              { type: "secondary", style: { marginBottom: 0 } },
+              "Confirm before updating the timeline ledger. This state will carry forward until another state change removes or resets it.",
+            ),
+            React.createElement(
+              Row,
+              { gutter: 12 },
+              React.createElement(
+                Col,
+                { span: 14 },
+                React.createElement(
+                  Form.Item,
+                  { label: "Entity", style: { marginBottom: 0 } },
+                  React.createElement(Select, {
+                    value: continuityDraft.entity,
+                    options: continuityEntityOptions,
+                    showSearch: true,
+                    optionFilterProp: "label",
+                    style: { width: "100%" },
+                    onChange: (entity: string) =>
+                      setContinuityDraft((cur: any) => ({ ...cur, entity })),
+                  }),
+                ),
+              ),
+              React.createElement(
+                Col,
+                { span: 10 },
+                React.createElement(
+                  Form.Item,
+                  { label: "Starts", style: { marginBottom: 0 } },
+                  React.createElement(Select, {
+                    value: continuityDraft.at_scene,
+                    options: continuitySceneOptions,
+                    showSearch: true,
+                    optionFilterProp: "label",
+                    style: { width: "100%" },
+                    onChange: (at_scene: string) =>
+                      setContinuityDraft((cur: any) => ({
+                        ...cur,
+                        at_scene,
+                      })),
+                  }),
+                ),
+              ),
+            ),
+            React.createElement(
+              Form.Item,
+              {
+                label: "State title",
+                extra:
+                  "Short chip label shown in Reel; also becomes the state id.",
+                style: { marginBottom: 0 },
+              },
+              React.createElement(Input, {
+                value: continuityDraft.title,
+                placeholder: "carrying blue umbrella",
+                onChange: (e: any) =>
+                  setContinuityDraft((cur: any) => ({
+                    ...cur,
+                    title: e.target.value,
+                  })),
+              }),
+            ),
+            React.createElement(
+              Form.Item,
+              {
+                label: "Prompt fact",
+                extra:
+                  "This exact fact is injected into later frame and motion prompts.",
+                style: { marginBottom: 0 },
+              },
+              React.createElement(TextArea, {
+                rows: 3,
+                value: continuityDraft.content,
+                placeholder:
+                  "Lin Hao carries a blue umbrella in every referenced scene.",
+                onChange: (e: any) =>
+                  setContinuityDraft((cur: any) => ({
+                    ...cur,
+                    content: e.target.value,
+                    note: e.target.value,
+                  })),
+              }),
+            ),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: 10,
+                },
+              },
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Starts",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  continuityDraft.at_scene,
+                ),
+              ),
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Affects",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  affectedContinuityScenes.length
+                    ? affectedContinuityScenes.map(sceneIdOf).join(", ")
+                    : "no scenes",
+                ),
+              ),
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Will re-render",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  `${affectedContinuityScenes.length} frame${
+                    affectedContinuityScenes.length === 1 ? "" : "s"
+                  } · ${affectedContinuityScenes.length} clip${
+                    affectedContinuityScenes.length === 1 ? "" : "s"
+                  }`,
+                ),
+              ),
+            ),
+          )
+        : null,
     ),
   );
 }

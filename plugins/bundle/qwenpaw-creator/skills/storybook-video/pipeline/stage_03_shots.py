@@ -36,7 +36,7 @@ _TOOLS_DIR = _REPO_ROOT / "plugins" / "tool"
 sys.path.insert(0, str(_SKILL_DIR))
 sys.path.insert(0, str(_REPO_SRC))
 
-from spec import ProjectSpec  # noqa: E402
+from spec import ProjectSpec, world_state_at  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,28 @@ def _parse_saved_path(tool_response) -> Path:
     )
 
 
+def _continuity_motion_block(project_spec: ProjectSpec, scene) -> str:
+    """Return motion-facing continuity facts for the scene, if any."""
+    entities_referenced = list(getattr(scene, "uses_characters", []) or [])
+    entities_referenced.extend(getattr(scene, "uses_props", []) or [])
+    scene_ref = getattr(scene, "uses_scene_ref", None)
+    if scene_ref:
+        entities_referenced.append(scene_ref)
+
+    lines: list[str] = []
+    for entity_id in entities_referenced:
+        states, _notes = world_state_at(project_spec, scene.scene_id, entity_id)
+        if states:
+            lines.append(f"  - {entity_id}: {', '.join(sorted(states))}")
+    if not lines:
+        return ""
+    return (
+        "CONTINUITY STATE — preserve these visible facts throughout "
+        "the motion; do not drop, swap, or heal them:\n"
+        + "\n".join(lines)
+    )
+
+
 async def run_stage_03(
     project_spec: ProjectSpec,
     output_dir: Path,
@@ -251,6 +273,9 @@ async def run_stage_03(
 
         provider = getattr(scene, "video_provider", None) or default_provider
         prompt = scene.motion_prompt
+        state_block = _continuity_motion_block(project_spec, scene)
+        if state_block:
+            prompt = f"{prompt}\n\n{state_block}"
         regen_notes = getattr(scene, "video_regen_notes", "") or ""
         if regen_notes.strip():
             prompt = (
