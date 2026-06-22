@@ -19,6 +19,8 @@ quality with 2-4 reference images).
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import shutil
 import sys
@@ -388,6 +390,81 @@ def _is_cancelled(pid: Optional[str]) -> bool:
         return False
 
 
+# --- Recipe cache -----------------------------------------------------------
+# A frame is a (near-)deterministic function of its inputs: the composed
+# prompt, the chosen provider, the output size/quality, and the reference
+# bundle. We fingerprint those into a short "recipe" hash, stash it beside the
+# PNG (``{frame}.recipe.json``), and keep every bake in a content-addressed
+# store (``.frame_cache/{recipe}.png``). On the next run a frame is re-baked
+# only when its recipe actually changed; an unchanged recipe is a verified
+# cache hit, and a recipe we've baked before is restored for free. This
+# replaces the old "skip if the file exists" check, which silently kept stale
+# frames after a prompt edit and needlessly re-baked when nothing had changed.
+
+_RECIPE_VERSION = "frame-v1"
+
+
+def _path_sig(path: str) -> str:
+    """Identity of one reference file: path + mtime + size.
+
+    mtime/size move whenever an upstream anchor is regenerated, so a re-baked
+    ref invalidates every frame that consumes it. A missing file folds to a
+    stable ``:0:0`` so the signature stays deterministic.
+    """
+    try:
+        st = Path(path).stat()
+        return f"{path}:{st.st_mtime_ns}:{st.st_size}"
+    except OSError:
+        return f"{path}:0:0"
+
+
+def _refs_signature(refs) -> str:
+    """Order-stable fingerprint of a scene's whole reference bundle."""
+    ordered = [*refs.style, *refs.scene_ref, *refs.characters, *refs.props]
+    return "|".join(_path_sig(p) for p in ordered)
+
+
+def _frame_recipe(
+    prompt: str,
+    provider: str,
+    size: str,
+    quality: str,
+    refs_sig: str,
+) -> str:
+    """Short stable hash of everything that determines a frame's pixels."""
+    payload = "\x01".join(
+        [_RECIPE_VERSION, provider, size, quality, refs_sig, prompt],
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _recipe_path(target: Path) -> Path:
+    """Sidecar path for a frame's recipe (``..._frame.recipe.json``)."""
+    return target.with_suffix(".recipe.json")
+
+
+def _read_recipe(recipe_path: Path) -> Optional[str]:
+    """Stored recipe hash for a frame, or None if absent/unreadable."""
+    try:
+        data = json.loads(recipe_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    rec = data.get("recipe")
+    return rec if isinstance(rec, str) else None
+
+
+def _write_recipe(recipe_path: Path, recipe: str, **meta) -> None:
+    """Persist the recipe hash (plus human-readable context) beside a frame."""
+    payload = {"recipe": recipe, "version": _RECIPE_VERSION, **meta}
+    try:
+        recipe_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except OSError as e:  # noqa: BLE001
+        logger.warning("could not write recipe sidecar %s: %s", recipe_path, e)
+
+
 async def run_stage_02_v15(
     project_spec: ProjectSpec,
     output_dir: Path,
@@ -414,6 +491,10 @@ async def run_stage_02_v15(
         quality: gpt-image-2 quality (ignored by qwen-image).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Content-addressed cache of past bakes, keyed by recipe hash. Lives in a
+    # hidden subdir so the panel's top-level *_frame.png scan never sees it.
+    store_dir = output_dir / ".frame_cache"
+    store_dir.mkdir(parents=True, exist_ok=True)
     report: dict = {"stage": "02_v15", "scenes": []}
 
     # The project id is the immediate parent of the output_dir for the
@@ -434,15 +515,23 @@ async def run_stage_02_v15(
         _try_emit(pid, "scene_start", stage="2",
                   scene_id=scene.scene_id, name=scene.name)
         target = output_dir / f"{scene.scene_id}_{scene.name}_frame.png"
-        if target.exists() and target.stat().st_size > 0 and not overwrite:
-            logger.info(f"[stage 02 skip] {target.name} exists")
-            report["scenes"].append({
-                "scene_id": scene.scene_id, "skipped": True, "path": str(target),
-            })
-            continue
+        recipe_path = _recipe_path(target)
+        exists = target.exists() and target.stat().st_size > 0
 
         refs = _resolve_refs_for_scene(project_spec, scene)
         if refs.total() == 0:
+            # Without refs we can't recompute the recipe. If a frame already
+            # exists, keep it rather than failing the batch; only error when
+            # there's nothing to fall back to.
+            if exists and not overwrite:
+                logger.info(
+                    f"[stage 02 keep] {target.name} — no refs to re-verify",
+                )
+                report["scenes"].append({
+                    "scene_id": scene.scene_id, "skipped": True,
+                    "path": str(target), "cache": "kept",
+                })
+                continue
             logger.error(
                 f"[scene {scene.scene_id}] no references available — "
                 f"Stage 0a/0b/0c must run first or scene must be standalone",
@@ -454,6 +543,53 @@ async def run_stage_02_v15(
 
         prompt = _compose_prompt(project_spec, scene)
         provider = getattr(scene, "frame_provider", None) or "gpt-image-2"
+        recipe = _frame_recipe(
+            prompt, provider, size, quality, _refs_signature(refs),
+        )
+
+        # 1) On-disk frame already matches the current recipe → reuse as-is.
+        if exists and not overwrite and _read_recipe(recipe_path) == recipe:
+            logger.info(
+                f"[stage 02 cache-hit] {target.name} — recipe unchanged",
+            )
+            report["scenes"].append({
+                "scene_id": scene.scene_id, "skipped": True,
+                "path": str(target), "cache": "hit",
+            })
+            continue
+
+        # 2) We've baked this exact recipe before (e.g. a reverted edit) →
+        # restore it from the content-addressed store for free.
+        store_path = store_dir / f"{recipe}.png"
+        if (
+            not overwrite
+            and store_path.exists()
+            and store_path.stat().st_size > 0
+        ):
+            shutil.copy2(store_path, target)
+            _write_recipe(
+                recipe_path, recipe,
+                scene=f"{scene.scene_id}_{scene.name}",
+                provider=provider, refs=refs.total(),
+                size=size, prompt_chars=len(prompt),
+            )
+            logger.info(
+                f"[stage 02 restore] {target.name} — recipe seen before",
+            )
+            report["scenes"].append({
+                "scene_id": scene.scene_id, "skipped": True,
+                "path": str(target), "cache": "restored",
+            })
+            continue
+
+        cache_state = (
+            "forced" if (exists and overwrite)
+            else "stale" if exists else "miss"
+        )
+        if cache_state == "stale":
+            logger.info(
+                f"[stage 02 re-bake] {target.name} — recipe changed",
+            )
         logger.info(
             f"[stage 02 compose] scene={scene.scene_id}_{scene.name}  "
             f"provider={provider}  refs={refs.total()} "
@@ -491,6 +627,18 @@ async def run_stage_02_v15(
             continue
 
         shutil.copy2(saved, target)
+        # Stash this bake in the content-addressed store so a later revert to
+        # the same recipe restores it for free (see cache step 2 above).
+        try:
+            shutil.copy2(target, store_dir / f"{recipe}.png")
+        except OSError as e:  # noqa: BLE001
+            logger.warning("could not cache frame %s: %s", recipe, e)
+        _write_recipe(
+            recipe_path, recipe,
+            scene=f"{scene.scene_id}_{scene.name}",
+            provider=provider, refs=refs.total(),
+            size=size, prompt_chars=len(prompt),
+        )
         elapsed = time.time() - t0
         logger.info(
             f"  ✓ scene {scene.scene_id}: {target.stat().st_size/1e6:.1f} MB "
@@ -503,6 +651,7 @@ async def run_stage_02_v15(
             "elapsed_s": round(elapsed, 1),
             "refs_used": refs.total(),
             "provider": provider,
+            "cache": cache_state,
         })
         _try_emit(pid, "scene_done", stage="2",
                   scene_id=scene.scene_id, name=scene.name,
