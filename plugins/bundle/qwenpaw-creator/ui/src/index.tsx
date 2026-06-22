@@ -46,7 +46,9 @@ const {
   ScissorOutlined,
   PictureOutlined,
   PlayCircleOutlined,
+  PushpinOutlined,
   ReloadOutlined,
+  SoundOutlined,
   EditOutlined,
   DeleteOutlined,
   PlusOutlined,
@@ -54,11 +56,19 @@ const {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   CheckCircleTwoTone,
+  CheckCircleOutlined,
   ExclamationCircleOutlined,
+  VideoCameraOutlined,
 } = antdIcons;
 const FoldIcon = MenuFoldOutlined ?? FileTextOutlined;
 const UnfoldIcon = MenuUnfoldOutlined ?? FileTextOutlined;
 const PreviewIcon = EyeOutlined ?? PictureOutlined;
+const AnchorStageIcon =
+  PushpinOutlined ?? CloudUploadOutlined ?? FileTextOutlined;
+const NarrationStageIcon = SoundOutlined ?? FileTextOutlined;
+const MotionStageIcon = VideoCameraOutlined ?? PlayCircleOutlined;
+const FinalStageIcon =
+  CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -2762,8 +2772,8 @@ function buildStageRows(
   return [
     {
       id: "stage-meta",
-      label: "Meta",
-      short: "M",
+      label: "Project setup",
+      icon: FileTextOutlined,
       active: activeStage === "meta",
       done: 1,
       total: 1,
@@ -2771,7 +2781,7 @@ function buildStageRows(
     {
       id: "stage-0",
       label: "Anchors",
-      short: "A",
+      icon: AnchorStageIcon,
       active: activeStage?.startsWith("0"),
       done: (projStatus?.stages?.["0"]?.refs ?? []).length,
       total:
@@ -2783,7 +2793,7 @@ function buildStageRows(
     {
       id: "stage-1",
       label: "Narration",
-      short: "N",
+      icon: NarrationStageIcon,
       active: activeStage === "1",
       done: (projStatus?.stages?.["1"]?.audio ?? []).length,
       total: (draft.scenes ?? []).filter((s: any) => s.has_narration).length,
@@ -2791,7 +2801,7 @@ function buildStageRows(
     {
       id: "stage-2",
       label: "Frames",
-      short: "F",
+      icon: PictureOutlined,
       active: activeStage === "2",
       done: (projStatus?.stages?.["2"]?.frames ?? []).length,
       total: (draft.scenes ?? []).length,
@@ -2799,20 +2809,79 @@ function buildStageRows(
     {
       id: "stage-3",
       label: "Motion",
-      short: "Mo",
+      icon: MotionStageIcon,
       active: activeStage === "3",
       done: (projStatus?.stages?.["3"]?.shots ?? []).length,
       total: (draft.scenes ?? []).length,
     },
     {
       id: "stage-4",
-      label: "Final",
-      short: "Fi",
+      label: "Final film",
+      icon: FinalStageIcon,
       active: activeStage === "4",
       done: (projStatus?.stages?.["4"]?.final ?? []).length,
       total: 1,
     },
   ];
+}
+
+function stageRailState(row: any) {
+  const total = Number(row.total) || 0;
+  const done = Math.min(Number(row.done) || 0, total);
+  if (row.active) {
+    return {
+      label: "Working",
+      color: "#1677ff",
+      bg: "#e6f4ff",
+      border: "#91caff",
+      progress: total > 0 ? done / total : 0,
+      compact: "run",
+    };
+  }
+  if (total <= 0) {
+    return {
+      label: "No work",
+      color: "#8c8c8c",
+      bg: "#fafafa",
+      border: "#eeeeee",
+      progress: 0,
+      compact: "—",
+    };
+  }
+  if (done >= total) {
+    return {
+      label: "Ready",
+      color: "#52c41a",
+      bg: "#f6ffed",
+      border: "#b7eb8f",
+      progress: 1,
+      compact: "✓",
+    };
+  }
+  if (done > 0) {
+    return {
+      label: "Partial",
+      color: "#d48806",
+      bg: "#fffbe6",
+      border: "#ffe58f",
+      progress: done / total,
+      compact: `${done}/${total}`,
+    };
+  }
+  return {
+    label: "Needed",
+    color: "#8c8c8c",
+    bg: "#ffffff",
+    border: "#eeeeee",
+    progress: 0,
+    compact: `${done}/${total}`,
+  };
+}
+
+function stageRailTooltip(row: any, state: any): string {
+  const total = Number(row.total) || 0;
+  const progress = total > 0 ? `${row.done}/${row.total}` : state.label;
+  return `${row.label}: ${progress} · ${state.label}`;
 }
 
 /**
@@ -2845,8 +2914,9 @@ function StageRail({ rows, inline = false }: any) {
         },
       },
       ...rows.map((r: any) => {
-        const done = r.total > 0 && r.done >= r.total;
-        const title = `${r.label}${r.total > 0 ? ` ${r.done}/${r.total}` : ""}`;
+        const state = stageRailState(r);
+        const Icon = r.icon || FileTextOutlined;
+        const title = stageRailTooltip(r, state);
         return React.createElement(
           Tooltip,
           { key: r.id, title, placement: "right" },
@@ -2856,34 +2926,65 @@ function StageRail({ rows, inline = false }: any) {
               type: "button",
               onClick: () => jumpToStage(r.id),
               style: {
-                width: 34,
-                minHeight: 32,
+                width: 42,
+                minHeight: 42,
                 borderRadius: 8,
-                border: r.active ? "1px solid #91caff" : "1px solid #eeeeee",
-                background: r.active ? "#e6f4ff" : "#fff",
-                color: r.active ? "#1677ff" : "#595959",
+                border: `1px solid ${state.border}`,
+                background: state.bg,
+                color: state.color,
                 cursor: "pointer",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 2,
-                padding: "3px 0",
-                fontSize: 10,
+                gap: 3,
+                padding: "4px 3px",
+                fontSize: 9,
                 fontWeight: 700,
                 lineHeight: 1,
               },
             },
-            React.createElement("span", {
-              style: {
-                width: 6,
-                height: 6,
-                borderRadius: 999,
-                background: done ? "#52c41a" : r.active ? "#1677ff" : "#d9d9d9",
-                display: "block",
-              },
+            React.createElement(Icon, {
+              style: { fontSize: 15, lineHeight: 1 },
             }),
-            React.createElement("span", null, r.short || r.label.slice(0, 1)),
+            React.createElement(
+              "span",
+              {
+                style: {
+                  color: state.color,
+                  fontSize: 9,
+                  fontVariantNumeric: "tabular-nums",
+                  maxWidth: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                },
+              },
+              state.compact,
+            ),
+            React.createElement(
+              "span",
+              {
+                style: {
+                  width: 28,
+                  height: 3,
+                  borderRadius: 999,
+                  background: "#edf0f4",
+                  display: "block",
+                  overflow: "hidden",
+                },
+              },
+              React.createElement("span", {
+                style: {
+                  width: `${Math.round(state.progress * 100)}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: state.color,
+                  display: "block",
+                },
+              }),
+            ),
           ),
         );
       }),
@@ -2933,8 +3034,10 @@ function StageRail({ rows, inline = false }: any) {
               },
               "Stages",
             ),
-            ...rows.map((r: any) =>
-              React.createElement(
+            ...rows.map((r: any) => {
+              const state = stageRailState(r);
+              const Icon = r.icon || FileTextOutlined;
+              return React.createElement(
                 "button",
                 {
                   key: r.id,
@@ -2949,28 +3052,23 @@ function StageRail({ rows, inline = false }: any) {
                     cursor: "pointer",
                     display: "flex",
                     fontSize: 12,
-                    gap: 6,
+                    gap: 7,
                     lineHeight: 1.4,
                     margin: 0,
-                    padding: "4px 6px",
+                    padding: "5px 6px",
                     textAlign: "left",
                     width: "100%",
                   },
+                  title: stageRailTooltip(r, state),
                 },
-                React.createElement(
-                  "span",
-                  {
-                    style: {
-                      color:
-                        r.done === r.total && r.total > 0
-                          ? "#52c41a"
-                          : "#bfbfbf",
-                      fontSize: 10,
-                      lineHeight: 1,
-                    },
+                React.createElement(Icon, {
+                  style: {
+                    color: state.color,
+                    flex: "0 0 auto",
+                    fontSize: 14,
+                    lineHeight: 1,
                   },
-                  "●",
-                ),
+                }),
                 React.createElement(
                   "span",
                   {
@@ -2983,20 +3081,22 @@ function StageRail({ rows, inline = false }: any) {
                   },
                   r.label,
                 ),
-                r.total > 0
-                  ? React.createElement(
-                      "span",
-                      {
-                        style: {
-                          color: "#999",
-                          fontVariantNumeric: "tabular-nums",
-                        },
-                      },
-                      `${r.done}/${r.total}`,
-                    )
-                  : null,
-              ),
-            ),
+                React.createElement(
+                  "span",
+                  {
+                    style: {
+                      color: state.color,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      fontVariantNumeric: "tabular-nums",
+                      textTransform: "uppercase",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  r.total > 0 ? `${r.done}/${r.total}` : state.label,
+                ),
+              );
+            }),
           )
         : React.createElement(
             Tooltip,
