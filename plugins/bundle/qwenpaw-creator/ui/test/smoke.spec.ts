@@ -499,19 +499,25 @@ test("'Make my film' auto-chains decompose → craft", async ({ page }) => {
   await expect.poll(() => calls).toContain("craft");
 });
 
-test("Render film opens a budget gate with Draft vs Full", async ({ page }) => {
+test("Reel CTA opens an intent gate with Storyboard, Animated, and Final", async ({
+  page,
+}) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await mockApi(page);
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
 
-  await page.getByRole("button", { name: /Render film/ }).click();
+  await page
+    .getByRole("button", { name: /storyboard/i })
+    .first()
+    .click();
 
-  // One cost confirm before any paid render — Draft (frames) vs Full.
-  await expect(page.getByText("Make the film?")).toBeVisible();
-  await expect(page.getByText(/Draft — frames only/)).toBeVisible();
-  await expect(page.getByText(/Full film/)).toBeVisible();
+  // One cost confirm before paid work, but now framed around user intent.
+  await expect(page.getByText("Choose the next pass")).toBeVisible();
+  await expect(page.getByText(/Storyboard draft/)).toBeVisible();
+  await expect(page.getByText(/Animated reel/)).toBeVisible();
+  await expect(page.getByText(/Final cut/)).toBeVisible();
   await page.waitForTimeout(400);
   await page.screenshot({ path: shot("06-budget-gate.png") });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
@@ -546,8 +552,11 @@ test("budget gate never claims $0 when the cost forecast is unavailable", async 
   });
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
-  await page.getByRole("button", { name: /Render film/ }).click();
-  await expect(page.getByText("Make the film?")).toBeVisible();
+  await page
+    .getByRole("button", { name: /storyboard/i })
+    .first()
+    .click();
+  await expect(page.getByText("Choose the next pass")).toBeVisible();
   await page.waitForTimeout(300);
   await page.screenshot({ path: shot("09-budget-no-forecast.png") });
   // The deceptive "$0" must be gone; an honest fallback takes its place.
@@ -582,7 +591,11 @@ test("a Shoot that produces no frame surfaces an error, not silent success", asy
       return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
     if (p.endsWith("/cost-forecast")) return j(FORECAST);
     if (p.endsWith("/status") && p.startsWith("/projects/"))
-      return j({ stages: {} });
+      return j({
+        stages: {
+          "0": { refs: [{ name: "boy.png" }, { name: "dock.png" }] },
+        },
+      });
     if (p.endsWith("/stage") && method === "POST")
       return route.fulfill({
         status: 422,
@@ -637,19 +650,22 @@ test("Stop appears during render and cancels it", async ({ page }) => {
   });
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
-  await page.getByRole("button", { name: /Render film/ }).click();
-  await page.getByRole("button", { name: /Full film/ }).click();
+  await page
+    .getByRole("button", { name: /storyboard/i })
+    .first()
+    .click();
+  await page.getByRole("button", { name: /Animated reel/ }).click();
 
   // The render is in flight → a Stop button appears; clicking it cancels.
   await expect(page.getByRole("button", { name: /Stop/ })).toBeVisible();
-  await expect(page.getByText("Make the film?")).toBeHidden();
+  await expect(page.getByText("Choose the next pass")).toBeHidden();
   await page.waitForTimeout(300);
   await page.screenshot({ path: shot("07-rendering-stop.png") });
   await page.getByRole("button", { name: /Stop/ }).click();
   await expect.poll(() => calls).toContain("cancel");
 });
 
-test("Stop during a Full render does not roll into the motion stage", async ({
+test("Stop during an Animated render does not roll into the motion stage", async ({
   page,
 }) => {
   // Regression: hitting Stop while frames (Stage 2) are rendering must not
@@ -675,7 +691,11 @@ test("Stop during a Full render does not roll into the motion stage", async ({
       return j({ meta: { title: "Old Man & The Sea" }, draft: DRAFT });
     if (p.endsWith("/cost-forecast")) return j(FORECAST);
     if (p.endsWith("/status") && p.startsWith("/projects/"))
-      return j({ stages: {} });
+      return j({
+        stages: {
+          "0": { refs: [{ name: "boy.png" }, { name: "dock.png" }] },
+        },
+      });
     if (p.endsWith("/stage") && method === "POST") {
       const body = route.request().postDataJSON() as { stage?: string };
       stages.push(String(body?.stage));
@@ -688,8 +708,11 @@ test("Stop during a Full render does not roll into the motion stage", async ({
   });
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
-  await page.getByRole("button", { name: /Render film/ }).click();
-  await page.getByRole("button", { name: /Full film/ }).click();
+  await page
+    .getByRole("button", { name: /storyboard/i })
+    .first()
+    .click();
+  await page.getByRole("button", { name: /Animated reel/ }).click();
   // Stop while the frame stage is still in flight.
   await page.getByRole("button", { name: /Stop/ }).click();
   // Let the in-flight frame batch resolve and give renderFilm a chance to
