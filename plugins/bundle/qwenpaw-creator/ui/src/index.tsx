@@ -73,7 +73,6 @@ const StudioModeIcon =
   AppstoreOutlined ?? VideoCameraOutlined ?? PlayCircleOutlined;
 const ClassicModeIcon = OrderedListOutlined ?? FileTextOutlined;
 const ReelHeaderIcon = VideoCameraOutlined ?? PlayCircleOutlined;
-const HeaderTitleIcon = PictureOutlined ?? FileTextOutlined;
 const OpenClassicIcon = ExportOutlined ?? ClassicModeIcon;
 const ForwardIcon = RightOutlined ?? PlayCircleOutlined;
 const DirectorIcon = EditOutlined ?? VideoCameraOutlined ?? FileTextOutlined;
@@ -86,6 +85,53 @@ const NarrationStageIcon = SoundOutlined ?? FileTextOutlined;
 const MotionStageIcon = VideoCameraOutlined ?? PlayCircleOutlined;
 const FinalStageIcon =
   CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
+
+function StorybookCreatorMark(): any {
+  const stroke = {
+    stroke: "currentColor",
+    strokeWidth: 2.2,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
+  return React.createElement(
+    "svg",
+    {
+      "aria-hidden": true,
+      focusable: false,
+      width: 32,
+      height: 32,
+      viewBox: "0 0 32 32",
+      fill: "none",
+      style: { display: "block" },
+    },
+    React.createElement("path", {
+      d: "M5.8 16.1c0-5.64 4.56-10.2 10.2-10.2s10.2 4.35 10.2 9.86c0 5.76-4.72 10.34-10.55 10.34-1.56 0-3.02-.34-4.33-.95",
+      ...stroke,
+    }),
+    React.createElement("path", {
+      d: "m21.42 23.28 4.8 4.8",
+      ...stroke,
+    }),
+    React.createElement("circle", {
+      cx: 17.95,
+      cy: 10.55,
+      r: 1.28,
+      fill: "#ff7a00",
+    }),
+    React.createElement("circle", {
+      cx: 21.26,
+      cy: 11.78,
+      r: 1.22,
+      fill: "#ff7a00",
+    }),
+    React.createElement("circle", {
+      cx: 18.88,
+      cy: 14.6,
+      r: 1.65,
+      fill: "#ff7a00",
+    }),
+  );
+}
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -675,7 +721,7 @@ function HeaderBar({ status, onRefresh }: any) {
             style: {
               display: "inline-flex",
               alignItems: "center",
-              gap: 9,
+              gap: 10,
               letterSpacing: 0,
             },
           },
@@ -683,20 +729,16 @@ function HeaderBar({ status, onRefresh }: any) {
             "span",
             {
               style: {
-                width: 28,
-                height: 28,
-                borderRadius: 8,
+                width: 32,
+                height: 32,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "#fff3e6",
-                color: "#f97316",
-                border: "1px solid #ffd3a8",
-                fontSize: 16,
+                color: "#202124",
                 flex: "0 0 auto",
               },
             },
-            React.createElement(HeaderTitleIcon),
+            React.createElement(StorybookCreatorMark),
           ),
           "Storybook Creator",
         ),
