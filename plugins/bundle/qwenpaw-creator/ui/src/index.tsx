@@ -86,10 +86,16 @@ const MotionStageIcon = VideoCameraOutlined ?? PlayCircleOutlined;
 const FinalStageIcon =
   CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
 
-function StorybookCreatorMark(): any {
+function DirectorBoardIcon({
+  size = 16,
+  strokeWidth = 1.8,
+}: {
+  size?: number;
+  strokeWidth?: number;
+}): any {
   const stroke = {
     stroke: "currentColor",
-    strokeWidth: 2.2,
+    strokeWidth,
     strokeLinecap: "round",
     strokeLinejoin: "round",
   };
@@ -98,38 +104,25 @@ function StorybookCreatorMark(): any {
     {
       "aria-hidden": true,
       focusable: false,
-      width: 32,
-      height: 32,
-      viewBox: "0 0 32 32",
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
       fill: "none",
       style: { display: "block" },
     },
     React.createElement("path", {
-      d: "M5.8 16.1c0-5.64 4.56-10.2 10.2-10.2s10.2 4.35 10.2 9.86c0 5.76-4.72 10.34-10.55 10.34-1.56 0-3.02-.34-4.33-.95",
+      d: "M4.25 9h15.5v9.25a1.5 1.5 0 0 1-1.5 1.5H5.75a1.5 1.5 0 0 1-1.5-1.5V9Z",
       ...stroke,
     }),
     React.createElement("path", {
-      d: "m21.42 23.28 4.8 4.8",
+      d: "m4.25 9 1.2-4.2a1.5 1.5 0 0 1 1.9-1l10.8 3.08A1.9 1.9 0 0 1 19.75 9",
       ...stroke,
     }),
-    React.createElement("circle", {
-      cx: 17.95,
-      cy: 10.55,
-      r: 1.28,
-      fill: "#ff7a00",
-    }),
-    React.createElement("circle", {
-      cx: 21.26,
-      cy: 11.78,
-      r: 1.22,
-      fill: "#ff7a00",
-    }),
-    React.createElement("circle", {
-      cx: 18.88,
-      cy: 14.6,
-      r: 1.65,
-      fill: "#ff7a00",
-    }),
+    React.createElement("path", { d: "M8.25 4.15 6.8 9", ...stroke }),
+    React.createElement("path", { d: "M12.2 5.28 10.8 9", ...stroke }),
+    React.createElement("path", { d: "M16.15 6.4 14.8 9", ...stroke }),
+    React.createElement("path", { d: "M4.25 12.55h15.5", ...stroke }),
+    React.createElement("path", { d: "M8 16h5.6", ...stroke }),
   );
 }
 
@@ -738,7 +731,10 @@ function HeaderBar({ status, onRefresh }: any) {
                 flex: "0 0 auto",
               },
             },
-            React.createElement(StorybookCreatorMark),
+            React.createElement(DirectorBoardIcon, {
+              size: 32,
+              strokeWidth: 1.9,
+            }),
           ),
           "Storybook Creator",
         ),
@@ -9570,10 +9566,23 @@ class QwenPawCreatorPlugin {
         path: "/plugin/qwenpaw-creator/storybook",
         component: CreatorPageWithBoundary,
         label: "Storybook Creator",
-        icon: "🎬",
+        icon: "▤",
         priority: 50,
       },
     ]);
+    (window.QwenPaw as any).menu?.replace?.(
+      this.id,
+      "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
+      {
+        id: "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
+        location: "primary.settings",
+        parentId: "plugins-group",
+        label: "Storybook Creator",
+        icon: DirectorBoardIcon,
+        route: "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
+        order: 50,
+      },
+    );
   }
 }
 
