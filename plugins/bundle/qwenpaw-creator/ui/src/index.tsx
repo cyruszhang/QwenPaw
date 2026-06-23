@@ -46,7 +46,9 @@ const {
   ScissorOutlined,
   PictureOutlined,
   PlayCircleOutlined,
+  PushpinOutlined,
   ReloadOutlined,
+  SoundOutlined,
   EditOutlined,
   DeleteOutlined,
   PlusOutlined,
@@ -54,11 +56,36 @@ const {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   CheckCircleTwoTone,
+  CheckCircleOutlined,
   ExclamationCircleOutlined,
+  VideoCameraOutlined,
+  AppstoreOutlined,
+  OrderedListOutlined,
+  ExportOutlined,
+  RightOutlined,
+  AudioOutlined,
+  SettingOutlined,
 } = antdIcons;
 const FoldIcon = MenuFoldOutlined ?? FileTextOutlined;
 const UnfoldIcon = MenuUnfoldOutlined ?? FileTextOutlined;
 const PreviewIcon = EyeOutlined ?? PictureOutlined;
+const StudioModeIcon =
+  AppstoreOutlined ?? VideoCameraOutlined ?? PlayCircleOutlined;
+const ClassicModeIcon = OrderedListOutlined ?? FileTextOutlined;
+const ReelHeaderIcon = VideoCameraOutlined ?? PlayCircleOutlined;
+const HeaderTitleIcon = PictureOutlined ?? FileTextOutlined;
+const OpenClassicIcon = ExportOutlined ?? ClassicModeIcon;
+const ForwardIcon = RightOutlined ?? PlayCircleOutlined;
+const DirectorIcon = EditOutlined ?? VideoCameraOutlined ?? FileTextOutlined;
+const SceneScopeIcon = ReelHeaderIcon;
+const DictateIcon = AudioOutlined ?? SoundOutlined ?? FileTextOutlined;
+const AdvancedOptionsIcon = SettingOutlined ?? FileTextOutlined;
+const AnchorStageIcon =
+  PushpinOutlined ?? CloudUploadOutlined ?? FileTextOutlined;
+const NarrationStageIcon = SoundOutlined ?? FileTextOutlined;
+const MotionStageIcon = VideoCameraOutlined ?? PlayCircleOutlined;
+const FinalStageIcon =
+  CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -423,8 +450,45 @@ function CreatorPage(): any {
   const [stageRows, setStageRows] = React.useState<any[] | null>(null);
   const viewportWidth = useViewportWidth();
   const effectiveProjectsCollapsed = projectsCollapsed || viewportWidth < 900;
+  const pageRef = React.useRef<HTMLDivElement | null>(null);
 
   const [loadingProjects, setLoadingProjects] = React.useState(false);
+
+  React.useEffect(() => {
+    // Reserve the vertical scrollbar gutter on the embedded host chain too.
+    // In QwenPaw the plugin may be mounted inside a nested scroll container,
+    // so document-level gutter alone still lets centered content drift when
+    // Classic is tall enough to add the scrollbar.
+    const targets: HTMLElement[] = [];
+    const addTarget = (el: HTMLElement | null | undefined) => {
+      if (el && !targets.includes(el)) targets.push(el);
+    };
+    addTarget(document.documentElement);
+    addTarget(document.body);
+    let node = pageRef.current;
+    while (node) {
+      addTarget(node);
+      if (node === document.body) break;
+      node = node.parentElement;
+    }
+
+    const previous = targets.map((el) => ({
+      el,
+      gutter: el.style.getPropertyValue("scrollbar-gutter"),
+    }));
+    targets.forEach((el) =>
+      el.style.setProperty("scrollbar-gutter", "stable both-edges"),
+    );
+    return () => {
+      for (const { el, gutter } of previous) {
+        if (gutter) {
+          el.style.setProperty("scrollbar-gutter", gutter);
+        } else {
+          el.style.removeProperty("scrollbar-gutter");
+        }
+      }
+    };
+  }, []);
 
   const reloadStatus = React.useCallback(async () => {
     try {
@@ -483,7 +547,11 @@ function CreatorPage(): any {
 
   return React.createElement(
     "div",
-    { style: { padding: 24, maxWidth: 1560, margin: "0 auto" } },
+    {
+      ref: pageRef,
+      "data-testid": "creator-page-shell",
+      style: { padding: 24, maxWidth: 1560, margin: "0 auto" },
+    },
     React.createElement(HeaderBar, { status, onRefresh: reloadStatus }),
     React.createElement(
       "div",
@@ -601,7 +669,37 @@ function HeaderBar({ status, onRefresh }: any) {
       React.createElement(
         Title,
         { level: 3, style: { margin: 0 } },
-        "🎬 Storybook Creator",
+        React.createElement(
+          "span",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 9,
+              letterSpacing: 0,
+            },
+          },
+          React.createElement(
+            "span",
+            {
+              style: {
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#fff3e6",
+                color: "#f97316",
+                border: "1px solid #ffd3a8",
+                fontSize: 16,
+                flex: "0 0 auto",
+              },
+            },
+            React.createElement(HeaderTitleIcon),
+          ),
+          "Storybook Creator",
+        ),
       ),
       React.createElement(
         Paragraph,
@@ -1089,6 +1187,7 @@ function ProjectPane({
   // "The Reel" Studio view (new fluid UX) vs the classic stage accordion.
   // Studio is the default; the classic panel stays one click away.
   const [studioMode, setStudioMode] = React.useState(true);
+  const [classicMounted, setClassicMounted] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [activeStage, setActiveStage] = React.useState<string | null>(null);
   const [pendingSceneRun, setPendingSceneRun] = React.useState<{
@@ -1761,9 +1860,9 @@ function ProjectPane({
   );
   React.useEffect(() => {
     const hasScenes = (sidebarDraft?.scenes ?? []).length > 0;
-    // In Studio mode the stage rail is redundant with the Reel — hide it.
-    onStageRowsChange?.(hasScenes && !studioMode ? sidebarStageRows : null);
-  }, [sidebarDraft, sidebarStageRows, onStageRowsChange, studioMode]);
+    // Keep the collapsed sidebar chrome stable while switching Studio/Classic.
+    onStageRowsChange?.(hasScenes ? sidebarStageRows : null);
+  }, [sidebarDraft, sidebarStageRows, onStageRowsChange]);
   React.useEffect(() => () => onStageRowsChange?.(null), [onStageRowsChange]);
 
   if (!project) {
@@ -1790,6 +1889,56 @@ function ProjectPane({
     currentStep = 3;
   }
   if (projStatus?.stages?.["2"]?.frames?.length) currentStep = 4;
+
+  const modeToggleButton = (
+    active: boolean,
+    label: string,
+    Icon: any,
+    onClick: () => void,
+  ) =>
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        role: "tab",
+        "aria-label": label,
+        "aria-pressed": active,
+        "aria-selected": active,
+        onClick,
+        style: {
+          appearance: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          border: `1px solid ${active ? "#ff7a00" : "transparent"}`,
+          borderRadius: 7,
+          background: active ? "#ff7a00" : "transparent",
+          color: active ? "#1f2328" : "#2b2f36",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: active ? 700 : 600,
+          height: 32,
+          letterSpacing: 0,
+          lineHeight: 1,
+          padding: "0 13px",
+          whiteSpace: "nowrap",
+        },
+      },
+      React.createElement(Icon, {
+        "aria-hidden": true,
+        style: {
+          fontSize: 14,
+          lineHeight: 1,
+        },
+      }),
+      label,
+    );
+  const openClassicMode = () => {
+    setClassicMounted(true);
+    setStudioMode(false);
+  };
+  const openStudioMode = () => setStudioMode(true);
 
   return React.createElement(
     Card,
@@ -1843,9 +1992,8 @@ function ProjectPane({
         }),
       ),
     },
-    studioMode && hasDraft
-      ? null
-      : React.createElement(
+    !hasDraft
+      ? React.createElement(
           Steps,
           {
             current: currentStep,
@@ -1874,7 +2022,8 @@ function ProjectPane({
             title: "Frames",
             icon: React.createElement(PlayCircleOutlined),
           }),
-        ),
+        )
+      : null,
 
     runError
       ? React.createElement(Alert, {
@@ -1963,97 +2112,136 @@ function ProjectPane({
     hasDraft && (draft.scenes || []).length > 0
       ? React.createElement(
           "div",
-          null,
+          {
+            "data-testid": "creator-mode-shell",
+            style: {
+              width: "100%",
+              maxWidth: 1360,
+              margin: "0 auto",
+            },
+          },
           React.createElement(
-            Space,
-            { size: 4, style: { marginBottom: 12 } },
-            React.createElement(Button, {
-              size: "small",
-              type: studioMode ? "primary" : "default",
-              onClick: () => setStudioMode(true),
-              children: "✨ Studio",
-            }),
-            React.createElement(Button, {
-              size: "small",
-              type: studioMode ? "default" : "primary",
-              onClick: () => setStudioMode(false),
-              children: "Classic",
+            "div",
+            {
+              role: "tablist",
+              "aria-label": "Project view",
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                marginBottom: 14,
+                padding: 4,
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
+                background: "#fff",
+                boxShadow: "0 1px 2px rgba(16, 24, 40, 0.04)",
+              },
+            },
+            modeToggleButton(
+              studioMode,
+              "Studio",
+              StudioModeIcon,
+              openStudioMode,
+            ),
+            modeToggleButton(
+              !studioMode,
+              "Classic",
+              ClassicModeIcon,
+              openClassicMode,
+            ),
+          ),
+          React.createElement(
+            "div",
+            {
+              "data-testid": "studio-view",
+              hidden: !studioMode,
+              style: { display: studioMode ? "block" : "none" },
+            },
+            React.createElement(ReelView, {
+              key: `reel-${pid}`,
+              pid,
+              draft,
+              projStatus,
+              liveProgress,
+              forecast,
+              busy,
+              activeStage,
+              pendingSceneRun,
+              onRunStage,
+              onRunOne: (sid: string) =>
+                onRunStage("2", { only_scene: sid, overwrite: true }),
+              onRunStageAllParallel,
+              onRerollScenes: (ids: string[]) =>
+                onRunStageAllParallel("2", true, ids),
+              // A Director edit re-shoots the frame AND re-animates the
+              // motion so the playing clip stays in sync — one coordinated
+              // run, and Stop still halts before Stage 3.
+              onRerollScenesFull: async (ids: string[]) => {
+                const r2 = await onRunStageAllParallel("2", true, ids);
+                if (!r2?.cancelled) {
+                  await onRunStageAllParallel("3", true, ids);
+                }
+              },
+              onDirector,
+              onSaveDraft,
+              onCancel,
+              onSwitchClassic: openClassicMode,
             }),
           ),
-          studioMode
-            ? React.createElement(ReelView, {
-                key: `reel-${pid}`,
-                pid,
-                draft,
-                projStatus,
-                liveProgress,
-                forecast,
-                busy,
-                activeStage,
-                pendingSceneRun,
-                onRunStage,
-                onRunOne: (sid: string) =>
-                  onRunStage("2", { only_scene: sid, overwrite: true }),
-                onRunStageAllParallel,
-                onRerollScenes: (ids: string[]) =>
-                  onRunStageAllParallel("2", true, ids),
-                // A Director edit re-shoots the frame AND re-animates the
-                // motion so the playing clip stays in sync — one
-                // coordinated run, and Stop still halts before Stage 3.
-                onRerollScenesFull: async (ids: string[]) => {
-                  const r2 = await onRunStageAllParallel("2", true, ids);
-                  if (!r2?.cancelled) {
-                    await onRunStageAllParallel("3", true, ids);
-                  }
+          classicMounted
+            ? React.createElement(
+                "div",
+                {
+                  "data-testid": "classic-view",
+                  hidden: studioMode,
+                  style: { display: studioMode ? "none" : "block" },
                 },
-                onDirector,
-                onCancel,
-                onSwitchClassic: () => setStudioMode(false),
-              })
-            : React.createElement(DraftPanel, {
-                key: `draft-${pid}`,
-                pid,
-                draft,
-                styles,
-                projStatus,
-                busy,
-                activeStage,
-                pendingSceneRun,
-                forecast,
-                status,
-                onRunStage,
-                onRunStageAllParallel,
-                onAutofix,
-                onDirector,
-                onSaveDraft,
-                onPatchScene,
-                onSelectTake,
-                onReload: reload,
-                onAddAnchor: (kind: AnchorKind) =>
-                  setAnchorEditor({
-                    open: true,
-                    mode: "add",
-                    kind,
-                    id: "",
-                    description: "",
-                  }),
-                onEditAnchor: (kind: AnchorKind, a: any) =>
-                  setAnchorEditor({
-                    open: true,
-                    mode: "update",
-                    kind,
-                    id: a.id,
-                    description: a.description || "",
-                  }),
-                onDeleteAnchor,
-                onEditScene: (sceneId: string) => {
-                  const sc = (draft.scenes || []).find(
-                    (s: any) => s.id === sceneId,
-                  );
-                  if (sc) setSceneEditor(sc);
-                },
-                liveProgress,
-              }),
+                React.createElement(DraftPanel, {
+                  key: `draft-${pid}`,
+                  pid,
+                  draft,
+                  styles,
+                  projStatus,
+                  busy,
+                  activeStage,
+                  pendingSceneRun,
+                  forecast,
+                  status,
+                  onRunStage,
+                  onRunStageAllParallel,
+                  onAutofix,
+                  onDirector,
+                  onSaveDraft,
+                  onPatchScene,
+                  onSelectTake,
+                  onReload: reload,
+                  onAddAnchor: (kind: AnchorKind) =>
+                    setAnchorEditor({
+                      open: true,
+                      mode: "add",
+                      kind,
+                      id: "",
+                      description: "",
+                    }),
+                  onEditAnchor: (kind: AnchorKind, a: any) =>
+                    setAnchorEditor({
+                      open: true,
+                      mode: "update",
+                      kind,
+                      id: a.id,
+                      description: a.description || "",
+                    }),
+                  onDeleteAnchor,
+                  onEditScene: (sceneId: string) => {
+                    const sc = (draft.scenes || []).find(
+                      (s: any) => s.id === sceneId,
+                    );
+                    if (sc) setSceneEditor(sc);
+                  },
+                  liveProgress,
+                }),
+              )
+            : null,
         )
       : null,
 
@@ -2761,8 +2949,8 @@ function buildStageRows(
   return [
     {
       id: "stage-meta",
-      label: "Meta",
-      short: "M",
+      label: "Project setup",
+      icon: FileTextOutlined,
       active: activeStage === "meta",
       done: 1,
       total: 1,
@@ -2770,7 +2958,7 @@ function buildStageRows(
     {
       id: "stage-0",
       label: "Anchors",
-      short: "A",
+      icon: AnchorStageIcon,
       active: activeStage?.startsWith("0"),
       done: (projStatus?.stages?.["0"]?.refs ?? []).length,
       total:
@@ -2782,7 +2970,7 @@ function buildStageRows(
     {
       id: "stage-1",
       label: "Narration",
-      short: "N",
+      icon: NarrationStageIcon,
       active: activeStage === "1",
       done: (projStatus?.stages?.["1"]?.audio ?? []).length,
       total: (draft.scenes ?? []).filter((s: any) => s.has_narration).length,
@@ -2790,7 +2978,7 @@ function buildStageRows(
     {
       id: "stage-2",
       label: "Frames",
-      short: "F",
+      icon: PictureOutlined,
       active: activeStage === "2",
       done: (projStatus?.stages?.["2"]?.frames ?? []).length,
       total: (draft.scenes ?? []).length,
@@ -2798,20 +2986,79 @@ function buildStageRows(
     {
       id: "stage-3",
       label: "Motion",
-      short: "Mo",
+      icon: MotionStageIcon,
       active: activeStage === "3",
       done: (projStatus?.stages?.["3"]?.shots ?? []).length,
       total: (draft.scenes ?? []).length,
     },
     {
       id: "stage-4",
-      label: "Final",
-      short: "Fi",
+      label: "Final film",
+      icon: FinalStageIcon,
       active: activeStage === "4",
       done: (projStatus?.stages?.["4"]?.final ?? []).length,
       total: 1,
     },
   ];
+}
+
+function stageRailState(row: any) {
+  const total = Number(row.total) || 0;
+  const done = Math.min(Number(row.done) || 0, total);
+  if (row.active) {
+    return {
+      label: "Working",
+      color: "#1677ff",
+      bg: "#e6f4ff",
+      border: "#91caff",
+      progress: total > 0 ? done / total : 0,
+      compact: "run",
+    };
+  }
+  if (total <= 0) {
+    return {
+      label: "No work",
+      color: "#8c8c8c",
+      bg: "#fafafa",
+      border: "#eeeeee",
+      progress: 0,
+      compact: "—",
+    };
+  }
+  if (done >= total) {
+    return {
+      label: "Ready",
+      color: "#52c41a",
+      bg: "#f6ffed",
+      border: "#b7eb8f",
+      progress: 1,
+      compact: "✓",
+    };
+  }
+  if (done > 0) {
+    return {
+      label: "Partial",
+      color: "#d48806",
+      bg: "#fffbe6",
+      border: "#ffe58f",
+      progress: done / total,
+      compact: `${done}/${total}`,
+    };
+  }
+  return {
+    label: "Needed",
+    color: "#8c8c8c",
+    bg: "#ffffff",
+    border: "#eeeeee",
+    progress: 0,
+    compact: `${done}/${total}`,
+  };
+}
+
+function stageRailTooltip(row: any, state: any): string {
+  const total = Number(row.total) || 0;
+  const progress = total > 0 ? `${row.done}/${row.total}` : state.label;
+  return `${row.label}: ${progress} · ${state.label}`;
 }
 
 /**
@@ -2844,8 +3091,9 @@ function StageRail({ rows, inline = false }: any) {
         },
       },
       ...rows.map((r: any) => {
-        const done = r.total > 0 && r.done >= r.total;
-        const title = `${r.label}${r.total > 0 ? ` ${r.done}/${r.total}` : ""}`;
+        const state = stageRailState(r);
+        const Icon = r.icon || FileTextOutlined;
+        const title = stageRailTooltip(r, state);
         return React.createElement(
           Tooltip,
           { key: r.id, title, placement: "right" },
@@ -2855,34 +3103,65 @@ function StageRail({ rows, inline = false }: any) {
               type: "button",
               onClick: () => jumpToStage(r.id),
               style: {
-                width: 34,
-                minHeight: 32,
+                width: 42,
+                minHeight: 42,
                 borderRadius: 8,
-                border: r.active ? "1px solid #91caff" : "1px solid #eeeeee",
-                background: r.active ? "#e6f4ff" : "#fff",
-                color: r.active ? "#1677ff" : "#595959",
+                border: `1px solid ${state.border}`,
+                background: state.bg,
+                color: state.color,
                 cursor: "pointer",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: 2,
-                padding: "3px 0",
-                fontSize: 10,
+                gap: 3,
+                padding: "4px 3px",
+                fontSize: 9,
                 fontWeight: 700,
                 lineHeight: 1,
               },
             },
-            React.createElement("span", {
-              style: {
-                width: 6,
-                height: 6,
-                borderRadius: 999,
-                background: done ? "#52c41a" : r.active ? "#1677ff" : "#d9d9d9",
-                display: "block",
-              },
+            React.createElement(Icon, {
+              style: { fontSize: 15, lineHeight: 1 },
             }),
-            React.createElement("span", null, r.short || r.label.slice(0, 1)),
+            React.createElement(
+              "span",
+              {
+                style: {
+                  color: state.color,
+                  fontSize: 9,
+                  fontVariantNumeric: "tabular-nums",
+                  maxWidth: "100%",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  textTransform: "uppercase",
+                  whiteSpace: "nowrap",
+                },
+              },
+              state.compact,
+            ),
+            React.createElement(
+              "span",
+              {
+                style: {
+                  width: 28,
+                  height: 3,
+                  borderRadius: 999,
+                  background: "#edf0f4",
+                  display: "block",
+                  overflow: "hidden",
+                },
+              },
+              React.createElement("span", {
+                style: {
+                  width: `${Math.round(state.progress * 100)}%`,
+                  height: "100%",
+                  borderRadius: 999,
+                  background: state.color,
+                  display: "block",
+                },
+              }),
+            ),
           ),
         );
       }),
@@ -2932,8 +3211,10 @@ function StageRail({ rows, inline = false }: any) {
               },
               "Stages",
             ),
-            ...rows.map((r: any) =>
-              React.createElement(
+            ...rows.map((r: any) => {
+              const state = stageRailState(r);
+              const Icon = r.icon || FileTextOutlined;
+              return React.createElement(
                 "button",
                 {
                   key: r.id,
@@ -2948,28 +3229,23 @@ function StageRail({ rows, inline = false }: any) {
                     cursor: "pointer",
                     display: "flex",
                     fontSize: 12,
-                    gap: 6,
+                    gap: 7,
                     lineHeight: 1.4,
                     margin: 0,
-                    padding: "4px 6px",
+                    padding: "5px 6px",
                     textAlign: "left",
                     width: "100%",
                   },
+                  title: stageRailTooltip(r, state),
                 },
-                React.createElement(
-                  "span",
-                  {
-                    style: {
-                      color:
-                        r.done === r.total && r.total > 0
-                          ? "#52c41a"
-                          : "#bfbfbf",
-                      fontSize: 10,
-                      lineHeight: 1,
-                    },
+                React.createElement(Icon, {
+                  style: {
+                    color: state.color,
+                    flex: "0 0 auto",
+                    fontSize: 14,
+                    lineHeight: 1,
                   },
-                  "●",
-                ),
+                }),
                 React.createElement(
                   "span",
                   {
@@ -2982,20 +3258,22 @@ function StageRail({ rows, inline = false }: any) {
                   },
                   r.label,
                 ),
-                r.total > 0
-                  ? React.createElement(
-                      "span",
-                      {
-                        style: {
-                          color: "#999",
-                          fontVariantNumeric: "tabular-nums",
-                        },
-                      },
-                      `${r.done}/${r.total}`,
-                    )
-                  : null,
-              ),
-            ),
+                React.createElement(
+                  "span",
+                  {
+                    style: {
+                      color: state.color,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      fontVariantNumeric: "tabular-nums",
+                      textTransform: "uppercase",
+                      whiteSpace: "nowrap",
+                    },
+                  },
+                  r.total > 0 ? `${r.done}/${r.total}` : state.label,
+                ),
+              );
+            }),
           )
         : React.createElement(
             Tooltip,
@@ -3482,6 +3760,128 @@ function activeStatesForChange(
     });
   });
   return [...active.values()].sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function normalizeIdList(value: any): string[] {
+  if (Array.isArray(value)) {
+    return value.map((v) => String(v || "").trim()).filter(Boolean);
+  }
+  const single = String(value || "").trim();
+  return single ? [single] : [];
+}
+
+function draftContinuityEntities(draft: any): any[] {
+  const chars: any[] = draft?.assets?.characters ?? [];
+  const props: any[] = draft?.assets?.props ?? [];
+  const refs: any[] = draft?.assets?.scene_refs ?? [];
+  return [
+    ...chars.map((c: any) => ({
+      id: String(c.id || "").trim(),
+      kind: "character",
+      label: humanizeId(c.id),
+    })),
+    ...props.map((p: any) => ({
+      id: String(p.id || "").trim(),
+      kind: "prop",
+      label: humanizeId(p.id),
+    })),
+    ...refs.map((r: any) => ({
+      id: String(r.id || "").trim(),
+      kind: "scene_ref",
+      label: humanizeId(r.id),
+    })),
+  ].filter((e: any) => e.id);
+}
+
+function sceneContinuityEntityIds(scene: any): string[] {
+  return Array.from(
+    new Set([
+      ...normalizeIdList(scene?.uses_characters),
+      ...normalizeIdList(scene?.uses_props),
+      ...normalizeIdList(scene?.uses_scene_ref),
+    ]),
+  );
+}
+
+function sceneUsesContinuityEntity(scene: any, entityId: string): boolean {
+  return sceneContinuityEntityIds(scene).includes(entityId);
+}
+
+function continuityGroupsForScene(draft: any, scene: any): any[] {
+  if (!scene) return [];
+  const entities = draftContinuityEntities(draft);
+  const entityById = new Map(entities.map((e: any) => [e.id, e]));
+  const ids = sceneContinuityEntityIds(scene);
+  return ids
+    .map((id) => {
+      const entity = entityById.get(id) || {
+        id,
+        kind: "entity",
+        label: humanizeId(id),
+      };
+      return {
+        entity,
+        states: activeStatesForChange(
+          draft?.state_changes || [],
+          id,
+          sceneIdOf(scene),
+        ),
+      };
+    })
+    .filter((group: any) => group.entity?.id);
+}
+
+function affectedScenesForContinuityChange(
+  draft: any,
+  entityId: string,
+  atScene: string,
+): any[] {
+  const scenes: any[] = draft?.scenes ?? [];
+  return scenes.filter((scene: any) => {
+    const sid = sceneIdOf(scene);
+    return sid && sid >= atScene && sceneUsesContinuityEntity(scene, entityId);
+  });
+}
+
+function preferredContinuityEntity(draft: any, scene: any): string {
+  const sceneIds = sceneContinuityEntityIds(scene);
+  if (sceneIds.length) return sceneIds[0];
+  return draftContinuityEntities(draft)[0]?.id || "";
+}
+
+function looksLikeContinuityIntent(text: string): boolean {
+  return /(?:state\s+change|change\s+(?:his|her|their|the)?\s*state|from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward|for\s+the\s+rest|keeps?\s+|continues?\s+|until\s+scene|after\s+this)/i.test(
+    text,
+  );
+}
+
+function stateTitleFromInstruction(text: string): string {
+  const cleaned = String(text || "")
+    .replace(
+      /^\s*(?:from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward),?\s*/i,
+      "",
+    )
+    .replace(/^\s*(?:make|have|give)\s+/i, "")
+    .replace(/^\s*(?:he|she|they|it|him|her|them|the\s+\w+)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return compactText(cleaned || text, 48);
+}
+
+function continuityChangeCount(draft: any): number {
+  return (draft?.state_changes || []).filter(
+    (c: any) =>
+      c?.entity &&
+      c?.at_scene &&
+      ((c.add && c.add.length) || (c.remove && c.remove.length) || c.reset),
+  ).length;
+}
+
+function continuityEntityKindLabel(kind: string): string {
+  if (kind === "character") return "character";
+  if (kind === "prop") return "prop";
+  if (kind === "scene_ref") return "setting";
+  return "entity";
 }
 
 function StateTimelineCard({ draft, onSaveDraft }: any) {
@@ -4214,17 +4614,17 @@ function MakeFilmHero({
         size: "large",
         loading: busy && activeStage === "decompose",
         disabled: !ready,
+        icon: React.createElement(StudioModeIcon),
         onClick: onMakeFilm || onSubmit,
-        children: "✨ Make my film",
+        children: "Make my film",
       }),
       React.createElement(Button, {
         type: "text",
         size: "small",
+        icon: React.createElement(AdvancedOptionsIcon),
         onClick: () => setShowAdvanced(!showAdvanced),
         style: { color: "#8b96b4" },
-        children: showAdvanced
-          ? "Hide advanced options ▲"
-          : "⚙ Advanced options ▾",
+        children: showAdvanced ? "Hide advanced options" : "Advanced options",
       }),
     ),
     !ready
@@ -5064,7 +5464,9 @@ function DirectorChat({ draft, onDirector }: any) {
       title: React.createElement(
         Space,
         { size: 6 },
-        React.createElement("span", null, "🎬"),
+        React.createElement(DirectorIcon, {
+          style: { color: "#6d28d9", fontSize: 15 },
+        }),
         React.createElement(AntText, { strong: true }, "Director"),
         React.createElement(
           AntText,
@@ -5667,6 +6069,184 @@ function SceneTile({
   );
 }
 
+function ReelContinuityRail({
+  draft,
+  scene,
+  open,
+  onToggle,
+  onChangeState,
+}: any) {
+  if (!scene) return null;
+  const groups = continuityGroupsForScene(draft, scene);
+  const hasActiveState = groups.some((g: any) => (g.states || []).length);
+  const activeStateCount = groups.reduce(
+    (total: number, group: any) => total + (group.states || []).length,
+    0,
+  );
+  const summary = groups.length
+    ? `${groups.length} tracked · ${
+        activeStateCount > 0 ? `${activeStateCount} active` : "canonical"
+      }`
+    : "No scene anchors";
+  return React.createElement(
+    "div",
+    {
+      style: {
+        border: "1px solid #283147",
+        background: "#111722",
+        borderRadius: 10,
+        padding: 12,
+        marginBottom: 14,
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          marginBottom: open && groups.length ? 10 : 0,
+        },
+      },
+      React.createElement(
+        Space,
+        { size: 8 },
+        React.createElement(
+          AntText,
+          { style: { color: "#f3f4f6", fontWeight: 700 } },
+          "Continuity",
+        ),
+        React.createElement(
+          Tag,
+          {
+            color: hasActiveState ? "success" : "default",
+            style: { margin: 0 },
+          },
+          hasActiveState ? "state visible" : "canonical",
+        ),
+        React.createElement(
+          AntText,
+          { style: { color: "#68748d", fontSize: 12 } },
+          summary,
+        ),
+      ),
+      React.createElement(
+        Space,
+        { size: 8 },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          onClick: onToggle,
+          style: { color: "#9aa4bf", fontWeight: 700 },
+          children: open ? "Hide details" : "Details",
+        }),
+        React.createElement(Button, {
+          size: "small",
+          onClick: onChangeState,
+          style: {
+            borderColor: "#f97316",
+            color: "#ffb072",
+            background: "rgba(249,115,22,0.08)",
+          },
+          children: "Change state from here",
+        }),
+      ),
+    ),
+    open && groups.length
+      ? React.createElement(
+          "div",
+          { style: { display: "grid", gap: 8 } },
+          ...groups.map((group: any) =>
+            React.createElement(
+              "div",
+              {
+                key: group.entity.id,
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "116px minmax(0, 1fr)",
+                  gap: 10,
+                  alignItems: "start",
+                  minWidth: 0,
+                },
+              },
+              React.createElement(
+                "div",
+                { style: { minWidth: 0 } },
+                React.createElement(
+                  AntText,
+                  {
+                    style: {
+                      color: "#dfe4f1",
+                      display: "block",
+                      fontSize: 12,
+                      fontWeight: 700,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    },
+                    title: group.entity.id,
+                  },
+                  group.entity.label || group.entity.id,
+                ),
+                React.createElement(
+                  AntText,
+                  { style: { color: "#68748d", fontSize: 10 } },
+                  continuityEntityKindLabel(group.entity.kind),
+                ),
+              ),
+              React.createElement(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    minWidth: 0,
+                  },
+                },
+                ...((group.states || []).length
+                  ? (group.states || []).map((state: any) =>
+                      React.createElement(
+                        Tag,
+                        {
+                          key: state.id,
+                          color: "orange",
+                          style: {
+                            margin: 0,
+                            maxWidth: "100%",
+                            whiteSpace: "normal",
+                            overflowWrap: "anywhere",
+                          },
+                        },
+                        state.title || state.id,
+                      ),
+                    )
+                  : [
+                      React.createElement(
+                        Tag,
+                        {
+                          key: "canonical",
+                          style: { margin: 0, color: "#8791a8" },
+                        },
+                        "canonical state",
+                      ),
+                    ]),
+              ),
+            ),
+          ),
+        )
+      : open
+      ? React.createElement(
+          AntText,
+          { style: { color: "#68748d", fontSize: 12 } },
+          "No referenced character, prop, or setting on this scene yet.",
+        )
+      : null,
+  );
+}
+
 function ReelView({
   pid,
   draft,
@@ -5682,6 +6262,7 @@ function ReelView({
   onRerollScenes,
   onRerollScenesFull,
   onDirector,
+  onSaveDraft,
   onCancel,
   onSwitchClassic,
 }: any) {
@@ -5697,6 +6278,9 @@ function ReelView({
     React.useState(false);
   const [readyOverrideConfirm, setReadyOverrideConfirm] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
+  const [continuityDraft, setContinuityDraft] = React.useState<any>(null);
+  const [continuityOpen, setContinuityOpen] = React.useState(false);
+  const [continuitySaving, setContinuitySaving] = React.useState(false);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
   const [scope, setScope] = React.useState<"scene" | "film">("scene");
@@ -5711,6 +6295,9 @@ function ReelView({
         (window as any).webkitSpeechRecognition
       : null;
   const speechSupported = !!SpeechRec;
+  React.useEffect(() => {
+    if (looksLikeContinuityIntent(note)) setContinuityOpen(true);
+  }, [note]);
   React.useEffect(() => {
     if (budgetOpen || !focusDirectorAfterBudget) return undefined;
     const timer = window.setTimeout(() => {
@@ -5832,6 +6419,33 @@ function ReelView({
   const selAsset = selected
     ? assetFor(selected)
     : { frame: null, shot: null, shotStale: false };
+  const continuityN = continuityChangeCount(draft);
+  const reelStatusLine = [
+    workflow.statusLine,
+    continuityN > 0
+      ? `${continuityN} continuity change${continuityN === 1 ? "" : "s"}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const continuityEntities = draftContinuityEntities(draft);
+  const continuityEntityOptions = continuityEntities.map((e: any) => ({
+    value: e.id,
+    label: `${continuityEntityKindLabel(e.kind)}: ${e.id}`,
+  }));
+  const continuitySceneOptions = scenes
+    .map((scene: any) => ({
+      value: sceneIdOf(scene),
+      label: sceneLabel(scene),
+    }))
+    .filter((option: any) => option.value);
+  const affectedContinuityScenes = continuityDraft
+    ? affectedScenesForContinuityChange(
+        draft,
+        continuityDraft.entity,
+        continuityDraft.at_scene,
+      )
+    : [];
 
   const toggleMic = () => {
     if (!speechSupported) return;
@@ -5878,9 +6492,116 @@ function ReelView({
     }
   };
 
-  const direct = async () => {
+  const openContinuityDraft = (instruction: string = "") => {
+    setContinuityOpen(true);
+    if (!selected) {
+      antMessage.warning("Pick a scene first.");
+      return;
+    }
+    const entity = preferredContinuityEntity(draft, selected);
+    if (!entity) {
+      antMessage.warning(
+        "Add or reference a character, prop, or setting before changing state.",
+      );
+      return;
+    }
+    const title = stateTitleFromInstruction(instruction);
+    const content = title || instruction.trim();
+    setContinuityDraft({
+      entity,
+      at_scene: sceneIdOf(selected),
+      title,
+      content,
+      note: instruction.trim(),
+    });
+  };
+
+  const applyContinuityDraft = async () => {
+    if (!continuityDraft || continuitySaving) return;
+    if (!onSaveDraft) {
+      antMessage.warning("State changes are unavailable in this view.");
+      return;
+    }
+    const entity = String(continuityDraft.entity || "").trim();
+    const atScene = String(continuityDraft.at_scene || "").trim();
+    const title = String(continuityDraft.title || "").trim();
+    const content = String(continuityDraft.content || "").trim();
+    if (!entity || !atScene || !title || !content) {
+      antMessage.warning(
+        "Entity, start scene, title, and prompt are required.",
+      );
+      return;
+    }
+    const affectedIds = affectedContinuityScenes
+      .map((scene: any) => sceneIdOf(scene))
+      .filter(Boolean);
+    if (!affectedIds.length) {
+      antMessage.warning(
+        "No downstream scenes reference that entity. Add it to a scene first.",
+      );
+      return;
+    }
+    setContinuitySaving(true);
+    try {
+      const change = {
+        entity,
+        at_scene: atScene,
+        add: [
+          {
+            id: slugStateId(title),
+            title,
+            content,
+          },
+        ],
+        remove: [],
+        reset: false,
+        note: String(continuityDraft.note || content).trim(),
+      };
+      const nextDraft = JSON.parse(JSON.stringify(draft));
+      nextDraft.state_changes = [...(nextDraft.state_changes || []), change];
+      await onSaveDraft?.(nextDraft, { quiet: true });
+      setContinuityDraft(null);
+      setNote("");
+      setLog((p) => [
+        ...p,
+        {
+          msg: content,
+          summary: `Added ongoing state for ${entity}; re-rendering ${
+            affectedIds.length
+          } affected scene${affectedIds.length === 1 ? "" : "s"}.`,
+          changes: affectedIds.map((sceneId: string) => ({
+            scene_id: sceneId,
+          })),
+        },
+      ]);
+      if (onRerollScenesFull) await onRerollScenesFull(affectedIds);
+      else if (onRerollScenes) await onRerollScenes(affectedIds);
+      else for (const id of affectedIds) await onRunOne(id);
+      antMessage.success(
+        `Continuity saved; re-rendering ${affectedIds.length} affected scene${
+          affectedIds.length === 1 ? "" : "s"
+        }.`,
+      );
+    } catch (e: any) {
+      antMessage.error(`Continuity update failed: ${compactApiError(e)}`);
+    } finally {
+      setContinuitySaving(false);
+    }
+  };
+
+  const direct = async (bypassContinuity: boolean = false) => {
     const msg = note.trim();
     if (!msg || directing) return;
+    if (
+      !bypassContinuity &&
+      scope === "scene" &&
+      selected &&
+      continuityEntities.length &&
+      looksLikeContinuityIntent(msg)
+    ) {
+      openContinuityDraft(msg);
+      return;
+    }
     setDirecting(true);
     try {
       // Scene-scoped by default: focus the instruction on the selected
@@ -6084,17 +6805,71 @@ function ReelView({
         },
       },
       React.createElement(
-        Space,
-        { size: 10 },
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            minWidth: 0,
+            flexWrap: "wrap",
+          },
+        },
         React.createElement(
-          "span",
-          { style: { fontSize: 18, fontWeight: 700 } },
-          "🎬 The Reel",
+          "div",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              color: "#f8fafc",
+              flex: "0 0 auto",
+            },
+          },
+          React.createElement(
+            "span",
+            {
+              style: {
+                width: 26,
+                height: 26,
+                borderRadius: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(249, 115, 22, 0.14)",
+                border: "1px solid rgba(249, 115, 22, 0.35)",
+                color: "#fb923c",
+                fontSize: 15,
+                flex: "0 0 auto",
+              },
+            },
+            React.createElement(ReelHeaderIcon),
+          ),
+          React.createElement(
+            "span",
+            {
+              style: {
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: 0,
+                lineHeight: 1,
+              },
+            },
+            "The Reel",
+          ),
         ),
         React.createElement(
           AntText,
-          { style: { color: "#8b96b4", fontSize: 12 } },
-          workflow.statusLine,
+          {
+            style: {
+              color: "#9aa4bf",
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 0,
+              lineHeight: 1.4,
+            },
+          },
+          reelStatusLine,
         ),
         forecast
           ? React.createElement(
@@ -6124,14 +6899,32 @@ function ReelView({
             setReadyOverrideConfirm(false);
             setBudgetOpen(true);
           },
-          children: `${workflow.primaryLabel} ▸`,
+          children: React.createElement(
+            "span",
+            {
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                letterSpacing: 0,
+              },
+            },
+            workflow.primaryLabel,
+            React.createElement(ForwardIcon, { style: { fontSize: 12 } }),
+          ),
         }),
         React.createElement(Button, {
-          type: "text",
           size: "small",
+          icon: React.createElement(OpenClassicIcon),
           onClick: onSwitchClassic,
-          style: { color: "#8b96b4" },
-          children: "Classic view ↗",
+          style: {
+            background: "#151b28",
+            borderColor: "#2b3448",
+            color: "#aeb6cc",
+            fontWeight: 700,
+            letterSpacing: 0,
+          },
+          children: "Classic editor",
         }),
       ),
     ),
@@ -6184,6 +6977,15 @@ function ReelView({
                 ),
               ),
         )
+      : null,
+    selected
+      ? React.createElement(ReelContinuityRail, {
+          draft,
+          scene: selected,
+          open: continuityOpen,
+          onToggle: () => setContinuityOpen((value) => !value),
+          onChangeState: () => openContinuityDraft(note.trim()),
+        })
       : null,
     // ── the strip ──
     React.createElement(
@@ -6273,11 +7075,10 @@ function ReelView({
         size: "small",
         type: scope === "scene" ? "primary" : "default",
         ghost: scope === "scene",
+        icon: selected ? React.createElement(SceneScopeIcon) : null,
         disabled: !selected,
         onClick: () => setScope("scene"),
-        children: selected
-          ? `🎬 ${selected.id} · ${selected.name}`
-          : "This scene",
+        children: selected ? `${selected.id} · ${selected.name}` : "This scene",
       }),
       React.createElement(Button, {
         size: "small",
@@ -6301,9 +7102,13 @@ function ReelView({
             React.createElement(Button, {
               type: listening ? "primary" : "default",
               danger: listening,
+              "aria-label": listening
+                ? "Stop dictation"
+                : "Dictate instruction",
+              icon: React.createElement(DictateIcon),
               disabled: directing,
               onClick: toggleMic,
-              children: listening ? "● rec" : "🎤",
+              children: listening ? "rec" : null,
             }),
           )
         : null,
@@ -6322,6 +7127,17 @@ function ReelView({
           borderColor: "#2a3148",
           color: "#dfe4f1",
         },
+      }),
+      React.createElement(Button, {
+        disabled: !selected || directing,
+        onClick: () => openContinuityDraft(note.trim()),
+        style: {
+          borderColor: "#f97316",
+          background: "#f97316",
+          color: "#111827",
+          fontWeight: 700,
+        },
+        children: "Change state",
       }),
       React.createElement(Button, {
         type: "primary",
@@ -6362,7 +7178,7 @@ function ReelView({
         Paragraph,
         { type: "secondary", style: { marginBottom: 16 } },
         `${scenes.length} scene${scenes.length === 1 ? "" : "s"} · ` +
-          (workflow.statusLine || "ready"),
+          (reelStatusLine || "ready"),
       ),
       workflow.readyForReview
         ? React.createElement(
@@ -6448,7 +7264,202 @@ function ReelView({
             // Never imply "free" when the forecast failed to load — a
             // missing estimate is "unavailable", not "$0".
             ...modeButtons,
+            continuityN > 0 && (hasStoryboardWork || hasAnimationWork)
+              ? React.createElement(Alert, {
+                  key: "continuity-scope",
+                  type: "success",
+                  showIcon: true,
+                  message: "Ready scenes stay untouched",
+                  description:
+                    "The Reel only runs scenes that are missing or stale; continuity edits re-render the scenes that reference the changed entity.",
+                })
+              : null,
           ),
+    ),
+    React.createElement(
+      Modal,
+      {
+        open: Boolean(continuityDraft),
+        title: "Apply as ongoing continuity?",
+        okText: "Apply continuity change",
+        confirmLoading: continuitySaving,
+        onCancel: () => setContinuityDraft(null),
+        onOk: () => void applyContinuityDraft(),
+        footer: [
+          React.createElement(Button, {
+            key: "cancel",
+            onClick: () => setContinuityDraft(null),
+            children: "Cancel",
+          }),
+          React.createElement(Button, {
+            key: "scene",
+            disabled: !note.trim() || continuitySaving,
+            onClick: () => {
+              setContinuityDraft(null);
+              void direct(true);
+            },
+            children: "Make scene-only edit",
+          }),
+          React.createElement(Button, {
+            key: "apply",
+            type: "primary",
+            loading: continuitySaving,
+            onClick: () => void applyContinuityDraft(),
+            style: { background: "#f97316" },
+            children: "Apply continuity change",
+          }),
+        ],
+        width: 660,
+      },
+      continuityDraft
+        ? React.createElement(
+            Space,
+            { direction: "vertical", size: 14, style: { width: "100%" } },
+            React.createElement(
+              Paragraph,
+              { type: "secondary", style: { marginBottom: 0 } },
+              "Confirm before updating the timeline ledger. This state will carry forward until another state change removes or resets it.",
+            ),
+            React.createElement(
+              Row,
+              { gutter: 12 },
+              React.createElement(
+                Col,
+                { span: 14 },
+                React.createElement(
+                  Form.Item,
+                  { label: "Entity", style: { marginBottom: 0 } },
+                  React.createElement(Select, {
+                    value: continuityDraft.entity,
+                    options: continuityEntityOptions,
+                    showSearch: true,
+                    optionFilterProp: "label",
+                    style: { width: "100%" },
+                    onChange: (entity: string) =>
+                      setContinuityDraft((cur: any) => ({ ...cur, entity })),
+                  }),
+                ),
+              ),
+              React.createElement(
+                Col,
+                { span: 10 },
+                React.createElement(
+                  Form.Item,
+                  { label: "Starts", style: { marginBottom: 0 } },
+                  React.createElement(Select, {
+                    value: continuityDraft.at_scene,
+                    options: continuitySceneOptions,
+                    showSearch: true,
+                    optionFilterProp: "label",
+                    style: { width: "100%" },
+                    onChange: (at_scene: string) =>
+                      setContinuityDraft((cur: any) => ({
+                        ...cur,
+                        at_scene,
+                      })),
+                  }),
+                ),
+              ),
+            ),
+            React.createElement(
+              Form.Item,
+              {
+                label: "State title",
+                extra:
+                  "Short chip label shown in Reel; also becomes the state id.",
+                style: { marginBottom: 0 },
+              },
+              React.createElement(Input, {
+                value: continuityDraft.title,
+                placeholder: "carrying blue umbrella",
+                onChange: (e: any) =>
+                  setContinuityDraft((cur: any) => ({
+                    ...cur,
+                    title: e.target.value,
+                  })),
+              }),
+            ),
+            React.createElement(
+              Form.Item,
+              {
+                label: "Prompt fact",
+                extra:
+                  "This exact fact is injected into later frame and motion prompts.",
+                style: { marginBottom: 0 },
+              },
+              React.createElement(TextArea, {
+                rows: 3,
+                value: continuityDraft.content,
+                placeholder:
+                  "Lin Hao carries a blue umbrella in every referenced scene.",
+                onChange: (e: any) =>
+                  setContinuityDraft((cur: any) => ({
+                    ...cur,
+                    content: e.target.value,
+                    note: e.target.value,
+                  })),
+              }),
+            ),
+            React.createElement(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: 10,
+                },
+              },
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Starts",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  continuityDraft.at_scene,
+                ),
+              ),
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Affects",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  affectedContinuityScenes.length
+                    ? affectedContinuityScenes.map(sceneIdOf).join(", ")
+                    : "no scenes",
+                ),
+              ),
+              React.createElement(
+                Card,
+                { size: "small", bodyStyle: { padding: 12 } },
+                React.createElement(
+                  AntText,
+                  { strong: true, style: { display: "block" } },
+                  "Will re-render",
+                ),
+                React.createElement(
+                  AntText,
+                  { type: "secondary" },
+                  `${affectedContinuityScenes.length} frame${
+                    affectedContinuityScenes.length === 1 ? "" : "s"
+                  } · ${affectedContinuityScenes.length} clip${
+                    affectedContinuityScenes.length === 1 ? "" : "s"
+                  }`,
+                ),
+              ),
+            ),
+          )
+        : null,
     ),
   );
 }

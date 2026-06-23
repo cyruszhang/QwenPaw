@@ -342,6 +342,91 @@ test("the Director is scene-scoped and re-renders frame + motion", async ({
   expect(stages).toContain("3");
 });
 
+test("Reel continuity changes save the ledger and rerender affected scenes", async ({
+  page,
+}) => {
+  let currentDraft = JSON.parse(JSON.stringify(DRAFT));
+  let savedDraft: any = null;
+  const stagePosts: any[] = [];
+  await page.route("**/mock.local/api/creator/**", async (route) => {
+    const u = new URL(route.request().url());
+    const p = u.pathname.replace(/^\/api\/creator/, "");
+    const method = route.request().method();
+    const j = (b: unknown) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(b),
+      });
+    if (p === "/status") return j({ has_dashscope: true, has_openai: true });
+    if (p === "/projects")
+      return j({ projects: [{ id: "demo", title: "Old Man & The Sea" }] });
+    if (p === "/styles") return j({ styles: [] });
+    if (p === "/projects/demo" && method === "GET")
+      return j({ meta: { title: "Old Man & The Sea" }, draft: currentDraft });
+    if (p === "/projects/demo" && method === "PUT") {
+      savedDraft = (route.request().postDataJSON() as any).draft;
+      currentDraft = savedDraft;
+      return j({ ok: true });
+    }
+    if (p.endsWith("/cost-forecast")) return j(FORECAST);
+    if (p.endsWith("/status") && p.startsWith("/projects/"))
+      return j({ stages: {} });
+    if (p.endsWith("/stage") && method === "POST") {
+      stagePosts.push(route.request().postDataJSON());
+      return j({ ok: true });
+    }
+    return j({});
+  });
+
+  await page.goto(harnessUrl);
+  await page.getByText("Old Man & The Sea").click();
+
+  await expect(page.getByText("Continuity")).toBeVisible();
+  await expect(page.getByText("canonical state")).toHaveCount(0);
+  await page
+    .getByPlaceholder(/Change scene|Direct the/i)
+    .fill("from here on, he carries a blue umbrella");
+  await expect(page.getByText("canonical state").first()).toBeVisible();
+  await page.getByRole("button", { name: "Change state", exact: true }).click();
+
+  await expect(page.getByText("Apply as ongoing continuity?")).toBeVisible();
+  await expect(page.getByText("00, 01, 02")).toBeVisible();
+  await expect(
+    page.locator('input[value="carries a blue umbrella"]'),
+  ).toBeVisible();
+  await page.screenshot({ path: shot("15-continuity-change.png") });
+
+  await page.getByRole("button", { name: "Apply continuity change" }).click();
+  await expect.poll(() => savedDraft?.state_changes?.length || 0).toBe(1);
+  expect(savedDraft.state_changes[0]).toMatchObject({
+    entity: "boy",
+    at_scene: "00",
+    add: [
+      {
+        id: "carries_a_blue_umbrella",
+        title: "carries a blue umbrella",
+        content: "carries a blue umbrella",
+      },
+    ],
+  });
+  await expect
+    .poll(() => stagePosts.filter((p) => p.stage === "2").length)
+    .toBe(3);
+  await expect
+    .poll(() => stagePosts.filter((p) => p.stage === "3").length)
+    .toBe(3);
+  expect(stagePosts.map((p) => p.only_scene).sort()).toEqual([
+    "00",
+    "00",
+    "01",
+    "01",
+    "02",
+    "02",
+  ]);
+  expect(stagePosts.every((p) => p.overwrite === true)).toBe(true);
+});
+
 test("the Director bar dictates speech into the note when supported", async ({
   page,
 }) => {
@@ -370,7 +455,7 @@ test("the Director bar dictates speech into the note when supported", async ({
   await mockApi(page);
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
-  const mic = page.getByRole("button", { name: "🎤" });
+  const mic = page.getByRole("button", { name: "Dictate instruction" });
   await expect(mic).toBeVisible();
   await mic.click();
   await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toHaveValue(
@@ -392,7 +477,9 @@ test("the mic is hidden when the browser has no speech API", async ({
   await page.getByText("Old Man & The Sea").click();
   // The Director input is there, but no mic button (graceful fallback).
   await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
-  await expect(page.getByRole("button", { name: "🎤" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Dictate instruction" }),
+  ).toHaveCount(0);
 });
 
 test("a clip left stale by a frame re-shoot is flagged, not played", async ({
@@ -458,9 +545,35 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await mockApi(page);
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
+  const modeShell = page.getByTestId("creator-mode-shell");
+  await expect(modeShell).toBeVisible();
+  await expect(page.getByTestId("studio-view")).toBeVisible();
+  await expect(page.getByTestId("classic-view")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarGutter,
+      ),
+    )
+    .toContain("stable");
+  await expect
+    .poll(() =>
+      page
+        .locator("#host-scroll-shell")
+        .evaluate((el) => getComputedStyle(el).scrollbarGutter),
+    )
+    .toContain("stable");
+  await page.waitForTimeout(220);
+  const studioBox = await modeShell.boundingBox();
 
-  await page.getByRole("button", { name: "Classic", exact: true }).click();
+  await page.getByRole("tab", { name: "Classic", exact: true }).click();
+  const classicBox = await modeShell.boundingBox();
+  expect(classicBox?.width ?? 0).toBeCloseTo(studioBox?.width ?? 0, 0);
+  await expect(page.getByTestId("studio-view")).toHaveCount(1);
+  await expect(page.getByTestId("studio-view")).toBeHidden();
+  await expect(page.getByTestId("classic-view")).toBeVisible();
   await expect(page.getByText("Meta settings")).toBeVisible();
+  await expect(page.getByText("Storyboard", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run anchors" })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Run narration" }),
@@ -470,6 +583,9 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Run final" })).toBeVisible();
   await expect(page.getByText("Animate missing")).toHaveCount(0);
   await page.screenshot({ path: shot("04-classic.png"), fullPage: true });
+  await page.getByRole("tab", { name: "Studio", exact: true }).click();
+  await expect(page.getByTestId("studio-view")).toBeVisible();
+  await expect(page.getByTestId("classic-view")).toBeHidden();
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 
