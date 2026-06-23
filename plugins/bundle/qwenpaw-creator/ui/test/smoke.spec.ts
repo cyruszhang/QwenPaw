@@ -541,9 +541,16 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await mockApi(page);
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
+  const modeShell = page.getByTestId("creator-mode-shell");
+  await expect(modeShell).toBeVisible();
+  await page.waitForTimeout(220);
+  const studioBox = await modeShell.boundingBox();
 
   await page.getByRole("button", { name: "Classic", exact: true }).click();
+  const classicBox = await modeShell.boundingBox();
+  expect(classicBox?.width ?? 0).toBeCloseTo(studioBox?.width ?? 0, 0);
   await expect(page.getByText("Meta settings")).toBeVisible();
+  await expect(page.getByText("Storyboard", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run anchors" })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Run narration" }),

@@ -1771,9 +1771,9 @@ function ProjectPane({
   );
   React.useEffect(() => {
     const hasScenes = (sidebarDraft?.scenes ?? []).length > 0;
-    // In Studio mode the stage rail is redundant with the Reel — hide it.
-    onStageRowsChange?.(hasScenes && !studioMode ? sidebarStageRows : null);
-  }, [sidebarDraft, sidebarStageRows, onStageRowsChange, studioMode]);
+    // Keep the collapsed sidebar chrome stable while switching Studio/Classic.
+    onStageRowsChange?.(hasScenes ? sidebarStageRows : null);
+  }, [sidebarDraft, sidebarStageRows, onStageRowsChange]);
   React.useEffect(() => () => onStageRowsChange?.(null), [onStageRowsChange]);
 
   if (!project) {
@@ -1800,6 +1800,35 @@ function ProjectPane({
     currentStep = 3;
   }
   if (projStatus?.stages?.["2"]?.frames?.length) currentStep = 4;
+
+  const modeToggleButton = (
+    active: boolean,
+    label: string,
+    onClick: () => void,
+  ) =>
+    React.createElement(
+      "button",
+      {
+        type: "button",
+        "aria-pressed": active,
+        onClick,
+        style: {
+          appearance: "none",
+          border: `1px solid ${active ? "#ff7a00" : "transparent"}`,
+          borderRadius: 6,
+          background: active ? "#ff7a00" : "transparent",
+          color: active ? "#1f2328" : "#2b2f36",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: active ? 700 : 600,
+          height: 30,
+          lineHeight: "28px",
+          padding: "0 12px",
+          whiteSpace: "nowrap",
+        },
+      },
+      label,
+    );
 
   return React.createElement(
     Card,
@@ -1853,9 +1882,8 @@ function ProjectPane({
         }),
       ),
     },
-    studioMode && hasDraft
-      ? null
-      : React.createElement(
+    !hasDraft
+      ? React.createElement(
           Steps,
           {
             current: currentStep,
@@ -1884,7 +1912,8 @@ function ProjectPane({
             title: "Frames",
             icon: React.createElement(PlayCircleOutlined),
           }),
-        ),
+        )
+      : null,
 
     runError
       ? React.createElement(Alert, {
@@ -1973,22 +2002,36 @@ function ProjectPane({
     hasDraft && (draft.scenes || []).length > 0
       ? React.createElement(
           "div",
-          null,
+          {
+            "data-testid": "creator-mode-shell",
+            style: {
+              width: "100%",
+              maxWidth: 1360,
+              margin: "0 auto",
+            },
+          },
           React.createElement(
-            Space,
-            { size: 4, style: { marginBottom: 12 } },
-            React.createElement(Button, {
-              size: "small",
-              type: studioMode ? "primary" : "default",
-              onClick: () => setStudioMode(true),
-              children: "✨ Studio",
-            }),
-            React.createElement(Button, {
-              size: "small",
-              type: studioMode ? "default" : "primary",
-              onClick: () => setStudioMode(false),
-              children: "Classic",
-            }),
+            "div",
+            {
+              role: "tablist",
+              "aria-label": "Project view",
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 3,
+                marginBottom: 12,
+                padding: 3,
+                border: "1px solid #ececec",
+                borderRadius: 8,
+                background: "#fff",
+              },
+            },
+            modeToggleButton(studioMode, "✨ Studio", () =>
+              setStudioMode(true),
+            ),
+            modeToggleButton(!studioMode, "Classic", () =>
+              setStudioMode(false),
+            ),
           ),
           studioMode
             ? React.createElement(ReelView, {
