@@ -549,6 +549,13 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await expect(modeShell).toBeVisible();
   await expect(page.getByTestId("studio-view")).toBeVisible();
   await expect(page.getByTestId("classic-view")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => getComputedStyle(document.documentElement).scrollbarGutter,
+      ),
+    )
+    .toContain("stable");
   await page.waitForTimeout(220);
   const studioBox = await modeShell.boundingBox();
 

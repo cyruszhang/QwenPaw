@@ -453,6 +453,30 @@ function CreatorPage(): any {
 
   const [loadingProjects, setLoadingProjects] = React.useState(false);
 
+  React.useEffect(() => {
+    // Reserve the vertical scrollbar gutter even when Studio is short.
+    // Classic often overflows vertically; without this, the viewport width
+    // changes on mode switch and the centered project shell subtly shifts.
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootGutter = root.style.getPropertyValue("scrollbar-gutter");
+    const previousBodyGutter = body.style.getPropertyValue("scrollbar-gutter");
+    root.style.setProperty("scrollbar-gutter", "stable");
+    body.style.setProperty("scrollbar-gutter", "stable");
+    return () => {
+      if (previousRootGutter) {
+        root.style.setProperty("scrollbar-gutter", previousRootGutter);
+      } else {
+        root.style.removeProperty("scrollbar-gutter");
+      }
+      if (previousBodyGutter) {
+        body.style.setProperty("scrollbar-gutter", previousBodyGutter);
+      } else {
+        body.style.removeProperty("scrollbar-gutter");
+      }
+    };
+  }, []);
+
   const reloadStatus = React.useCallback(async () => {
     try {
       const s = await apiGet<Status>("/creator/status");
