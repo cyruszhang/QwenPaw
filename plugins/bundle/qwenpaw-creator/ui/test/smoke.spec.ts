@@ -543,12 +543,17 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await page.getByText("Old Man & The Sea").click();
   const modeShell = page.getByTestId("creator-mode-shell");
   await expect(modeShell).toBeVisible();
+  await expect(page.getByTestId("studio-view")).toBeVisible();
+  await expect(page.getByTestId("classic-view")).toHaveCount(0);
   await page.waitForTimeout(220);
   const studioBox = await modeShell.boundingBox();
 
   await page.getByRole("button", { name: "Classic", exact: true }).click();
   const classicBox = await modeShell.boundingBox();
   expect(classicBox?.width ?? 0).toBeCloseTo(studioBox?.width ?? 0, 0);
+  await expect(page.getByTestId("studio-view")).toHaveCount(1);
+  await expect(page.getByTestId("studio-view")).toBeHidden();
+  await expect(page.getByTestId("classic-view")).toBeVisible();
   await expect(page.getByText("Meta settings")).toBeVisible();
   await expect(page.getByText("Storyboard", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run anchors" })).toBeVisible();
@@ -560,6 +565,9 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Run final" })).toBeVisible();
   await expect(page.getByText("Animate missing")).toHaveCount(0);
   await page.screenshot({ path: shot("04-classic.png"), fullPage: true });
+  await page.getByRole("button", { name: "✨ Studio", exact: true }).click();
+  await expect(page.getByTestId("studio-view")).toBeVisible();
+  await expect(page.getByTestId("classic-view")).toBeHidden();
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
 });
 

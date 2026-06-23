@@ -1099,6 +1099,7 @@ function ProjectPane({
   // "The Reel" Studio view (new fluid UX) vs the classic stage accordion.
   // Studio is the default; the classic panel stays one click away.
   const [studioMode, setStudioMode] = React.useState(true);
+  const [classicMounted, setClassicMounted] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [activeStage, setActiveStage] = React.useState<string | null>(null);
   const [pendingSceneRun, setPendingSceneRun] = React.useState<{
@@ -1829,6 +1830,11 @@ function ProjectPane({
       },
       label,
     );
+  const openClassicMode = () => {
+    setClassicMounted(true);
+    setStudioMode(false);
+  };
+  const openStudioMode = () => setStudioMode(true);
 
   return React.createElement(
     Card,
@@ -2026,88 +2032,101 @@ function ProjectPane({
                 background: "#fff",
               },
             },
-            modeToggleButton(studioMode, "✨ Studio", () =>
-              setStudioMode(true),
-            ),
-            modeToggleButton(!studioMode, "Classic", () =>
-              setStudioMode(false),
-            ),
+            modeToggleButton(studioMode, "✨ Studio", openStudioMode),
+            modeToggleButton(!studioMode, "Classic", openClassicMode),
           ),
-          studioMode
-            ? React.createElement(ReelView, {
-                key: `reel-${pid}`,
-                pid,
-                draft,
-                projStatus,
-                liveProgress,
-                forecast,
-                busy,
-                activeStage,
-                pendingSceneRun,
-                onRunStage,
-                onRunOne: (sid: string) =>
-                  onRunStage("2", { only_scene: sid, overwrite: true }),
-                onRunStageAllParallel,
-                onRerollScenes: (ids: string[]) =>
-                  onRunStageAllParallel("2", true, ids),
-                // A Director edit re-shoots the frame AND re-animates the
-                // motion so the playing clip stays in sync — one
-                // coordinated run, and Stop still halts before Stage 3.
-                onRerollScenesFull: async (ids: string[]) => {
-                  const r2 = await onRunStageAllParallel("2", true, ids);
-                  if (!r2?.cancelled) {
-                    await onRunStageAllParallel("3", true, ids);
-                  }
+          React.createElement(
+            "div",
+            {
+              "data-testid": "studio-view",
+              hidden: !studioMode,
+              style: { display: studioMode ? "block" : "none" },
+            },
+            React.createElement(ReelView, {
+              key: `reel-${pid}`,
+              pid,
+              draft,
+              projStatus,
+              liveProgress,
+              forecast,
+              busy,
+              activeStage,
+              pendingSceneRun,
+              onRunStage,
+              onRunOne: (sid: string) =>
+                onRunStage("2", { only_scene: sid, overwrite: true }),
+              onRunStageAllParallel,
+              onRerollScenes: (ids: string[]) =>
+                onRunStageAllParallel("2", true, ids),
+              // A Director edit re-shoots the frame AND re-animates the
+              // motion so the playing clip stays in sync — one coordinated
+              // run, and Stop still halts before Stage 3.
+              onRerollScenesFull: async (ids: string[]) => {
+                const r2 = await onRunStageAllParallel("2", true, ids);
+                if (!r2?.cancelled) {
+                  await onRunStageAllParallel("3", true, ids);
+                }
+              },
+              onDirector,
+              onSaveDraft,
+              onCancel,
+              onSwitchClassic: openClassicMode,
+            }),
+          ),
+          classicMounted
+            ? React.createElement(
+                "div",
+                {
+                  "data-testid": "classic-view",
+                  hidden: studioMode,
+                  style: { display: studioMode ? "none" : "block" },
                 },
-                onDirector,
-                onSaveDraft,
-                onCancel,
-                onSwitchClassic: () => setStudioMode(false),
-              })
-            : React.createElement(DraftPanel, {
-                key: `draft-${pid}`,
-                pid,
-                draft,
-                styles,
-                projStatus,
-                busy,
-                activeStage,
-                pendingSceneRun,
-                forecast,
-                status,
-                onRunStage,
-                onRunStageAllParallel,
-                onAutofix,
-                onDirector,
-                onSaveDraft,
-                onPatchScene,
-                onSelectTake,
-                onReload: reload,
-                onAddAnchor: (kind: AnchorKind) =>
-                  setAnchorEditor({
-                    open: true,
-                    mode: "add",
-                    kind,
-                    id: "",
-                    description: "",
-                  }),
-                onEditAnchor: (kind: AnchorKind, a: any) =>
-                  setAnchorEditor({
-                    open: true,
-                    mode: "update",
-                    kind,
-                    id: a.id,
-                    description: a.description || "",
-                  }),
-                onDeleteAnchor,
-                onEditScene: (sceneId: string) => {
-                  const sc = (draft.scenes || []).find(
-                    (s: any) => s.id === sceneId,
-                  );
-                  if (sc) setSceneEditor(sc);
-                },
-                liveProgress,
-              }),
+                React.createElement(DraftPanel, {
+                  key: `draft-${pid}`,
+                  pid,
+                  draft,
+                  styles,
+                  projStatus,
+                  busy,
+                  activeStage,
+                  pendingSceneRun,
+                  forecast,
+                  status,
+                  onRunStage,
+                  onRunStageAllParallel,
+                  onAutofix,
+                  onDirector,
+                  onSaveDraft,
+                  onPatchScene,
+                  onSelectTake,
+                  onReload: reload,
+                  onAddAnchor: (kind: AnchorKind) =>
+                    setAnchorEditor({
+                      open: true,
+                      mode: "add",
+                      kind,
+                      id: "",
+                      description: "",
+                    }),
+                  onEditAnchor: (kind: AnchorKind, a: any) =>
+                    setAnchorEditor({
+                      open: true,
+                      mode: "update",
+                      kind,
+                      id: a.id,
+                      description: a.description || "",
+                    }),
+                  onDeleteAnchor,
+                  onEditScene: (sceneId: string) => {
+                    const sc = (draft.scenes || []).find(
+                      (s: any) => s.id === sceneId,
+                    );
+                    if (sc) setSceneEditor(sc);
+                  },
+                  liveProgress,
+                }),
+              )
+            : null,
         )
       : null,
 
