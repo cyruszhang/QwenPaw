@@ -59,10 +59,27 @@ const {
   CheckCircleOutlined,
   ExclamationCircleOutlined,
   VideoCameraOutlined,
+  AppstoreOutlined,
+  OrderedListOutlined,
+  ExportOutlined,
+  RightOutlined,
+  AudioOutlined,
+  SettingOutlined,
 } = antdIcons;
 const FoldIcon = MenuFoldOutlined ?? FileTextOutlined;
 const UnfoldIcon = MenuUnfoldOutlined ?? FileTextOutlined;
 const PreviewIcon = EyeOutlined ?? PictureOutlined;
+const StudioModeIcon =
+  AppstoreOutlined ?? VideoCameraOutlined ?? PlayCircleOutlined;
+const ClassicModeIcon = OrderedListOutlined ?? FileTextOutlined;
+const ReelHeaderIcon = VideoCameraOutlined ?? PlayCircleOutlined;
+const HeaderTitleIcon = PictureOutlined ?? FileTextOutlined;
+const OpenClassicIcon = ExportOutlined ?? ClassicModeIcon;
+const ForwardIcon = RightOutlined ?? PlayCircleOutlined;
+const DirectorIcon = EditOutlined ?? VideoCameraOutlined ?? FileTextOutlined;
+const SceneScopeIcon = ReelHeaderIcon;
+const DictateIcon = AudioOutlined ?? SoundOutlined ?? FileTextOutlined;
+const AdvancedOptionsIcon = SettingOutlined ?? FileTextOutlined;
 const AnchorStageIcon =
   PushpinOutlined ?? CloudUploadOutlined ?? FileTextOutlined;
 const NarrationStageIcon = SoundOutlined ?? FileTextOutlined;
@@ -611,7 +628,37 @@ function HeaderBar({ status, onRefresh }: any) {
       React.createElement(
         Title,
         { level: 3, style: { margin: 0 } },
-        "🎬 Storybook Creator",
+        React.createElement(
+          "span",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 9,
+              letterSpacing: 0,
+            },
+          },
+          React.createElement(
+            "span",
+            {
+              style: {
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#fff3e6",
+                color: "#f97316",
+                border: "1px solid #ffd3a8",
+                fontSize: 16,
+                flex: "0 0 auto",
+              },
+            },
+            React.createElement(HeaderTitleIcon),
+          ),
+          "Storybook Creator",
+        ),
       ),
       React.createElement(
         Paragraph,
@@ -1805,29 +1852,45 @@ function ProjectPane({
   const modeToggleButton = (
     active: boolean,
     label: string,
+    Icon: any,
     onClick: () => void,
   ) =>
     React.createElement(
       "button",
       {
         type: "button",
+        role: "tab",
+        "aria-label": label,
         "aria-pressed": active,
+        "aria-selected": active,
         onClick,
         style: {
           appearance: "none",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
           border: `1px solid ${active ? "#ff7a00" : "transparent"}`,
-          borderRadius: 6,
+          borderRadius: 7,
           background: active ? "#ff7a00" : "transparent",
           color: active ? "#1f2328" : "#2b2f36",
           cursor: "pointer",
           fontSize: 13,
           fontWeight: active ? 700 : 600,
-          height: 30,
-          lineHeight: "28px",
-          padding: "0 12px",
+          height: 32,
+          letterSpacing: 0,
+          lineHeight: 1,
+          padding: "0 13px",
           whiteSpace: "nowrap",
         },
       },
+      React.createElement(Icon, {
+        "aria-hidden": true,
+        style: {
+          fontSize: 14,
+          lineHeight: 1,
+        },
+      }),
       label,
     );
   const openClassicMode = () => {
@@ -2024,16 +2087,27 @@ function ProjectPane({
               style: {
                 display: "inline-flex",
                 alignItems: "center",
-                gap: 3,
-                marginBottom: 12,
-                padding: 3,
-                border: "1px solid #ececec",
-                borderRadius: 8,
+                gap: 4,
+                marginBottom: 14,
+                padding: 4,
+                border: "1px solid #e5e7eb",
+                borderRadius: 10,
                 background: "#fff",
+                boxShadow: "0 1px 2px rgba(16, 24, 40, 0.04)",
               },
             },
-            modeToggleButton(studioMode, "✨ Studio", openStudioMode),
-            modeToggleButton(!studioMode, "Classic", openClassicMode),
+            modeToggleButton(
+              studioMode,
+              "Studio",
+              StudioModeIcon,
+              openStudioMode,
+            ),
+            modeToggleButton(
+              !studioMode,
+              "Classic",
+              ClassicModeIcon,
+              openClassicMode,
+            ),
           ),
           React.createElement(
             "div",
@@ -4499,17 +4573,17 @@ function MakeFilmHero({
         size: "large",
         loading: busy && activeStage === "decompose",
         disabled: !ready,
+        icon: React.createElement(StudioModeIcon),
         onClick: onMakeFilm || onSubmit,
-        children: "✨ Make my film",
+        children: "Make my film",
       }),
       React.createElement(Button, {
         type: "text",
         size: "small",
+        icon: React.createElement(AdvancedOptionsIcon),
         onClick: () => setShowAdvanced(!showAdvanced),
         style: { color: "#8b96b4" },
-        children: showAdvanced
-          ? "Hide advanced options ▲"
-          : "⚙ Advanced options ▾",
+        children: showAdvanced ? "Hide advanced options" : "Advanced options",
       }),
     ),
     !ready
@@ -5349,7 +5423,9 @@ function DirectorChat({ draft, onDirector }: any) {
       title: React.createElement(
         Space,
         { size: 6 },
-        React.createElement("span", null, "🎬"),
+        React.createElement(DirectorIcon, {
+          style: { color: "#6d28d9", fontSize: 15 },
+        }),
         React.createElement(AntText, { strong: true }, "Director"),
         React.createElement(
           AntText,
@@ -6650,16 +6726,70 @@ function ReelView({
         },
       },
       React.createElement(
-        Space,
-        { size: 10 },
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: 11,
+            minWidth: 0,
+            flexWrap: "wrap",
+          },
+        },
         React.createElement(
-          "span",
-          { style: { fontSize: 18, fontWeight: 700 } },
-          "🎬 The Reel",
+          "div",
+          {
+            style: {
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              color: "#f8fafc",
+              flex: "0 0 auto",
+            },
+          },
+          React.createElement(
+            "span",
+            {
+              style: {
+                width: 26,
+                height: 26,
+                borderRadius: 8,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(249, 115, 22, 0.14)",
+                border: "1px solid rgba(249, 115, 22, 0.35)",
+                color: "#fb923c",
+                fontSize: 15,
+                flex: "0 0 auto",
+              },
+            },
+            React.createElement(ReelHeaderIcon),
+          ),
+          React.createElement(
+            "span",
+            {
+              style: {
+                fontSize: 18,
+                fontWeight: 800,
+                letterSpacing: 0,
+                lineHeight: 1,
+              },
+            },
+            "The Reel",
+          ),
         ),
         React.createElement(
           AntText,
-          { style: { color: "#8b96b4", fontSize: 12 } },
+          {
+            style: {
+              color: "#9aa4bf",
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 0,
+              lineHeight: 1.4,
+            },
+          },
           reelStatusLine,
         ),
         forecast
@@ -6690,14 +6820,32 @@ function ReelView({
             setReadyOverrideConfirm(false);
             setBudgetOpen(true);
           },
-          children: `${workflow.primaryLabel} ▸`,
+          children: React.createElement(
+            "span",
+            {
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                letterSpacing: 0,
+              },
+            },
+            workflow.primaryLabel,
+            React.createElement(ForwardIcon, { style: { fontSize: 12 } }),
+          ),
         }),
         React.createElement(Button, {
-          type: "text",
           size: "small",
+          icon: React.createElement(OpenClassicIcon),
           onClick: onSwitchClassic,
-          style: { color: "#8b96b4" },
-          children: "Classic view ↗",
+          style: {
+            background: "#151b28",
+            borderColor: "#2b3448",
+            color: "#aeb6cc",
+            fontWeight: 700,
+            letterSpacing: 0,
+          },
+          children: "Classic editor",
         }),
       ),
     ),
@@ -6846,11 +6994,10 @@ function ReelView({
         size: "small",
         type: scope === "scene" ? "primary" : "default",
         ghost: scope === "scene",
+        icon: selected ? React.createElement(SceneScopeIcon) : null,
         disabled: !selected,
         onClick: () => setScope("scene"),
-        children: selected
-          ? `🎬 ${selected.id} · ${selected.name}`
-          : "This scene",
+        children: selected ? `${selected.id} · ${selected.name}` : "This scene",
       }),
       React.createElement(Button, {
         size: "small",
@@ -6874,9 +7021,13 @@ function ReelView({
             React.createElement(Button, {
               type: listening ? "primary" : "default",
               danger: listening,
+              "aria-label": listening
+                ? "Stop dictation"
+                : "Dictate instruction",
+              icon: React.createElement(DictateIcon),
               disabled: directing,
               onClick: toggleMic,
-              children: listening ? "● rec" : "🎤",
+              children: listening ? "rec" : null,
             }),
           )
         : null,

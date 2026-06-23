@@ -453,7 +453,7 @@ test("the Director bar dictates speech into the note when supported", async ({
   await mockApi(page);
   await page.goto(harnessUrl);
   await page.getByText("Old Man & The Sea").click();
-  const mic = page.getByRole("button", { name: "🎤" });
+  const mic = page.getByRole("button", { name: "Dictate instruction" });
   await expect(mic).toBeVisible();
   await mic.click();
   await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toHaveValue(
@@ -475,7 +475,9 @@ test("the mic is hidden when the browser has no speech API", async ({
   await page.getByText("Old Man & The Sea").click();
   // The Director input is there, but no mic button (graceful fallback).
   await expect(page.getByPlaceholder(/Change scene|Direct the/i)).toBeVisible();
-  await expect(page.getByRole("button", { name: "🎤" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Dictate instruction" }),
+  ).toHaveCount(0);
 });
 
 test("a clip left stale by a frame re-shoot is flagged, not played", async ({
@@ -548,7 +550,7 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await page.waitForTimeout(220);
   const studioBox = await modeShell.boundingBox();
 
-  await page.getByRole("button", { name: "Classic", exact: true }).click();
+  await page.getByRole("tab", { name: "Classic", exact: true }).click();
   const classicBox = await modeShell.boundingBox();
   expect(classicBox?.width ?? 0).toBeCloseTo(studioBox?.width ?? 0, 0);
   await expect(page.getByTestId("studio-view")).toHaveCount(1);
@@ -565,7 +567,7 @@ test("Classic toggle restores the stage-accordion view", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Run final" })).toBeVisible();
   await expect(page.getByText("Animate missing")).toHaveCount(0);
   await page.screenshot({ path: shot("04-classic.png"), fullPage: true });
-  await page.getByRole("button", { name: "✨ Studio", exact: true }).click();
+  await page.getByRole("tab", { name: "Studio", exact: true }).click();
   await expect(page.getByTestId("studio-view")).toBeVisible();
   await expect(page.getByTestId("classic-view")).toBeHidden();
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);
