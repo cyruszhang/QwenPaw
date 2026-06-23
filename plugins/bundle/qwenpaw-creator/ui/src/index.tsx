@@ -3809,7 +3809,7 @@ function preferredContinuityEntity(draft: any, scene: any): string {
 }
 
 function looksLikeContinuityIntent(text: string): boolean {
-  return /(?:from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward|for\s+the\s+rest|keeps?\s+|continues?\s+|until\s+scene|after\s+this)/i.test(
+  return /(?:state\s+change|change\s+(?:his|her|their|the)?\s*state|from\s+(?:here|now|this\s+point)\s+on|going\s+forward|onward|for\s+the\s+rest|keeps?\s+|continues?\s+|until\s+scene|after\s+this)/i.test(
     text,
   );
 }
@@ -6028,10 +6028,25 @@ function SceneTile({
   );
 }
 
-function ReelContinuityRail({ draft, scene, onChangeState }: any) {
+function ReelContinuityRail({
+  draft,
+  scene,
+  open,
+  onToggle,
+  onChangeState,
+}: any) {
   if (!scene) return null;
   const groups = continuityGroupsForScene(draft, scene);
   const hasActiveState = groups.some((g: any) => (g.states || []).length);
+  const activeStateCount = groups.reduce(
+    (total: number, group: any) => total + (group.states || []).length,
+    0,
+  );
+  const summary = groups.length
+    ? `${groups.length} tracked · ${
+        activeStateCount > 0 ? `${activeStateCount} active` : "canonical"
+      }`
+    : "No scene anchors";
   return React.createElement(
     "div",
     {
@@ -6051,7 +6066,7 @@ function ReelContinuityRail({ draft, scene, onChangeState }: any) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: 10,
-          marginBottom: groups.length ? 10 : 0,
+          marginBottom: open && groups.length ? 10 : 0,
         },
       },
       React.createElement(
@@ -6070,19 +6085,35 @@ function ReelContinuityRail({ draft, scene, onChangeState }: any) {
           },
           hasActiveState ? "state visible" : "canonical",
         ),
+        React.createElement(
+          AntText,
+          { style: { color: "#68748d", fontSize: 12 } },
+          summary,
+        ),
       ),
-      React.createElement(Button, {
-        size: "small",
-        onClick: onChangeState,
-        style: {
-          borderColor: "#f97316",
-          color: "#ffb072",
-          background: "rgba(249,115,22,0.08)",
-        },
-        children: "Change state from here",
-      }),
+      React.createElement(
+        Space,
+        { size: 8 },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          onClick: onToggle,
+          style: { color: "#9aa4bf", fontWeight: 700 },
+          children: open ? "Hide details" : "Details",
+        }),
+        React.createElement(Button, {
+          size: "small",
+          onClick: onChangeState,
+          style: {
+            borderColor: "#f97316",
+            color: "#ffb072",
+            background: "rgba(249,115,22,0.08)",
+          },
+          children: "Change state from here",
+        }),
+      ),
     ),
-    groups.length
+    open && groups.length
       ? React.createElement(
           "div",
           { style: { display: "grid", gap: 8 } },
@@ -6165,11 +6196,13 @@ function ReelContinuityRail({ draft, scene, onChangeState }: any) {
             ),
           ),
         )
-      : React.createElement(
+      : open
+      ? React.createElement(
           AntText,
           { style: { color: "#68748d", fontSize: 12 } },
           "No referenced character, prop, or setting on this scene yet.",
-        ),
+        )
+      : null,
   );
 }
 
@@ -6205,6 +6238,7 @@ function ReelView({
   const [readyOverrideConfirm, setReadyOverrideConfirm] = React.useState(false);
   const [rendering, setRendering] = React.useState(false);
   const [continuityDraft, setContinuityDraft] = React.useState<any>(null);
+  const [continuityOpen, setContinuityOpen] = React.useState(false);
   const [continuitySaving, setContinuitySaving] = React.useState(false);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
@@ -6220,6 +6254,9 @@ function ReelView({
         (window as any).webkitSpeechRecognition
       : null;
   const speechSupported = !!SpeechRec;
+  React.useEffect(() => {
+    if (looksLikeContinuityIntent(note)) setContinuityOpen(true);
+  }, [note]);
   React.useEffect(() => {
     if (budgetOpen || !focusDirectorAfterBudget) return undefined;
     const timer = window.setTimeout(() => {
@@ -6415,6 +6452,7 @@ function ReelView({
   };
 
   const openContinuityDraft = (instruction: string = "") => {
+    setContinuityOpen(true);
     if (!selected) {
       antMessage.warning("Pick a scene first.");
       return;
@@ -6903,6 +6941,8 @@ function ReelView({
       ? React.createElement(ReelContinuityRail, {
           draft,
           scene: selected,
+          open: continuityOpen,
+          onToggle: () => setContinuityOpen((value) => !value),
           onChangeState: () => openContinuityDraft(note.trim()),
         })
       : null,

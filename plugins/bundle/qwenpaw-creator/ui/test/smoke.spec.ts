@@ -383,9 +383,11 @@ test("Reel continuity changes save the ledger and rerender affected scenes", asy
   await page.getByText("Old Man & The Sea").click();
 
   await expect(page.getByText("Continuity")).toBeVisible();
+  await expect(page.getByText("canonical state")).toHaveCount(0);
   await page
     .getByPlaceholder(/Change scene|Direct the/i)
     .fill("from here on, he carries a blue umbrella");
+  await expect(page.getByText("canonical state").first()).toBeVisible();
   await page.getByRole("button", { name: "Change state", exact: true }).click();
 
   await expect(page.getByText("Apply as ongoing continuity?")).toBeVisible();
