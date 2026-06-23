@@ -177,6 +177,20 @@ test("panel boots in the mock host and lists projects without errors", async ({
   await page.goto(harnessUrl);
 
   await expect(page.locator("#harness-error")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__menuReplacements?.[0]?.targetId ?? "",
+      ),
+    )
+    .toBe("legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook");
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as any).__menuReplacements?.[0]?.iconType ?? "",
+      ),
+    )
+    .toBe("function");
   await expect(page.getByText("Old Man & The Sea")).toBeVisible();
   await page.screenshot({ path: shot("01-project-list.png") });
   expect(errors, "uncaught page errors:\n" + errors.join("\n")).toEqual([]);

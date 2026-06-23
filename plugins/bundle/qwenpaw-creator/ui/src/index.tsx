@@ -93,12 +93,38 @@ function DirectorBoardIcon({
   size?: number;
   strokeWidth?: number;
 }): any {
+  const compact = size <= 18;
   const stroke = {
     stroke: "currentColor",
-    strokeWidth,
+    strokeWidth: compact ? 2 : strokeWidth,
     strokeLinecap: "round",
     strokeLinejoin: "round",
   };
+  if (compact) {
+    return React.createElement(
+      "svg",
+      {
+        "aria-hidden": true,
+        focusable: false,
+        width: size,
+        height: size,
+        viewBox: "0 0 24 24",
+        fill: "none",
+        style: { display: "block" },
+      },
+      React.createElement("path", {
+        d: "M5 8.5h14v9.25a1.75 1.75 0 0 1-1.75 1.75H6.75A1.75 1.75 0 0 1 5 17.75V8.5Z",
+        ...stroke,
+      }),
+      React.createElement("path", {
+        d: "m5 8.5 1.15-3.75 11.7 2.55L19 8.5",
+        ...stroke,
+      }),
+      React.createElement("path", { d: "M9.25 5.42 8.25 8.5", ...stroke }),
+      React.createElement("path", { d: "M14.2 6.5 13.2 8.5", ...stroke }),
+      React.createElement("path", { d: "M5 12h14", ...stroke }),
+    );
+  }
   return React.createElement(
     "svg",
     {
