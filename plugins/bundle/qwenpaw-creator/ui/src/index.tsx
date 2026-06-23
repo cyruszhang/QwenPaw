@@ -450,29 +450,42 @@ function CreatorPage(): any {
   const [stageRows, setStageRows] = React.useState<any[] | null>(null);
   const viewportWidth = useViewportWidth();
   const effectiveProjectsCollapsed = projectsCollapsed || viewportWidth < 900;
+  const pageRef = React.useRef<HTMLDivElement | null>(null);
 
   const [loadingProjects, setLoadingProjects] = React.useState(false);
 
   React.useEffect(() => {
-    // Reserve the vertical scrollbar gutter even when Studio is short.
-    // Classic often overflows vertically; without this, the viewport width
-    // changes on mode switch and the centered project shell subtly shifts.
-    const root = document.documentElement;
-    const body = document.body;
-    const previousRootGutter = root.style.getPropertyValue("scrollbar-gutter");
-    const previousBodyGutter = body.style.getPropertyValue("scrollbar-gutter");
-    root.style.setProperty("scrollbar-gutter", "stable");
-    body.style.setProperty("scrollbar-gutter", "stable");
+    // Reserve the vertical scrollbar gutter on the embedded host chain too.
+    // In QwenPaw the plugin may be mounted inside a nested scroll container,
+    // so document-level gutter alone still lets centered content drift when
+    // Classic is tall enough to add the scrollbar.
+    const targets: HTMLElement[] = [];
+    const addTarget = (el: HTMLElement | null | undefined) => {
+      if (el && !targets.includes(el)) targets.push(el);
+    };
+    addTarget(document.documentElement);
+    addTarget(document.body);
+    let node = pageRef.current;
+    while (node) {
+      addTarget(node);
+      if (node === document.body) break;
+      node = node.parentElement;
+    }
+
+    const previous = targets.map((el) => ({
+      el,
+      gutter: el.style.getPropertyValue("scrollbar-gutter"),
+    }));
+    targets.forEach((el) =>
+      el.style.setProperty("scrollbar-gutter", "stable both-edges"),
+    );
     return () => {
-      if (previousRootGutter) {
-        root.style.setProperty("scrollbar-gutter", previousRootGutter);
-      } else {
-        root.style.removeProperty("scrollbar-gutter");
-      }
-      if (previousBodyGutter) {
-        body.style.setProperty("scrollbar-gutter", previousBodyGutter);
-      } else {
-        body.style.removeProperty("scrollbar-gutter");
+      for (const { el, gutter } of previous) {
+        if (gutter) {
+          el.style.setProperty("scrollbar-gutter", gutter);
+        } else {
+          el.style.removeProperty("scrollbar-gutter");
+        }
       }
     };
   }, []);
@@ -534,7 +547,11 @@ function CreatorPage(): any {
 
   return React.createElement(
     "div",
-    { style: { padding: 24, maxWidth: 1560, margin: "0 auto" } },
+    {
+      ref: pageRef,
+      "data-testid": "creator-page-shell",
+      style: { padding: 24, maxWidth: 1560, margin: "0 auto" },
+    },
     React.createElement(HeaderBar, { status, onRefresh: reloadStatus }),
     React.createElement(
       "div",
