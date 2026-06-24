@@ -2209,6 +2209,14 @@ function ProjectPane({
               },
               onDirector,
               onSaveDraft,
+              onEditAnchor: (kind: AnchorKind, a: any) =>
+                setAnchorEditor({
+                  open: true,
+                  mode: "update",
+                  kind,
+                  id: a.id,
+                  description: a.description || "",
+                }),
               onCancel,
               onSwitchClassic: openClassicMode,
             }),
@@ -6151,6 +6159,7 @@ function ReelContinuityRail({
   open,
   onToggle,
   onChangeState,
+  onEditBaseline,
 }: any) {
   if (!scene) return null;
   const groups = continuityGroupsForScene(draft, scene);
@@ -6309,6 +6318,24 @@ function ReelContinuityRail({
                         "canonical state",
                       ),
                     ]),
+                onEditBaseline
+                  ? React.createElement(Button, {
+                      key: "edit-baseline",
+                      size: "small",
+                      icon: React.createElement(EditOutlined),
+                      onClick: () => onEditBaseline(group.entity),
+                      style: {
+                        height: 22,
+                        padding: "0 7px",
+                        borderColor: "#334155",
+                        background: "#151b28",
+                        color: "#cbd5e1",
+                        fontSize: 11,
+                        fontWeight: 700,
+                      },
+                      children: "Edit baseline",
+                    })
+                  : null,
               ),
             ),
           ),
@@ -6782,6 +6809,7 @@ function ReelView({
   onRerollScenesFull,
   onDirector,
   onSaveDraft,
+  onEditAnchor,
   onCancel,
   onSwitchClassic,
 }: any) {
@@ -7554,6 +7582,11 @@ function ReelView({
           open: continuityOpen,
           onToggle: () => setContinuityOpen((value) => !value),
           onChangeState: () => openContinuityDraft(note.trim()),
+          onEditBaseline: (entity: any) =>
+            onEditAnchor?.(entity.kind, {
+              id: entity.id,
+              description: entity.description,
+            }),
         })
       : null,
     // ── the strip ──
