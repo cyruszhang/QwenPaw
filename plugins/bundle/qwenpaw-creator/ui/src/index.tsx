@@ -2209,14 +2209,6 @@ function ProjectPane({
               },
               onDirector,
               onSaveDraft,
-              onEditAnchor: (kind: AnchorKind, a: any) =>
-                setAnchorEditor({
-                  open: true,
-                  mode: "update",
-                  kind,
-                  id: a.id,
-                  description: a.description || "",
-                }),
               onCancel,
               onSwitchClassic: openClassicMode,
             }),
@@ -6159,7 +6151,7 @@ function ReelContinuityRail({
   open,
   onToggle,
   onChangeState,
-  onEditBaseline,
+  onChangeEntityState,
 }: any) {
   if (!scene) return null;
   const groups = continuityGroupsForScene(draft, scene);
@@ -6318,12 +6310,12 @@ function ReelContinuityRail({
                         "canonical state",
                       ),
                     ]),
-                onEditBaseline
+                onChangeEntityState
                   ? React.createElement(Button, {
-                      key: "edit-baseline",
+                      key: "change-entity-state",
                       size: "small",
-                      icon: React.createElement(EditOutlined),
-                      onClick: () => onEditBaseline(group.entity),
+                      icon: React.createElement(PlusOutlined),
+                      onClick: () => onChangeEntityState(group.entity),
                       style: {
                         height: 22,
                         padding: "0 7px",
@@ -6333,7 +6325,9 @@ function ReelContinuityRail({
                         fontSize: 11,
                         fontWeight: 700,
                       },
-                      children: "Edit baseline",
+                      children: (group.states || []).length
+                        ? "Change state"
+                        : "Add state",
                     })
                   : null,
               ),
@@ -6809,7 +6803,6 @@ function ReelView({
   onRerollScenesFull,
   onDirector,
   onSaveDraft,
-  onEditAnchor,
   onCancel,
   onSwitchClassic,
 }: any) {
@@ -7047,28 +7040,35 @@ function ReelView({
     }
   };
 
-  const openContinuityDraft = (instruction: string = "") => {
+  const openContinuityDraft = (
+    instruction: string = "",
+    entityOverride: string = "",
+  ) => {
     setContinuityOpen(true);
-    setContinuityAdjustOpen(false);
+    const trimmedInstruction = instruction.trim();
+    setContinuityAdjustOpen(!trimmedInstruction);
     if (!selected) {
       antMessage.warning("Pick a scene first.");
       return;
     }
-    const entity = preferredContinuityEntity(draft, selected, instruction);
+    const entity =
+      entityOverride || preferredContinuityEntity(draft, selected, instruction);
     if (!entity) {
       antMessage.warning(
         "Add or reference a character, prop, or setting before changing state.",
       );
       return;
     }
-    const title = stateTitleFromInstruction(instruction);
-    const content = title || instruction.trim();
+    const title = trimmedInstruction
+      ? stateTitleFromInstruction(trimmedInstruction)
+      : "";
+    const content = title || trimmedInstruction;
     setContinuityDraft({
       entity,
       at_scene: sceneIdOf(selected),
       title,
       content,
-      note: instruction.trim(),
+      note: trimmedInstruction,
     });
   };
 
@@ -7582,11 +7582,8 @@ function ReelView({
           open: continuityOpen,
           onToggle: () => setContinuityOpen((value) => !value),
           onChangeState: () => openContinuityDraft(note.trim()),
-          onEditBaseline: (entity: any) =>
-            onEditAnchor?.(entity.kind, {
-              id: entity.id,
-              description: entity.description,
-            }),
+          onChangeEntityState: (entity: any) =>
+            openContinuityDraft(note.trim(), entity.id),
         })
       : null,
     // ── the strip ──
