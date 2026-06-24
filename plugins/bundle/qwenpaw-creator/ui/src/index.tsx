@@ -7698,17 +7698,6 @@ function ReelView({
         },
       }),
       React.createElement(Button, {
-        disabled: !selected || directing,
-        onClick: () => openContinuityDraft(note.trim()),
-        style: {
-          borderColor: "#f97316",
-          background: "#f97316",
-          color: "#111827",
-          fontWeight: 700,
-        },
-        children: "Change state",
-      }),
-      React.createElement(Button, {
         type: "primary",
         loading: directing,
         disabled: !note.trim(),

@@ -413,7 +413,7 @@ test("Reel continuity changes save the ledger and rerender affected scenes", asy
     .getByPlaceholder(/Change scene|Direct the/i)
     .fill("from here on, he carries a blue umbrella");
   await expect(page.getByText("canonical state").first()).toBeVisible();
-  await page.getByRole("button", { name: "Change state", exact: true }).click();
+  await page.getByRole("button", { name: "Change state from here" }).click();
 
   await expect(page.getByText("State change preview")).toBeVisible();
   await expect(
