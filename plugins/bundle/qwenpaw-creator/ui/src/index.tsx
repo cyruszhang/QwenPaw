@@ -2202,9 +2202,10 @@ function ProjectPane({
               // run, and Stop still halts before Stage 3.
               onRerollScenesFull: async (ids: string[]) => {
                 const r2 = await onRunStageAllParallel("2", true, ids);
-                if (!r2?.cancelled) {
-                  await onRunStageAllParallel("3", true, ids);
+                if (r2?.cancelled || r2?.failed) {
+                  return r2;
                 }
+                return onRunStageAllParallel("3", true, ids);
               },
               onDirector,
               onSaveDraft,
@@ -6324,9 +6325,162 @@ function ReelContinuityRail({
 
 function sceneSpanLabel(scenes: any[]): string {
   const ids = scenes.map(sceneIdOf).filter(Boolean);
+  return sceneIdsLabel(ids);
+}
+
+function sceneIdsLabel(ids: string[]): string {
   if (!ids.length) return "no scenes";
   if (ids.length <= 5) return ids.join(", ");
   return `${ids.slice(0, 3).join(", ")} +${ids.length - 3} more`;
+}
+
+function RerenderPlanPills({ sceneIds, hasFinal }: any) {
+  const affectedLabel = sceneIdsLabel(sceneIds || []);
+  const items = [
+    { label: `Frames ${affectedLabel}`, color: "#60a5fa" },
+    { label: `Motion ${affectedLabel}`, color: "#a78bfa" },
+    {
+      label: hasFinal ? "Final cut needs refresh" : "Review changed scenes",
+      color: hasFinal ? "#fbbf24" : "#34d399",
+    },
+  ];
+  return React.createElement(
+    "div",
+    {
+      style: {
+        display: "flex",
+        gap: 6,
+        flexWrap: "wrap",
+        marginTop: 8,
+      },
+    },
+    ...items.map((item) =>
+      React.createElement(
+        "span",
+        {
+          key: item.label,
+          style: {
+            border: `1px solid ${item.color}55`,
+            borderRadius: 999,
+            color: "#dbeafe",
+            background: `${item.color}16`,
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: "18px",
+            padding: "0 8px",
+            whiteSpace: "nowrap",
+          },
+        },
+        item.label,
+      ),
+    ),
+  );
+}
+
+function RerenderTrustTrail({ trail, onClear }: any) {
+  if (!trail) return null;
+  const status = trail.status || "running";
+  const tone =
+    status === "done"
+      ? { border: "#22c55e", label: "Updated scenes", dot: "#22c55e" }
+      : status === "error"
+      ? { border: "#ef4444", label: "Rerender paused", dot: "#ef4444" }
+      : { border: "#3b82f6", label: "Rerendering", dot: "#3b82f6" };
+  return React.createElement(
+    "div",
+    {
+      style: {
+        marginTop: 10,
+        border: `1px solid ${tone.border}55`,
+        borderLeft: `4px solid ${tone.border}`,
+        background: "#101827",
+        borderRadius: 10,
+        padding: "10px 12px",
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: 12,
+          alignItems: "start",
+        },
+      },
+      React.createElement(
+        "div",
+        { style: { minWidth: 0 } },
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: 7,
+              color: "#cbd5e1",
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: 0.2,
+              textTransform: "uppercase",
+            },
+          },
+          React.createElement("span", {
+            style: {
+              width: 7,
+              height: 7,
+              borderRadius: 999,
+              background: tone.dot,
+              boxShadow:
+                status === "running" ? `0 0 8px ${tone.dot}` : undefined,
+              flex: "0 0 auto",
+            },
+          }),
+          tone.label,
+        ),
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#f8fafc",
+              display: "block",
+              fontSize: 13,
+              fontWeight: 800,
+              marginTop: 4,
+              overflowWrap: "anywhere",
+            },
+          },
+          `${trail.entityLabel} · ${trail.before} → ${trail.after}`,
+        ),
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#9aa4bf",
+              display: "block",
+              fontSize: 12,
+              marginTop: 3,
+              overflowWrap: "anywhere",
+            },
+          },
+          trail.message,
+        ),
+        React.createElement(RerenderPlanPills, {
+          sceneIds: trail.sceneIds,
+          hasFinal: trail.hasFinal,
+        }),
+      ),
+      status === "done" || status === "error"
+        ? React.createElement(Button, {
+            size: "small",
+            type: "text",
+            onClick: onClear,
+            style: { color: "#9aa4bf" },
+            children: "Clear",
+          })
+        : null,
+    ),
+  );
 }
 
 function continuityEntityDisplayName(draft: any, entityId: string): string {
@@ -6374,13 +6528,14 @@ function StateChangePreviewCard({
   const entityLabel = continuityEntityDisplayName(draft, entity);
   const before = continuityCurrentStateLabel(draft, change);
   const after = compactText(title || content || "new state", 46);
-  const affectedLabel = sceneSpanLabel(affectedScenes || []);
+  const affectedSceneIds = (affectedScenes || [])
+    .map(sceneIdOf)
+    .filter(Boolean);
+  const affectedLabel = sceneIdsLabel(affectedSceneIds);
   const affectedCount = (affectedScenes || []).length;
   const canApply = Boolean(entity && change.at_scene && title && content);
   const planLine = affectedCount
-    ? `Affects ${affectedLabel} · re-shoots frames + motion${
-        hasFinal ? " · final cut will need refresh" : ""
-      }`
+    ? `Affects ${affectedLabel}`
     : "No downstream scene references this entity yet.";
 
   return React.createElement(
@@ -6449,6 +6604,12 @@ function StateChangePreviewCard({
           },
           planLine,
         ),
+        affectedCount
+          ? React.createElement(RerenderPlanPills, {
+              sceneIds: affectedSceneIds,
+              hasFinal,
+            })
+          : null,
       ),
       React.createElement(
         Space,
@@ -6640,6 +6801,7 @@ function ReelView({
   const [continuityOpen, setContinuityOpen] = React.useState(false);
   const [continuityAdjustOpen, setContinuityAdjustOpen] = React.useState(false);
   const [continuitySaving, setContinuitySaving] = React.useState(false);
+  const [rerenderTrail, setRerenderTrail] = React.useState<any>(null);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
   const [scope, setScope] = React.useState<"scene" | "film">("scene");
@@ -6907,6 +7069,14 @@ function ReelView({
       );
       return;
     }
+    const trailBase = {
+      entityLabel: continuityEntityDisplayName(draft, entity),
+      before: continuityCurrentStateLabel(draft, continuityDraft),
+      after: compactText(title || content, 46),
+      sceneIds: affectedIds,
+      hasFinal: workflow.hasFinal,
+    };
+    let runningTrail: any = null;
     setContinuitySaving(true);
     try {
       const change = {
@@ -6926,6 +7096,14 @@ function ReelView({
       const nextDraft = JSON.parse(JSON.stringify(draft));
       nextDraft.state_changes = [...(nextDraft.state_changes || []), change];
       await onSaveDraft?.(nextDraft, { quiet: true });
+      runningTrail = {
+        ...trailBase,
+        status: "running",
+        message: `Re-rendering ${affectedIds.length} affected scene${
+          affectedIds.length === 1 ? "" : "s"
+        }: frames, then motion.`,
+      };
+      setRerenderTrail(runningTrail);
       closeContinuityDraft();
       setNote("");
       setLog((p) => [
@@ -6940,15 +7118,47 @@ function ReelView({
           })),
         },
       ]);
-      if (onRerollScenesFull) await onRerollScenesFull(affectedIds);
-      else if (onRerollScenes) await onRerollScenes(affectedIds);
-      else for (const id of affectedIds) await onRunOne(id);
+      let rerenderResult: any = null;
+      if (onRerollScenesFull)
+        rerenderResult = await onRerollScenesFull(affectedIds);
+      else if (onRerollScenes)
+        rerenderResult = await onRerollScenes(affectedIds);
+      else for (const id of affectedIds) rerenderResult = await onRunOne(id);
+      if (rerenderResult?.cancelled || rerenderResult?.failed) {
+        setRerenderTrail({
+          ...runningTrail,
+          status: "error",
+          message: rerenderResult?.cancelled
+            ? "Stopped before all changed scenes finished. Re-shoot the affected scenes when ready."
+            : "Some changed scenes did not finish. Review the affected scenes, then re-shoot them.",
+        });
+        return;
+      }
+      setRerenderTrail({
+        ...runningTrail,
+        status: "done",
+        message: `Updated ${affectedIds.length} scene${
+          affectedIds.length === 1 ? "" : "s"
+        }. ${
+          workflow.hasFinal
+            ? "Final cut needs refresh before export."
+            : "Review the changed scenes."
+        }`,
+      });
       antMessage.success(
-        `Continuity saved; re-rendering ${affectedIds.length} affected scene${
+        `Continuity saved; updated ${affectedIds.length} affected scene${
           affectedIds.length === 1 ? "" : "s"
         }.`,
       );
     } catch (e: any) {
+      if (runningTrail) {
+        setRerenderTrail({
+          ...runningTrail,
+          status: "error",
+          message:
+            "State was saved, but the rerender did not finish. Re-shoot the affected scenes when ready.",
+        });
+      }
       antMessage.error(`Continuity update failed: ${compactApiError(e)}`);
     } finally {
       setContinuitySaving(false);
@@ -7537,6 +7747,10 @@ function ReelView({
         void direct(true);
       },
       onToggleAdjust: () => setContinuityAdjustOpen((value) => !value),
+    }),
+    React.createElement(RerenderTrustTrail, {
+      trail: rerenderTrail,
+      onClear: () => setRerenderTrail(null),
     }),
     // ── budget gate: one cost confirm before any paid render ──
     React.createElement(

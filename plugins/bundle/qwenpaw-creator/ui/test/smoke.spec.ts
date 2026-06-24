@@ -419,9 +419,9 @@ test("Reel continuity changes save the ledger and rerender affected scenes", asy
   await expect(
     page.getByText("Boy · canonical → carries a blue umbrella"),
   ).toBeVisible();
-  await expect(
-    page.getByText("Affects 00, 01, 02 · re-shoots frames + motion"),
-  ).toBeVisible();
+  await expect(page.getByText("Affects 00, 01, 02")).toBeVisible();
+  await expect(page.getByText("Frames 00, 01, 02")).toBeVisible();
+  await expect(page.getByText("Motion 00, 01, 02")).toBeVisible();
   await page.screenshot({
     path: shot("15-continuity-change.png"),
     fullPage: true,
@@ -452,6 +452,10 @@ test("Reel continuity changes save the ledger and rerender affected scenes", asy
   await expect
     .poll(() => stagePosts.filter((p) => p.stage === "3").length)
     .toBe(3);
+  await expect(page.getByText("Updated scenes")).toBeVisible();
+  await expect(
+    page.getByText("Updated 3 scenes. Review the changed scenes."),
+  ).toBeVisible();
   expect(stagePosts.map((p) => p.only_scene).sort()).toEqual([
     "00",
     "00",
