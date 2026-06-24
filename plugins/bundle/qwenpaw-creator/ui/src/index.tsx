@@ -2007,27 +2007,6 @@ function ProjectPane({
       extra: React.createElement(
         Space,
         null,
-        forecast
-          ? React.createElement(
-              Tooltip,
-              {
-                title: `Stage 0 refs ≈ $${forecast.stage_0_usd} (${
-                  forecast.breakdown?.characters ?? 0
-                } chars + ${forecast.breakdown?.props ?? 0} props + ${
-                  forecast.breakdown?.scene_refs ?? 0
-                } settings + style). Stage 2 frames ≈ $${
-                  forecast.stage_2_usd
-                } (${forecast.breakdown?.scenes ?? 0} scenes). Stage 3 I2V ≈ $${
-                  forecast.stage_3_usd
-                } (${forecast.breakdown?.scenes ?? 0} clips).`,
-              },
-              React.createElement(
-                Tag,
-                { color: "gold" },
-                `≈ $${forecast.total_usd}`,
-              ),
-            )
-          : null,
         React.createElement(Button, {
           danger: true,
           size: "small",
@@ -2887,7 +2866,7 @@ function AnchorEditModal({ editor, onCancel, onSubmit }: any) {
 
 /**
  * One-line collapsible card for each pipeline stage.
- * - Header always shows status summary + cost.
+ * - Header always shows the status summary.
  * - Body hidden when collapsed; full gallery when expanded.
  * - Has an `id` so the right-rail can scroll to it.
  */
@@ -2895,7 +2874,6 @@ function StageSection({
   id,
   stageLabel,
   summary,
-  costUsd,
   extra,
   open,
   onToggle,
@@ -2957,13 +2935,6 @@ function StageSection({
           { strong: true, style: { whiteSpace: "nowrap" } },
           stageLabel,
         ),
-        costUsd != null
-          ? React.createElement(
-              Tag,
-              { color: "gold", style: { fontSize: 11, marginInlineEnd: 0 } },
-              `≈ $${costUsd}`,
-            )
-          : null,
         React.createElement(
           AntText,
           {
@@ -7187,7 +7158,7 @@ function ReelView({
         color: "#dfe4f1",
       },
     },
-    // ── header: title + progress + cost + roll-all + classic toggle ──
+    // ── header: title + progress + roll-all + classic toggle ──
     React.createElement(
       "div",
       {
@@ -7266,13 +7237,6 @@ function ReelView({
           },
           reelStatusLine,
         ),
-        forecast
-          ? React.createElement(
-              Tag,
-              { color: "gold", style: { margin: 0 } },
-              `≈ $${forecast.total_usd}`,
-            )
-          : null,
       ),
       React.createElement(
         Space,
@@ -8023,7 +7987,6 @@ function DraftPanel({
           const done = (projStatus?.stages?.["0"]?.refs ?? []).length;
           return `${done}/${total} ready`;
         })(),
-        costUsd: forecast?.stage_0_usd,
         open: openStage === "stage-0",
         onToggle: toggleStage,
         extra: (() => {
@@ -8128,7 +8091,6 @@ function DraftPanel({
           const done = (projStatus?.stages?.["1"]?.audio ?? []).length;
           return `${done}/${narrated} voiced`;
         })(),
-        costUsd: 0,
         open: openStage === "stage-1",
         onToggle: toggleStage,
         extra: classicPrimary({
@@ -8158,7 +8120,6 @@ function DraftPanel({
           const done = (projStatus?.stages?.["2"]?.frames ?? []).length;
           return `${done}/${total} ready`;
         })(),
-        costUsd: forecast?.stage_2_usd,
         open: openStage === "stage-2",
         onToggle: toggleStage,
         extra: (() => {
@@ -8270,7 +8231,6 @@ function DraftPanel({
           const done = (projStatus?.stages?.["3"]?.shots ?? []).length;
           return `${done}/${total} moving`;
         })(),
-        costUsd: forecast?.stage_3_usd,
         open: openStage === "stage-3",
         onToggle: toggleStage,
         extra: classicPrimary({
@@ -8326,7 +8286,6 @@ function DraftPanel({
           const final = (projStatus?.stages?.["4"]?.final ?? []).length;
           return final > 0 ? "ready" : "not assembled";
         })(),
-        costUsd: 0,
         open: openStage === "stage-4",
         onToggle: toggleStage,
         extra: classicPrimary({
