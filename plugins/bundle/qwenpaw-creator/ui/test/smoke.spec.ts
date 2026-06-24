@@ -186,9 +186,13 @@ test("panel boots in the mock host and lists projects without errors", async ({
     .toBe("legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook");
   await expect
     .poll(() =>
-      page.evaluate(() => (window as any).__capturedRoutes?.[0]?.icon ?? ""),
+      page.evaluate(() => {
+        const icon = (window as any).__capturedRoutes?.[0]?.icon;
+        if (icon === "▤" || icon === "◢") return "bad-glyph";
+        return icon?.type ? "react-icon" : typeof icon;
+      }),
     )
-    .not.toBe("▤");
+    .toBe("react-icon");
   await expect
     .poll(() =>
       page.evaluate(

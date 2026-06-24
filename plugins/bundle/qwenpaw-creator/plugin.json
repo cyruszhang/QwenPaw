@@ -35,7 +35,7 @@
     "panel": {
       "path": "/plugin/qwenpaw-creator/storybook",
       "label": "Storybook Creator",
-      "icon": "◢"
+      "icon": "🎬"
     },
     "notes": "v0.2 wraps the storybook-video skill in a console panel: source upload → Stage 00 LLM decomposition → ProjectSpec editor → Stage 0a/0b/0c ref generation → HITL review → Stage 02 composition. Stage 3 (Wan I2V) and Stage 4 (ffmpeg assembly) remain CLI-only."
   }

@@ -9592,7 +9592,9 @@ const STORYBOOK_ROUTE_ID =
   "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook";
 const STORYBOOK_ROUTE_PATH = "/plugin/qwenpaw-creator/storybook";
 const STORYBOOK_ROUTE_LABEL = "Storybook Creator";
-const STORYBOOK_ROUTE_FALLBACK_ICON = "◢";
+const STORYBOOK_ROUTE_FALLBACK_ICON = React.createElement(DirectorBoardIcon, {
+  size: 18,
+});
 
 class QwenPawCreatorPlugin {
   readonly id = "qwenpaw-creator";
