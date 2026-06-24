@@ -189,10 +189,12 @@ test("panel boots in the mock host and lists projects without errors", async ({
       page.evaluate(() => {
         const icon = (window as any).__capturedRoutes?.[0]?.icon;
         if (icon === "▤" || icon === "◢") return "bad-glyph";
-        return icon?.type ? "react-icon" : typeof icon;
+        return icon?.type && icon?.props?.size === 20
+          ? "director-board-20"
+          : typeof icon;
       }),
     )
-    .toBe("react-icon");
+    .toBe("director-board-20");
   await expect
     .poll(() =>
       page.evaluate(

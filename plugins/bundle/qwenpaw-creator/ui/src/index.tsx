@@ -87,48 +87,18 @@ const FinalStageIcon =
   CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
 
 function DirectorBoardIcon({
-  size = 16,
+  size = 20,
   strokeWidth = 1.8,
 }: {
   size?: number;
   strokeWidth?: number;
 }): any {
-  const compact = size <= 18;
   const stroke = {
     stroke: "currentColor",
-    strokeWidth: compact ? 2 : strokeWidth,
+    strokeWidth,
     strokeLinecap: "round",
     strokeLinejoin: "round",
   };
-  if (compact) {
-    return React.createElement(
-      "svg",
-      {
-        "aria-hidden": true,
-        focusable: false,
-        width: size,
-        height: size,
-        viewBox: "0 0 24 24",
-        fill: "none",
-        style: { display: "block" },
-      },
-      React.createElement("path", {
-        d: "M6 10.5h12v7.1c0 .77-.63 1.4-1.4 1.4H7.4c-.77 0-1.4-.63-1.4-1.4v-7.1Z",
-        ...stroke,
-      }),
-      React.createElement("path", {
-        d: "m5.5 9.5 1.25-4 11.75 2.6-1.25 2.4H6.1",
-        ...stroke,
-      }),
-      React.createElement("path", { d: "M10 6.2 8.7 10.5", ...stroke }),
-      React.createElement("path", { d: "M13.9 7.05 12.7 10.5", ...stroke }),
-      React.createElement("path", {
-        d: "M11 13.25v2.75l2.6-1.38L11 13.25Z",
-        fill: "currentColor",
-        stroke: "none",
-      }),
-    );
-  }
   return React.createElement(
     "svg",
     {
@@ -154,6 +124,13 @@ function DirectorBoardIcon({
     React.createElement("path", { d: "M4.25 12.55h15.5", ...stroke }),
     React.createElement("path", { d: "M8 16h5.6", ...stroke }),
   );
+}
+
+function StorybookSidebarIcon(): any {
+  return React.createElement(DirectorBoardIcon, {
+    size: 20,
+    strokeWidth: 1.8,
+  });
 }
 
 // ── auth helpers ─────────────────────────────────────────────────────
@@ -9593,7 +9570,8 @@ const STORYBOOK_ROUTE_ID =
 const STORYBOOK_ROUTE_PATH = "/plugin/qwenpaw-creator/storybook";
 const STORYBOOK_ROUTE_LABEL = "Storybook Creator";
 const STORYBOOK_ROUTE_FALLBACK_ICON = React.createElement(DirectorBoardIcon, {
-  size: 18,
+  size: 20,
+  strokeWidth: 1.8,
 });
 
 class QwenPawCreatorPlugin {
@@ -9606,7 +9584,7 @@ class QwenPawCreatorPlugin {
       location: "primary.settings",
       parentId: "plugins-group",
       label: STORYBOOK_ROUTE_LABEL,
-      icon: DirectorBoardIcon,
+      icon: StorybookSidebarIcon,
       route: STORYBOOK_ROUTE_ID,
       order: 50,
     });
