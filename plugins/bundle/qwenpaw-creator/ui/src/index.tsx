@@ -3824,16 +3824,19 @@ function draftContinuityEntities(draft: any): any[] {
       id: String(c.id || "").trim(),
       kind: "character",
       label: humanizeId(c.id),
+      description: String(c.description || ""),
     })),
     ...props.map((p: any) => ({
       id: String(p.id || "").trim(),
       kind: "prop",
       label: humanizeId(p.id),
+      description: String(p.description || ""),
     })),
     ...refs.map((r: any) => ({
       id: String(r.id || "").trim(),
       kind: "scene_ref",
       label: humanizeId(r.id),
+      description: String(r.description || ""),
     })),
   ].filter((e: any) => e.id);
 }
@@ -3888,10 +3891,66 @@ function affectedScenesForContinuityChange(
   });
 }
 
-function preferredContinuityEntity(draft: any, scene: any): string {
+function continuityEntityMatchesText(entity: any, text: string): boolean {
+  const haystack = String(text || "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+  if (!haystack) return false;
+  const description = String(entity?.description || "")
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+  const needles = [
+    entity?.id,
+    entity?.label,
+    humanizeId(entity?.id || ""),
+    entity?.description,
+  ]
+    .map((value) =>
+      String(value || "")
+        .toLowerCase()
+        .replace(/[_-]+/g, " ")
+        .trim(),
+    )
+    .filter(Boolean);
+  if (needles.some((needle) => haystack.includes(needle))) return true;
+  if (
+    entity?.kind === "character" &&
+    /\bold\s+man\b/.test(haystack) &&
+    /\b(?:elderly|older|aged|weathered)\b/.test(description)
+  ) {
+    return true;
+  }
+  if (
+    entity?.kind === "character" &&
+    /\bboy\b/.test(haystack) &&
+    /\b(?:boy|young)\b/.test(description)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function preferredContinuityEntity(
+  draft: any,
+  scene: any,
+  instruction: string = "",
+): string {
   const sceneIds = sceneContinuityEntityIds(scene);
+  const entities = draftContinuityEntities(draft);
+  const byId = new Map(entities.map((entity: any) => [entity.id, entity]));
+  const sceneEntities = sceneIds
+    .map((id) => byId.get(id) || { id, label: humanizeId(id) })
+    .filter(Boolean);
+  const matchedSceneEntity = sceneEntities.find((entity: any) =>
+    continuityEntityMatchesText(entity, instruction),
+  );
+  if (matchedSceneEntity?.id) return matchedSceneEntity.id;
+  const matchedAnyEntity = entities.find((entity: any) =>
+    continuityEntityMatchesText(entity, instruction),
+  );
+  if (matchedAnyEntity?.id) return matchedAnyEntity.id;
   if (sceneIds.length) return sceneIds[0];
-  return draftContinuityEntities(draft)[0]?.id || "";
+  return entities[0]?.id || "";
 }
 
 function looksLikeContinuityIntent(text: string): boolean {
@@ -6292,6 +6351,289 @@ function ReelContinuityRail({
   );
 }
 
+function sceneSpanLabel(scenes: any[]): string {
+  const ids = scenes.map(sceneIdOf).filter(Boolean);
+  if (!ids.length) return "no scenes";
+  if (ids.length <= 5) return ids.join(", ");
+  return `${ids.slice(0, 3).join(", ")} +${ids.length - 3} more`;
+}
+
+function continuityEntityDisplayName(draft: any, entityId: string): string {
+  const entity = draftContinuityEntities(draft).find(
+    (e: any) => e.id === entityId,
+  );
+  return entity?.label || humanizeId(entityId) || entityId;
+}
+
+function continuityCurrentStateLabel(draft: any, change: any): string {
+  const active = activeStatesForChange(
+    draft?.state_changes || [],
+    String(change?.entity || ""),
+    String(change?.at_scene || ""),
+  );
+  if (!active.length) return "canonical";
+  return compactText(
+    active
+      .map((state: any) => state.title || state.id)
+      .filter(Boolean)
+      .join(", "),
+    42,
+  );
+}
+
+function StateChangePreviewCard({
+  draft,
+  change,
+  affectedScenes,
+  entityOptions,
+  sceneOptions,
+  adjustOpen,
+  saving,
+  hasFinal,
+  onPatch,
+  onApply,
+  onCancel,
+  onSceneOnly,
+  onToggleAdjust,
+}: any) {
+  if (!change) return null;
+  const entity = String(change.entity || "");
+  const title = String(change.title || "").trim();
+  const content = String(change.content || "").trim();
+  const entityLabel = continuityEntityDisplayName(draft, entity);
+  const before = continuityCurrentStateLabel(draft, change);
+  const after = compactText(title || content || "new state", 46);
+  const affectedLabel = sceneSpanLabel(affectedScenes || []);
+  const affectedCount = (affectedScenes || []).length;
+  const canApply = Boolean(entity && change.at_scene && title && content);
+  const planLine = affectedCount
+    ? `Affects ${affectedLabel} · re-shoots frames + motion${
+        hasFinal ? " · final cut will need refresh" : ""
+      }`
+    : "No downstream scene references this entity yet.";
+
+  return React.createElement(
+    "div",
+    {
+      style: {
+        marginTop: 10,
+        border: "1px solid rgba(249,115,22,0.35)",
+        borderLeft: "4px solid #f97316",
+        background: "#111722",
+        borderRadius: 10,
+        padding: "10px 12px",
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) auto",
+          gap: 12,
+          alignItems: "start",
+        },
+      },
+      React.createElement(
+        "div",
+        { style: { minWidth: 0 } },
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#fed7aa",
+              display: "block",
+              fontSize: 11,
+              fontWeight: 800,
+              letterSpacing: 0.2,
+              textTransform: "uppercase",
+            },
+          },
+          "State change preview",
+        ),
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: "#f8fafc",
+              display: "block",
+              fontSize: 14,
+              fontWeight: 800,
+              marginTop: 3,
+              overflowWrap: "anywhere",
+            },
+          },
+          `${entityLabel} · ${before} → ${after}`,
+        ),
+        React.createElement(
+          AntText,
+          {
+            style: {
+              color: affectedCount ? "#aeb6cc" : "#fbbf24",
+              display: "block",
+              fontSize: 12,
+              marginTop: 4,
+              overflowWrap: "anywhere",
+            },
+          },
+          planLine,
+        ),
+      ),
+      React.createElement(
+        Space,
+        { size: 8, wrap: true, style: { justifyContent: "flex-end" } },
+        React.createElement(Button, {
+          size: "small",
+          type: "text",
+          onClick: onCancel,
+          style: { color: "#9aa4bf" },
+          children: "Cancel",
+        }),
+        React.createElement(Button, {
+          size: "small",
+          onClick: onToggleAdjust,
+          style: {
+            background: "#151b28",
+            borderColor: "#334155",
+            color: "#dbeafe",
+          },
+          children: adjustOpen ? "Hide options" : "Adjust scope",
+        }),
+        React.createElement(Button, {
+          size: "small",
+          type: "primary",
+          loading: saving,
+          disabled: !canApply || !affectedCount,
+          onClick: onApply,
+          style: { background: "#f97316" },
+          children: "Apply change",
+        }),
+      ),
+    ),
+    adjustOpen
+      ? React.createElement(
+          "div",
+          {
+            style: {
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px solid rgba(148,163,184,0.22)",
+            },
+          },
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "grid",
+                gridTemplateColumns: "minmax(180px, 1fr) minmax(160px, 0.75fr)",
+                gap: 10,
+              },
+            },
+            React.createElement(
+              Form.Item,
+              {
+                label: React.createElement(
+                  AntText,
+                  { style: { color: "#cbd5e1" } },
+                  "Entity",
+                ),
+                style: { marginBottom: 10 },
+              },
+              React.createElement(Select, {
+                value: change.entity,
+                options: entityOptions,
+                showSearch: true,
+                optionFilterProp: "label",
+                style: { width: "100%" },
+                onChange: (entity: string) => onPatch({ entity }),
+              }),
+            ),
+            React.createElement(
+              Form.Item,
+              {
+                label: React.createElement(
+                  AntText,
+                  { style: { color: "#cbd5e1" } },
+                  "Starts",
+                ),
+                style: { marginBottom: 10 },
+              },
+              React.createElement(Select, {
+                value: change.at_scene,
+                options: sceneOptions,
+                showSearch: true,
+                optionFilterProp: "label",
+                style: { width: "100%" },
+                onChange: (at_scene: string) => onPatch({ at_scene }),
+              }),
+            ),
+          ),
+          React.createElement(
+            Form.Item,
+            {
+              label: React.createElement(
+                AntText,
+                { style: { color: "#cbd5e1" } },
+                "State label",
+              ),
+              style: { marginBottom: 10 },
+            },
+            React.createElement(Input, {
+              value: change.title,
+              placeholder: "carrying blue umbrella",
+              onChange: (e: any) => onPatch({ title: e.target.value }),
+            }),
+          ),
+          React.createElement(
+            Form.Item,
+            {
+              label: React.createElement(
+                AntText,
+                { style: { color: "#cbd5e1" } },
+                "Prompt fact",
+              ),
+              style: { marginBottom: 10 },
+            },
+            React.createElement(TextArea, {
+              rows: 2,
+              value: change.content,
+              placeholder:
+                "Lin Hao carries a blue umbrella in every referenced scene.",
+              onChange: (e: any) =>
+                onPatch({ content: e.target.value, note: e.target.value }),
+            }),
+          ),
+          React.createElement(
+            "div",
+            {
+              style: {
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 10,
+                alignItems: "center",
+              },
+            },
+            React.createElement(
+              AntText,
+              { style: { color: "#6f7a96", fontSize: 11 } },
+              affectedCount
+                ? `${affectedCount} scene${
+                    affectedCount === 1 ? "" : "s"
+                  } will be re-rendered.`
+                : "Pick an entity used by later scenes to create a carry-forward state.",
+            ),
+            React.createElement(Button, {
+              size: "small",
+              onClick: onSceneOnly,
+              disabled: saving,
+              children: "Make scene-only edit",
+            }),
+          ),
+        )
+      : null,
+  );
+}
+
 function ReelView({
   pid,
   draft,
@@ -6325,6 +6667,7 @@ function ReelView({
   const [rendering, setRendering] = React.useState(false);
   const [continuityDraft, setContinuityDraft] = React.useState<any>(null);
   const [continuityOpen, setContinuityOpen] = React.useState(false);
+  const [continuityAdjustOpen, setContinuityAdjustOpen] = React.useState(false);
   const [continuitySaving, setContinuitySaving] = React.useState(false);
   // Director scope: "scene" targets the selected tile (default — click a
   // tile, talk to it); "film" lets one instruction touch the whole story.
@@ -6491,6 +6834,12 @@ function ReelView({
         continuityDraft.at_scene,
       )
     : [];
+  const closeContinuityDraft = () => {
+    setContinuityDraft(null);
+    setContinuityAdjustOpen(false);
+  };
+  const patchContinuityDraft = (patch: any) =>
+    setContinuityDraft((cur: any) => (cur ? { ...cur, ...patch } : cur));
 
   const toggleMic = () => {
     if (!speechSupported) return;
@@ -6539,11 +6888,12 @@ function ReelView({
 
   const openContinuityDraft = (instruction: string = "") => {
     setContinuityOpen(true);
+    setContinuityAdjustOpen(false);
     if (!selected) {
       antMessage.warning("Pick a scene first.");
       return;
     }
-    const entity = preferredContinuityEntity(draft, selected);
+    const entity = preferredContinuityEntity(draft, selected, instruction);
     if (!entity) {
       antMessage.warning(
         "Add or reference a character, prop, or setting before changing state.",
@@ -6605,7 +6955,7 @@ function ReelView({
       const nextDraft = JSON.parse(JSON.stringify(draft));
       nextDraft.state_changes = [...(nextDraft.state_changes || []), change];
       await onSaveDraft?.(nextDraft, { quiet: true });
-      setContinuityDraft(null);
+      closeContinuityDraft();
       setNote("");
       setLog((p) => [
         ...p,
@@ -7206,6 +7556,24 @@ function ReelView({
         ? `Talking to scene ${selected.id}. I edit its script, then re-shoot its frame + motion. Click another tile to direct it, or switch to “Whole film”.`
         : "Talking to the whole film. I edit the script of the scenes you mean, then re-shoot their frame + motion.",
     ),
+    React.createElement(StateChangePreviewCard, {
+      draft,
+      change: continuityDraft,
+      affectedScenes: affectedContinuityScenes,
+      entityOptions: continuityEntityOptions,
+      sceneOptions: continuitySceneOptions,
+      adjustOpen: continuityAdjustOpen,
+      saving: continuitySaving,
+      hasFinal: workflow.hasFinal,
+      onPatch: patchContinuityDraft,
+      onApply: () => void applyContinuityDraft(),
+      onCancel: closeContinuityDraft,
+      onSceneOnly: () => {
+        closeContinuityDraft();
+        void direct(true);
+      },
+      onToggleAdjust: () => setContinuityAdjustOpen((value) => !value),
+    }),
     // ── budget gate: one cost confirm before any paid render ──
     React.createElement(
       Modal,
@@ -7320,191 +7688,6 @@ function ReelView({
                 })
               : null,
           ),
-    ),
-    React.createElement(
-      Modal,
-      {
-        open: Boolean(continuityDraft),
-        title: "Apply as ongoing continuity?",
-        okText: "Apply continuity change",
-        confirmLoading: continuitySaving,
-        onCancel: () => setContinuityDraft(null),
-        onOk: () => void applyContinuityDraft(),
-        footer: [
-          React.createElement(Button, {
-            key: "cancel",
-            onClick: () => setContinuityDraft(null),
-            children: "Cancel",
-          }),
-          React.createElement(Button, {
-            key: "scene",
-            disabled: !note.trim() || continuitySaving,
-            onClick: () => {
-              setContinuityDraft(null);
-              void direct(true);
-            },
-            children: "Make scene-only edit",
-          }),
-          React.createElement(Button, {
-            key: "apply",
-            type: "primary",
-            loading: continuitySaving,
-            onClick: () => void applyContinuityDraft(),
-            style: { background: "#f97316" },
-            children: "Apply continuity change",
-          }),
-        ],
-        width: 660,
-      },
-      continuityDraft
-        ? React.createElement(
-            Space,
-            { direction: "vertical", size: 14, style: { width: "100%" } },
-            React.createElement(
-              Paragraph,
-              { type: "secondary", style: { marginBottom: 0 } },
-              "Confirm before updating the timeline ledger. This state will carry forward until another state change removes or resets it.",
-            ),
-            React.createElement(
-              Row,
-              { gutter: 12 },
-              React.createElement(
-                Col,
-                { span: 14 },
-                React.createElement(
-                  Form.Item,
-                  { label: "Entity", style: { marginBottom: 0 } },
-                  React.createElement(Select, {
-                    value: continuityDraft.entity,
-                    options: continuityEntityOptions,
-                    showSearch: true,
-                    optionFilterProp: "label",
-                    style: { width: "100%" },
-                    onChange: (entity: string) =>
-                      setContinuityDraft((cur: any) => ({ ...cur, entity })),
-                  }),
-                ),
-              ),
-              React.createElement(
-                Col,
-                { span: 10 },
-                React.createElement(
-                  Form.Item,
-                  { label: "Starts", style: { marginBottom: 0 } },
-                  React.createElement(Select, {
-                    value: continuityDraft.at_scene,
-                    options: continuitySceneOptions,
-                    showSearch: true,
-                    optionFilterProp: "label",
-                    style: { width: "100%" },
-                    onChange: (at_scene: string) =>
-                      setContinuityDraft((cur: any) => ({
-                        ...cur,
-                        at_scene,
-                      })),
-                  }),
-                ),
-              ),
-            ),
-            React.createElement(
-              Form.Item,
-              {
-                label: "State title",
-                extra:
-                  "Short chip label shown in Reel; also becomes the state id.",
-                style: { marginBottom: 0 },
-              },
-              React.createElement(Input, {
-                value: continuityDraft.title,
-                placeholder: "carrying blue umbrella",
-                onChange: (e: any) =>
-                  setContinuityDraft((cur: any) => ({
-                    ...cur,
-                    title: e.target.value,
-                  })),
-              }),
-            ),
-            React.createElement(
-              Form.Item,
-              {
-                label: "Prompt fact",
-                extra:
-                  "This exact fact is injected into later frame and motion prompts.",
-                style: { marginBottom: 0 },
-              },
-              React.createElement(TextArea, {
-                rows: 3,
-                value: continuityDraft.content,
-                placeholder:
-                  "Lin Hao carries a blue umbrella in every referenced scene.",
-                onChange: (e: any) =>
-                  setContinuityDraft((cur: any) => ({
-                    ...cur,
-                    content: e.target.value,
-                    note: e.target.value,
-                  })),
-              }),
-            ),
-            React.createElement(
-              "div",
-              {
-                style: {
-                  display: "grid",
-                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                  gap: 10,
-                },
-              },
-              React.createElement(
-                Card,
-                { size: "small", bodyStyle: { padding: 12 } },
-                React.createElement(
-                  AntText,
-                  { strong: true, style: { display: "block" } },
-                  "Starts",
-                ),
-                React.createElement(
-                  AntText,
-                  { type: "secondary" },
-                  continuityDraft.at_scene,
-                ),
-              ),
-              React.createElement(
-                Card,
-                { size: "small", bodyStyle: { padding: 12 } },
-                React.createElement(
-                  AntText,
-                  { strong: true, style: { display: "block" } },
-                  "Affects",
-                ),
-                React.createElement(
-                  AntText,
-                  { type: "secondary" },
-                  affectedContinuityScenes.length
-                    ? affectedContinuityScenes.map(sceneIdOf).join(", ")
-                    : "no scenes",
-                ),
-              ),
-              React.createElement(
-                Card,
-                { size: "small", bodyStyle: { padding: 12 } },
-                React.createElement(
-                  AntText,
-                  { strong: true, style: { display: "block" } },
-                  "Will re-render",
-                ),
-                React.createElement(
-                  AntText,
-                  { type: "secondary" },
-                  `${affectedContinuityScenes.length} frame${
-                    affectedContinuityScenes.length === 1 ? "" : "s"
-                  } · ${affectedContinuityScenes.length} clip${
-                    affectedContinuityScenes.length === 1 ? "" : "s"
-                  }`,
-                ),
-              ),
-            ),
-          )
-        : null,
     ),
   );
 }

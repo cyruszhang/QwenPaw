@@ -415,14 +415,25 @@ test("Reel continuity changes save the ledger and rerender affected scenes", asy
   await expect(page.getByText("canonical state").first()).toBeVisible();
   await page.getByRole("button", { name: "Change state", exact: true }).click();
 
-  await expect(page.getByText("Apply as ongoing continuity?")).toBeVisible();
-  await expect(page.getByText("00, 01, 02")).toBeVisible();
+  await expect(page.getByText("State change preview")).toBeVisible();
+  await expect(
+    page.getByText("Boy · canonical → carries a blue umbrella"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Affects 00, 01, 02 · re-shoots frames + motion"),
+  ).toBeVisible();
+  await page.screenshot({
+    path: shot("15-continuity-change.png"),
+    fullPage: true,
+  });
+  await expect(page.getByText("Prompt fact")).toHaveCount(0);
+  await page.getByRole("button", { name: "Adjust scope" }).click();
+  await expect(page.getByText("Prompt fact")).toBeVisible();
   await expect(
     page.locator('input[value="carries a blue umbrella"]'),
   ).toBeVisible();
-  await page.screenshot({ path: shot("15-continuity-change.png") });
 
-  await page.getByRole("button", { name: "Apply continuity change" }).click();
+  await page.getByRole("button", { name: "Apply change" }).click();
   await expect.poll(() => savedDraft?.state_changes?.length || 0).toBe(1);
   expect(savedDraft.state_changes[0]).toMatchObject({
     entity: "boy",
