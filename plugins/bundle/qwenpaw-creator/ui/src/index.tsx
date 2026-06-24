@@ -73,7 +73,6 @@ const StudioModeIcon =
   AppstoreOutlined ?? VideoCameraOutlined ?? PlayCircleOutlined;
 const ClassicModeIcon = OrderedListOutlined ?? FileTextOutlined;
 const ReelHeaderIcon = VideoCameraOutlined ?? PlayCircleOutlined;
-const HeaderTitleIcon = PictureOutlined ?? FileTextOutlined;
 const OpenClassicIcon = ExportOutlined ?? ClassicModeIcon;
 const ForwardIcon = RightOutlined ?? PlayCircleOutlined;
 const DirectorIcon = EditOutlined ?? VideoCameraOutlined ?? FileTextOutlined;
@@ -86,6 +85,53 @@ const NarrationStageIcon = SoundOutlined ?? FileTextOutlined;
 const MotionStageIcon = VideoCameraOutlined ?? PlayCircleOutlined;
 const FinalStageIcon =
   CheckCircleOutlined ?? CheckCircleTwoTone ?? ScissorOutlined;
+
+function DirectorBoardIcon({
+  size = 20,
+  strokeWidth = 1.8,
+}: {
+  size?: number;
+  strokeWidth?: number;
+}): any {
+  const stroke = {
+    stroke: "currentColor",
+    strokeWidth,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
+  return React.createElement(
+    "svg",
+    {
+      "aria-hidden": true,
+      focusable: false,
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      style: { display: "block" },
+    },
+    React.createElement("path", {
+      d: "M4.25 9h15.5v9.25a1.5 1.5 0 0 1-1.5 1.5H5.75a1.5 1.5 0 0 1-1.5-1.5V9Z",
+      ...stroke,
+    }),
+    React.createElement("path", {
+      d: "m4.25 9 1.2-4.2a1.5 1.5 0 0 1 1.9-1l10.8 3.08A1.9 1.9 0 0 1 19.75 9",
+      ...stroke,
+    }),
+    React.createElement("path", { d: "M8.25 4.15 6.8 9", ...stroke }),
+    React.createElement("path", { d: "M12.2 5.28 10.8 9", ...stroke }),
+    React.createElement("path", { d: "M16.15 6.4 14.8 9", ...stroke }),
+    React.createElement("path", { d: "M4.25 12.55h15.5", ...stroke }),
+    React.createElement("path", { d: "M8 16h5.6", ...stroke }),
+  );
+}
+
+function StorybookSidebarIcon(): any {
+  return React.createElement(DirectorBoardIcon, {
+    size: 20,
+    strokeWidth: 1.8,
+  });
+}
 
 // ── auth helpers ─────────────────────────────────────────────────────
 
@@ -675,7 +721,7 @@ function HeaderBar({ status, onRefresh }: any) {
             style: {
               display: "inline-flex",
               alignItems: "center",
-              gap: 9,
+              gap: 10,
               letterSpacing: 0,
             },
           },
@@ -683,20 +729,19 @@ function HeaderBar({ status, onRefresh }: any) {
             "span",
             {
               style: {
-                width: 28,
-                height: 28,
-                borderRadius: 8,
+                width: 32,
+                height: 32,
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                background: "#fff3e6",
-                color: "#f97316",
-                border: "1px solid #ffd3a8",
-                fontSize: 16,
+                color: "#202124",
                 flex: "0 0 auto",
               },
             },
-            React.createElement(HeaderTitleIcon),
+            React.createElement(DirectorBoardIcon, {
+              size: 32,
+              strokeWidth: 1.9,
+            }),
           ),
           "Storybook Creator",
         ),
@@ -9520,18 +9565,51 @@ function CreatorPageWithBoundary(): any {
   );
 }
 
+const STORYBOOK_ROUTE_ID =
+  "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook";
+const STORYBOOK_ROUTE_PATH = "/plugin/qwenpaw-creator/storybook";
+const STORYBOOK_ROUTE_LABEL = "Storybook Creator";
+const STORYBOOK_ROUTE_FALLBACK_ICON = React.createElement(DirectorBoardIcon, {
+  size: 20,
+  strokeWidth: 1.8,
+});
+
 class QwenPawCreatorPlugin {
   readonly id = "qwenpaw-creator";
+  private replaceSidebarMenu(): boolean {
+    const menu = (window.QwenPaw as any).menu;
+    if (!menu?.replace) return false;
+    menu.replace(this.id, STORYBOOK_ROUTE_ID, {
+      id: STORYBOOK_ROUTE_ID,
+      location: "primary.settings",
+      parentId: "plugins-group",
+      label: STORYBOOK_ROUTE_LABEL,
+      icon: StorybookSidebarIcon,
+      route: STORYBOOK_ROUTE_ID,
+      order: 50,
+    });
+    return true;
+  }
+
   setup(): void {
     window.QwenPaw.registerRoutes?.(this.id, [
       {
-        path: "/plugin/qwenpaw-creator/storybook",
+        path: STORYBOOK_ROUTE_PATH,
         component: CreatorPageWithBoundary,
-        label: "Storybook Creator",
-        icon: "🎬",
+        label: STORYBOOK_ROUTE_LABEL,
+        icon: STORYBOOK_ROUTE_FALLBACK_ICON,
         priority: 50,
       },
     ]);
+    if (this.replaceSidebarMenu()) return;
+
+    let attempts = 0;
+    const retryReplace = () => {
+      attempts += 1;
+      if (this.replaceSidebarMenu() || attempts >= 10) return;
+      window.setTimeout(retryReplace, 50);
+    };
+    window.setTimeout(retryReplace, 0);
   }
 }
 

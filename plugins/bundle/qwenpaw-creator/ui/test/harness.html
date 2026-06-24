@@ -25,6 +25,7 @@
     <script>
       // The host contract the panel bundle reads at module load.
       window.__capturedRoutes = null;
+      window.__menuReplacements = [];
       window.QwenPaw = {
         host: {
           React: window.React,
@@ -39,6 +40,16 @@
         },
         registerRoutes: function (id, routes) {
           window.__capturedRoutes = routes;
+        },
+        menu: {
+          replace: function (pluginId, targetId, item) {
+            window.__menuReplacements.push({
+              pluginId: pluginId,
+              targetId: targetId,
+              label: item && item.label,
+              iconType: item && typeof item.icon,
+            });
+          },
         },
       };
 
