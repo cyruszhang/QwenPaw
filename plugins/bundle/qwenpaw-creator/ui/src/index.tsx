@@ -113,16 +113,20 @@ function DirectorBoardIcon({
         style: { display: "block" },
       },
       React.createElement("path", {
-        d: "M5 8.5h14v9.25a1.75 1.75 0 0 1-1.75 1.75H6.75A1.75 1.75 0 0 1 5 17.75V8.5Z",
+        d: "M6 10.5h12v7.1c0 .77-.63 1.4-1.4 1.4H7.4c-.77 0-1.4-.63-1.4-1.4v-7.1Z",
         ...stroke,
       }),
       React.createElement("path", {
-        d: "m5 8.5 1.15-3.75 11.7 2.55L19 8.5",
+        d: "m5.5 9.5 1.25-4 11.75 2.6-1.25 2.4H6.1",
         ...stroke,
       }),
-      React.createElement("path", { d: "M9.25 5.42 8.25 8.5", ...stroke }),
-      React.createElement("path", { d: "M14.2 6.5 13.2 8.5", ...stroke }),
-      React.createElement("path", { d: "M5 12h14", ...stroke }),
+      React.createElement("path", { d: "M10 6.2 8.7 10.5", ...stroke }),
+      React.createElement("path", { d: "M13.9 7.05 12.7 10.5", ...stroke }),
+      React.createElement("path", {
+        d: "M11 13.25v2.75l2.6-1.38L11 13.25Z",
+        fill: "currentColor",
+        stroke: "none",
+      }),
     );
   }
   return React.createElement(
@@ -9584,31 +9588,48 @@ function CreatorPageWithBoundary(): any {
   );
 }
 
+const STORYBOOK_ROUTE_ID =
+  "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook";
+const STORYBOOK_ROUTE_PATH = "/plugin/qwenpaw-creator/storybook";
+const STORYBOOK_ROUTE_LABEL = "Storybook Creator";
+const STORYBOOK_ROUTE_FALLBACK_ICON = "◢";
+
 class QwenPawCreatorPlugin {
   readonly id = "qwenpaw-creator";
+  private replaceSidebarMenu(): boolean {
+    const menu = (window.QwenPaw as any).menu;
+    if (!menu?.replace) return false;
+    menu.replace(this.id, STORYBOOK_ROUTE_ID, {
+      id: STORYBOOK_ROUTE_ID,
+      location: "primary.settings",
+      parentId: "plugins-group",
+      label: STORYBOOK_ROUTE_LABEL,
+      icon: DirectorBoardIcon,
+      route: STORYBOOK_ROUTE_ID,
+      order: 50,
+    });
+    return true;
+  }
+
   setup(): void {
     window.QwenPaw.registerRoutes?.(this.id, [
       {
-        path: "/plugin/qwenpaw-creator/storybook",
+        path: STORYBOOK_ROUTE_PATH,
         component: CreatorPageWithBoundary,
-        label: "Storybook Creator",
-        icon: "▤",
+        label: STORYBOOK_ROUTE_LABEL,
+        icon: STORYBOOK_ROUTE_FALLBACK_ICON,
         priority: 50,
       },
     ]);
-    (window.QwenPaw as any).menu?.replace?.(
-      this.id,
-      "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
-      {
-        id: "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
-        location: "primary.settings",
-        parentId: "plugins-group",
-        label: "Storybook Creator",
-        icon: DirectorBoardIcon,
-        route: "legacy:qwenpaw-creator:plugin/qwenpaw-creator/storybook",
-        order: 50,
-      },
-    );
+    if (this.replaceSidebarMenu()) return;
+
+    let attempts = 0;
+    const retryReplace = () => {
+      attempts += 1;
+      if (this.replaceSidebarMenu() || attempts >= 10) return;
+      window.setTimeout(retryReplace, 50);
+    };
+    window.setTimeout(retryReplace, 0);
   }
 }
 
