@@ -123,6 +123,12 @@ const en = {
   "clarification.title": "The analysis needs your input",
   "clarification.submit": "Answer",
   "clarification.answerFailed": "Could not submit the answer. {detail}",
+  "plan.title": "Analysis plan",
+  "segments.aria": "Analysis milestones",
+  "segments.duration": "{seconds}s",
+  "artifacts.aria": "Generated artifacts",
+  "artifacts.title": "Artifacts",
+  "artifacts.downloadFailed": "Could not download the artifact. {detail}",
 
   // Analysis trace
   "trace.live": "Live analysis",
@@ -284,6 +290,12 @@ const zh: Record<StringKey, string> = {
   "clarification.title": "分析需要你的确认",
   "clarification.submit": "回答",
   "clarification.answerFailed": "无法提交回答。{detail}",
+  "plan.title": "分析计划",
+  "segments.aria": "分析里程碑",
+  "segments.duration": "{seconds}秒",
+  "artifacts.aria": "生成的产物",
+  "artifacts.title": "产物",
+  "artifacts.downloadFailed": "无法下载产物。{detail}",
 
   "trace.live": "实时分析",
   "trace.steps": "分析轨迹 · {count} {stepWord}",

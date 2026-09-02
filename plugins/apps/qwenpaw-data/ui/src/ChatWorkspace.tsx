@@ -36,12 +36,42 @@ interface ChatTraceItem {
   result?: QueryResult;
 }
 
+export interface SegmentView {
+  id: string;
+  title: string;
+  input?: string;
+  behavior?: string;
+  conclusion?: string;
+  artifacts: string[];
+  durationSeconds?: number;
+}
+
+export interface ArtifactView {
+  name: string;
+  path: string;
+}
+
+export interface PlanNodeView {
+  id: string;
+  name: string;
+  description?: string;
+  state?: string;
+}
+
+export interface PlanView {
+  name?: string;
+  nodes: PlanNodeView[];
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   text: string;
   activity?: string;
   trace?: ChatTraceItem[];
+  segments?: SegmentView[];
+  artifacts?: ArtifactView[];
+  plan?: PlanView | null;
   streaming?: boolean;
 }
 
@@ -55,6 +85,9 @@ export interface ChatStreamState {
   messageOrder: string[];
   toolMessageIds: Record<string, string>;
   trace: ChatTraceItem[];
+  segments: SegmentView[];
+  artifacts: ArtifactView[];
+  plan: PlanView | null;
   finalMessageId?: string;
   finalText: string;
   completed: boolean;
@@ -88,8 +121,98 @@ export function createChatStreamState(): ChatStreamState {
     messageOrder: [],
     toolMessageIds: {},
     trace: [],
+    segments: [],
+    artifacts: [],
+    plan: null,
     finalText: "",
     completed: false,
+  };
+}
+
+const SEGMENT_SPAN_RE = /<span\s+class="[^"]*">([\s\S]*?)<\/span>/g;
+
+/** BizTrace segment bodies carry Tailwind color spans; keep the inner text. */
+export function stripSegmentSpans(body: string): string {
+  return body.replace(SEGMENT_SPAN_RE, "$1");
+}
+
+function toSegmentView(raw: unknown): SegmentView | null {
+  const segment = recordValue(raw);
+  if (!segment || typeof segment.title !== "string") return null;
+  const started =
+    typeof segment.started_at === "number" ? segment.started_at : undefined;
+  const ended =
+    typeof segment.ended_at === "number" ? segment.ended_at : undefined;
+  const artifacts: string[] = [];
+  if (Array.isArray(segment.artifact)) {
+    for (const item of segment.artifact) {
+      const artifact = recordValue(item);
+      if (artifact && typeof artifact.name === "string" && artifact.name) {
+        artifacts.push(artifact.name);
+      }
+    }
+  }
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim()
+      ? stripSegmentSpans(value)
+      : undefined;
+  return {
+    id:
+      typeof segment.segment_id === "string" && segment.segment_id
+        ? segment.segment_id
+        : `${segment.title}-${started ?? ""}`,
+    title: segment.title,
+    input: text(segment.input),
+    behavior: text(segment.behavior),
+    conclusion: text(segment.conclusion),
+    artifacts,
+    durationSeconds:
+      started !== undefined && ended !== undefined && ended > started
+        ? Math.round(ended - started)
+        : undefined,
+  };
+}
+
+function toPlanView(raw: unknown): PlanView | null {
+  const snapshot = recordValue(raw);
+  if (!snapshot || !Array.isArray(snapshot.nodes)) return null;
+  const nodes: PlanNodeView[] = [];
+  for (const item of snapshot.nodes) {
+    const node = recordValue(item);
+    if (!node) continue;
+    const name =
+      typeof node.name === "string"
+        ? node.name
+        : typeof node.subject === "string"
+          ? node.subject
+          : "";
+    if (!name) continue;
+    const id =
+      typeof node.node_id === "string" && node.node_id
+        ? node.node_id
+        : typeof node.id === "string" && node.id
+          ? node.id
+          : `node-${nodes.length}`;
+    const state =
+      typeof node.state === "string"
+        ? node.state
+        : typeof node.status === "string"
+          ? node.status
+          : undefined;
+    nodes.push({
+      id,
+      name,
+      description:
+        typeof node.description === "string" && node.description
+          ? node.description
+          : undefined,
+      state,
+    });
+  }
+  if (!nodes.length) return null;
+  return {
+    name: typeof snapshot.name === "string" ? snapshot.name : undefined,
+    nodes,
   };
 }
 
@@ -380,6 +503,36 @@ export function reduceChatStreamEvent(
     }
   }
 
+  if (event.object === "segment") {
+    const view = toSegmentView((event as Record<string, unknown>).segment);
+    if (view && !next.segments.some((item) => item.id === view.id)) {
+      next = { ...next, segments: [...next.segments, view] };
+    }
+  }
+
+  if (event.object === "artifact.registered") {
+    const artifact = recordValue(
+      (event as Record<string, unknown>).artifact,
+    );
+    const path = artifact && typeof artifact.path === "string" ? artifact.path : "";
+    if (path && !next.artifacts.some((item) => item.path === path)) {
+      const name =
+        artifact && typeof artifact.name === "string" && artifact.name
+          ? artifact.name
+          : path.split("/").at(-1) || path;
+      next = { ...next, artifacts: [...next.artifacts, { name, path }] };
+    }
+  }
+
+  if (event.object === "task_status") {
+    const plan = toPlanView(
+      (event as Record<string, unknown>).graph_snapshot,
+    );
+    if (plan) {
+      next = { ...next, plan };
+    }
+  }
+
   if (event.object === "response" && event.status === "completed") {
     const final = finalAssistantMessage(event);
     const fallbackId = next.messageOrder.at(-1);
@@ -557,6 +710,9 @@ function streamMessagePatch(state: ChatStreamState): Partial<ChatMessage> {
     text: state.finalText,
     activity,
     trace: state.trace,
+    segments: state.segments,
+    artifacts: state.artifacts,
+    plan: state.plan,
     streaming: !state.completed,
   };
 }
@@ -908,6 +1064,94 @@ function AssistantBody({ text }: { text: string }) {
         </div>
       ) : null}
     </>
+  );
+}
+
+function PlanPanel({ plan }: { plan?: PlanView | null }) {
+  const t = useT();
+  if (!plan || !plan.nodes.length) return null;
+  return (
+    <details className="qwenpaw-data-plan" open>
+      <summary>
+        {t("plan.title")}
+        {plan.name ? <em> · {plan.name}</em> : null}
+      </summary>
+      <ol>
+        {plan.nodes.map((node) => (
+          <li key={node.id}>
+            <span className="qwenpaw-data-plan__name">{node.name}</span>
+            {node.state ? (
+              <i className={`qwenpaw-data-plan__state is-${node.state}`}>
+                {node.state}
+              </i>
+            ) : null}
+            {node.description ? <small>{node.description}</small> : null}
+          </li>
+        ))}
+      </ol>
+    </details>
+  );
+}
+
+function SegmentTimeline({ segments }: { segments?: SegmentView[] }) {
+  const t = useT();
+  if (!segments || !segments.length) return null;
+  return (
+    <div className="qwenpaw-data-segments" aria-label={t("segments.aria")}>
+      {segments.map((segment) => (
+        <details key={segment.id} className="qwenpaw-data-segment">
+          <summary>
+            <span>{segment.title}</span>
+            {segment.durationSeconds !== undefined ? (
+              <em>
+                {t("segments.duration", {
+                  seconds: String(segment.durationSeconds),
+                })}
+              </em>
+            ) : null}
+          </summary>
+          {segment.conclusion ? (
+            <p className="qwenpaw-data-segment__conclusion">
+              {segment.conclusion}
+            </p>
+          ) : null}
+          {segment.behavior ? <small>{segment.behavior}</small> : null}
+          {segment.artifacts.length ? (
+            <div className="qwenpaw-data-segment__artifacts">
+              {segment.artifacts.map((name) => (
+                <code key={name}>{name}</code>
+              ))}
+            </div>
+          ) : null}
+        </details>
+      ))}
+    </div>
+  );
+}
+
+function ArtifactStrip({
+  artifacts,
+  onDownload,
+}: {
+  artifacts?: ArtifactView[];
+  onDownload(artifact: ArtifactView): void;
+}) {
+  const t = useT();
+  if (!artifacts || !artifacts.length) return null;
+  return (
+    <div className="qwenpaw-data-artifacts" aria-label={t("artifacts.aria")}>
+      <span>{t("artifacts.title")}</span>
+      {artifacts.map((artifact) => (
+        <button
+          key={artifact.path}
+          type="button"
+          title={artifact.path}
+          onClick={() => onDownload(artifact)}
+        >
+          {artifact.name}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1320,6 +1564,30 @@ export function ChatWorkspace({
     }
   }
 
+  async function downloadArtifact(artifact: ArtifactView) {
+    if (!activeSessionId) return;
+    try {
+      const blob = await engine.downloadArtifact(activeSessionId, artifact.path);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = artifact.name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      void paw
+        .toast(
+          t("artifacts.downloadFailed", {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+          "error",
+        )
+        .catch(() => undefined);
+    }
+  }
+
   async function submitClarification(
     request: ClarificationRequest,
     selections: string[][],
@@ -1522,7 +1790,9 @@ export function ChatWorkspace({
                   </div>
                   {message.role === "assistant" ? (
                     <>
+                      <PlanPanel plan={message.plan} />
                       <AnalysisTrace message={message} />
+                      <SegmentTimeline segments={message.segments} />
                       {message.text ? (
                         <AssistantBody text={message.text} />
                       ) : message.streaming && !message.activity ? (
@@ -1533,6 +1803,12 @@ export function ChatWorkspace({
                           <i /> <i /> <i />
                         </div>
                       ) : null}
+                      <ArtifactStrip
+                        artifacts={message.artifacts}
+                        onDownload={(artifact) =>
+                          void downloadArtifact(artifact)
+                        }
+                      />
                     </>
                   ) : (
                     <div className="qwenpaw-data-message__body">

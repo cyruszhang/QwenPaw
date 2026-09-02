@@ -190,3 +190,81 @@ describe("replayChatTranscript", () => {
     expect(messages[1].text).toContain("模型不可用");
   });
 });
+
+describe("console-grade turn rendering", () => {
+  it("collects segments, artifacts and the plan from engine frames", () => {
+    let state = createChatStreamState();
+    state = reduceChatStreamEvent(state, {
+      object: "task_status",
+      event_type: "graph_updated",
+      graph_snapshot: {
+        name: "GMV 波动分析",
+        nodes: [
+          { node_id: "n1", name: "取数", description: "拉取指标" },
+          { node_id: "n2", name: "下钻", state: "in_progress" },
+        ],
+      },
+    } as never);
+    state = reduceChatStreamEvent(state, {
+      object: "segment",
+      segment: {
+        segment_id: "seg_1",
+        title: "取数",
+        behavior: "运行 SQL",
+        conclusion: '增长 <span class="text-green-600 font-bold">12%</span>',
+        artifact: [{ name: "chart.png" }],
+        started_at: 10,
+        ended_at: 25,
+        coverage: { start_seq: 0, end_seq: 3 },
+      },
+    } as never);
+    // duplicate segment ids collapse
+    state = reduceChatStreamEvent(state, {
+      object: "segment",
+      segment: {
+        segment_id: "seg_1",
+        title: "取数",
+        coverage: { start_seq: 0, end_seq: 3 },
+      },
+    } as never);
+    state = reduceChatStreamEvent(state, {
+      object: "artifact.registered",
+      artifact: { name: "chart.png", path: "chart.png" },
+    } as never);
+    state = reduceChatStreamEvent(state, {
+      object: "artifact.registered",
+      artifact: { name: "chart.png", path: "chart.png" },
+    } as never);
+
+    expect(state.plan?.name).toBe("GMV 波动分析");
+    expect(state.plan?.nodes.map((n) => n.state)).toEqual([
+      undefined,
+      "in_progress",
+    ]);
+    expect(state.segments).toHaveLength(1);
+    expect(state.segments[0].conclusion).toBe("增长 12%");
+    expect(state.segments[0].durationSeconds).toBe(15);
+    expect(state.segments[0].artifacts).toEqual(["chart.png"]);
+    expect(state.artifacts).toEqual([{ name: "chart.png", path: "chart.png" }]);
+  });
+
+  it("ignores malformed segment and plan payloads", () => {
+    let state = createChatStreamState();
+    state = reduceChatStreamEvent(state, {
+      object: "segment",
+      segment: { no_title: true },
+    } as never);
+    state = reduceChatStreamEvent(state, {
+      object: "task_status",
+      event_type: "graph_updated",
+      graph_snapshot: { nodes: "nope" },
+    } as never);
+    state = reduceChatStreamEvent(state, {
+      object: "artifact.registered",
+      artifact: {},
+    } as never);
+    expect(state.segments).toEqual([]);
+    expect(state.plan).toBeNull();
+    expect(state.artifacts).toEqual([]);
+  });
+});

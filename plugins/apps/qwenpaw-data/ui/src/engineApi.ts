@@ -139,6 +139,11 @@ export function createEngineApi(paw: PawAppSdk) {
           `/chats/${encodeURIComponent(chatId)}/steer`,
         { text },
       ),
+    downloadArtifact: (sessionId: string, path: string): Promise<Blob> =>
+      paw.api.download(
+        `${ENGINE_BASE}/sessions/${encodeURIComponent(sessionId)}` +
+          `/artifacts/file?path=${encodeURIComponent(path)}`,
+      ),
     answerClarification: (
       sessionId: string,
       chatId: string,
