@@ -2570,3 +2570,103 @@
     grid-template-columns: 1fr;
   }
 }
+
+.qwenpaw-data-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 2px;
+}
+.qwenpaw-data-followups button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border: 1px solid #dfe2ec;
+  border-radius: 999px;
+  color: var(--qwenpaw-data-ink);
+  background: #f7f8fb;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.qwenpaw-data-followups button:hover {
+  border-color: var(--qwenpaw-data-purple);
+  color: var(--qwenpaw-data-purple);
+}
+.qwenpaw-data-followups button b {
+  display: inline-flex;
+  color: #a4a9b6;
+}
+
+.qwenpaw-data-composer__stop {
+  position: absolute;
+  top: 13px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  color: #fff;
+  background: #d64545;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.qwenpaw-data-clarification {
+  margin: 8px 10px 2px;
+  padding: 10px 12px;
+  border: 1px solid #e4d9f7;
+  border-radius: 12px;
+  background: #faf7ff;
+}
+.qwenpaw-data-clarification header {
+  margin-bottom: 6px;
+  color: var(--qwenpaw-data-purple);
+  font-size: 13px;
+  font-weight: 600;
+}
+.qwenpaw-data-clarification__question p {
+  margin: 6px 0 2px;
+  font-size: 13.5px;
+}
+.qwenpaw-data-clarification__question small {
+  color: #7a7f8e;
+}
+.qwenpaw-data-clarification__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.qwenpaw-data-clarification__options button {
+  padding: 5px 12px;
+  border: 1px solid #dfe2ec;
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.qwenpaw-data-clarification__options button.is-selected {
+  border-color: var(--qwenpaw-data-purple);
+  color: #fff;
+  background: var(--qwenpaw-data-purple);
+}
+.qwenpaw-data-clarification footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.qwenpaw-data-clarification footer button {
+  padding: 6px 18px;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--qwenpaw-data-purple);
+  font-size: 13px;
+  cursor: pointer;
+}
+.qwenpaw-data-clarification footer button:disabled {
+  color: #aeb2be;
+  background: #eceef2;
+  cursor: default;
+}

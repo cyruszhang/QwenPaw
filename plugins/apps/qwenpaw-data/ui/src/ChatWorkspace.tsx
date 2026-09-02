@@ -1,6 +1,12 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DataSourceMetadata } from "./api";
+import {
+  createEngineApi,
+  engineSessionToChatSession,
+  type EngineApi,
+  type EngineChat,
+} from "./engineApi";
 import { ArrowUpIcon, ArrowUpRightIcon, EllipsisIcon, PinIcon } from "./icons";
 import { useLanguage, useT } from "./language";
 import { LogoMark } from "./LogoMark";
@@ -39,9 +45,6 @@ export interface ChatMessage {
   streaming?: boolean;
 }
 
-// Bare app-level session used as the fallback when dialogue management
-// (the chatSessions API) is unavailable.
-const FALLBACK_CHAT_SESSION_ID = "pawapp:qwenpaw-data";
 const SOURCE_CONTEXT_OPEN = "<qwenpaw-data-source-context>";
 const SOURCE_CONTEXT_CLOSE = "</qwenpaw-data-source-context>";
 const LEGACY_SOURCE_CONTEXT_RE =
@@ -395,6 +398,154 @@ export function reduceChatStreamEvent(
   return next;
 }
 
+export function finalizeChatStreamState(
+  state: ChatStreamState,
+  fallbackText: string,
+): ChatStreamState {
+  if (state.completed) return state;
+  const fallbackId = state.messageOrder.at(-1);
+  return {
+    ...state,
+    completed: true,
+    finalMessageId: fallbackId,
+    finalText:
+      (fallbackId && state.textByMessage[fallbackId]) || fallbackText,
+    trace: state.trace.map((item) =>
+      item.status === "running"
+        ? { ...item, status: "completed" as const }
+        : item,
+    ),
+  };
+}
+
+export interface ClarificationOption {
+  label: string;
+  description?: string;
+}
+
+export interface ClarificationQuestion {
+  question: string;
+  description?: string;
+  multiSelect: boolean;
+  options: ClarificationOption[];
+}
+
+export interface ClarificationRequest {
+  id: string;
+  title: string;
+  questions: ClarificationQuestion[];
+}
+
+/** Parse an ask_user_question plugin_call message into a clarification card. */
+export function parseClarificationRequest(
+  event: PawChatStreamEvent,
+): ClarificationRequest | null {
+  if (
+    event.object !== "message" ||
+    event.type !== "plugin_call" ||
+    event.status !== "completed"
+  ) {
+    return null;
+  }
+  const content = Array.isArray(event.content) ? event.content : [];
+  for (const item of content) {
+    const block = recordValue(item);
+    if (!block || block.type !== "data") continue;
+    const data = recordValue(block.data);
+    if (!data || data.name !== "ask_user_question") continue;
+    const callId = typeof data.call_id === "string" ? data.call_id : "";
+    if (!callId) continue;
+    let parsed: unknown = data.arguments;
+    if (typeof parsed === "string") {
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return null;
+      }
+    }
+    const args = recordValue(parsed);
+    if (!args || !Array.isArray(args.questions)) return null;
+    const questions: ClarificationQuestion[] = [];
+    for (const raw of args.questions) {
+      const question = recordValue(raw);
+      if (!question || typeof question.question !== "string") return null;
+      const options: ClarificationOption[] = [];
+      if (!Array.isArray(question.options) || question.options.length === 0) {
+        return null;
+      }
+      for (const rawOption of question.options) {
+        const option = recordValue(rawOption);
+        if (!option || typeof option.label !== "string") return null;
+        options.push({
+          label: option.label,
+          description:
+            typeof option.description === "string"
+              ? option.description
+              : undefined,
+        });
+      }
+      questions.push({
+        question: question.question,
+        description:
+          typeof question.description === "string"
+            ? question.description
+            : undefined,
+        multiSelect: question.multiSelect === true,
+        options,
+      });
+    }
+    if (!questions.length) return null;
+    return {
+      id: callId,
+      title: typeof args.title === "string" ? args.title : "",
+      questions,
+    };
+  }
+  return null;
+}
+
+
+function chatFailureError(chat: EngineChat): Error {
+  return Object.assign(new Error(chat.error?.message || "analysis failed"), {
+    code: chat.error?.code || "",
+  });
+}
+
+/** Rebuild one finished chat's transcript from its persisted event stream. */
+export async function replayChatTranscript(
+  engine: EngineApi,
+  chat: EngineChat,
+  language: Language,
+  fallbackText: string,
+): Promise<ChatMessage[]> {
+  let state = createChatStreamState();
+  for await (const event of engine.streamChatEvents(
+    chat.session_id,
+    chat.id,
+  )) {
+    if (event.object === "followup.generated") continue;
+    state = reduceChatStreamEvent(state, event, language);
+  }
+  state = finalizeChatStreamState(
+    state,
+    chat.status === "failed"
+      ? analysisErrorMessage(chatFailureError(chat), language)
+      : fallbackText,
+  );
+  return [
+    { id: `user-${chat.id}`, role: "user", text: chat.user_input },
+    {
+      id: `assistant-${chat.id}`,
+      role: "assistant",
+      text: "",
+      trace: [],
+      ...streamMessagePatch(state),
+      streaming: false,
+    },
+  ];
+}
+
+
 function streamMessagePatch(state: ChatStreamState): Partial<ChatMessage> {
   const finalId = state.finalMessageId;
   const activity = state.messageOrder
@@ -545,6 +696,7 @@ function DialogueHistory({
   activeSessionId,
   busy,
   creating,
+  showPinArchive = true,
   onCreate,
   onSelect,
   onTogglePin,
@@ -556,6 +708,7 @@ function DialogueHistory({
   activeSessionId: string;
   busy: boolean;
   creating: boolean;
+  showPinArchive?: boolean;
   onCreate(): void;
   onSelect(sessionId: string): void;
   onTogglePin(session: PawChatSession): void;
@@ -674,18 +827,20 @@ function DialogueHistory({
                         onClick={closeMenu}
                       />
                       <div className="qwenpaw-data-history__menu" role="menu">
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            onTogglePin(session);
-                          }}
-                        >
-                          {session.pinned
-                            ? t("history.unpin")
-                            : t("history.pin")}
-                        </button>
+                        {showPinArchive ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              onTogglePin(session);
+                            }}
+                          >
+                            {session.pinned
+                              ? t("history.unpin")
+                              : t("history.pin")}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           role="menuitem"
@@ -697,16 +852,18 @@ function DialogueHistory({
                         >
                           {t("history.rename")}
                         </button>
-                        <button
-                          type="button"
-                          role="menuitem"
-                          onClick={() => {
-                            closeMenu();
-                            onArchive(session);
-                          }}
-                        >
-                          {t("history.archive")}
-                        </button>
+                        {showPinArchive ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              closeMenu();
+                              onArchive(session);
+                            }}
+                          >
+                            {t("history.archive")}
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           role="menuitem"
@@ -754,6 +911,82 @@ function AssistantBody({ text }: { text: string }) {
   );
 }
 
+function ClarificationCard({
+  request,
+  onSubmit,
+}: {
+  request: ClarificationRequest;
+  onSubmit(selections: string[][]): void;
+}) {
+  const t = useT();
+  const [selections, setSelections] = useState<string[][]>(() =>
+    request.questions.map(() => []),
+  );
+
+  function toggle(questionIndex: number, label: string) {
+    setSelections((current) =>
+      current.map((selected, index) => {
+        if (index !== questionIndex) return selected;
+        const question = request.questions[questionIndex];
+        if (question.multiSelect) {
+          return selected.includes(label)
+            ? selected.filter((item) => item !== label)
+            : [...selected, label];
+        }
+        return selected.includes(label) ? [] : [label];
+      }),
+    );
+  }
+
+  const answered = selections.every((selected) => selected.length > 0);
+
+  return (
+    <div
+      className="qwenpaw-data-clarification"
+      role="group"
+      aria-label={t("clarification.aria")}
+    >
+      <header>{request.title || t("clarification.title")}</header>
+      {request.questions.map((question, questionIndex) => (
+        <div
+          key={`${questionIndex}-${question.question}`}
+          className="qwenpaw-data-clarification__question"
+        >
+          <p>{question.question}</p>
+          {question.description ? <small>{question.description}</small> : null}
+          <div className="qwenpaw-data-clarification__options">
+            {question.options.map((option) => {
+              const selected =
+                selections[questionIndex]?.includes(option.label) ?? false;
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  className={selected ? "is-selected" : ""}
+                  aria-pressed={selected}
+                  title={option.description || undefined}
+                  onClick={() => toggle(questionIndex, option.label)}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <footer>
+        <button
+          type="button"
+          disabled={!answered}
+          onClick={() => onSubmit(selections)}
+        >
+          {t("clarification.submit")}
+        </button>
+      </footer>
+    </div>
+  );
+}
+
 export function ChatWorkspace({
   paw,
   selectedSource,
@@ -775,14 +1008,17 @@ export function ChatWorkspace({
   const [restoring, setRestoring] = useState(true);
   const [creatingSession, setCreatingSession] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [followups, setFollowups] = useState<string[]>([]);
+  const [clarification, setClarification] =
+    useState<ClarificationRequest | null>(null);
+  const engine = useMemo(() => createEngineApi(paw), [paw]);
+  const activeTurnRef = useRef<{ sessionId: string; chatId: string } | null>(
+    null,
+  );
   const language = useLanguage();
   const t = useT();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const conversationRef = useRef<HTMLDivElement>(null);
-  const sourceLabel = useMemo(
-    () => selectedSource?.datasource_name || selectedSource?.datasource_id,
-    [selectedSource],
-  );
   const activeSession = sessions.find(
     (session) => session.sessionId === activeSessionId,
   );
@@ -796,18 +1032,19 @@ export function ChatWorkspace({
       })
       .catch(() => undefined);
     void Promise.all([
-      paw.chatSessions.list({ agentId: "qwenpaw-data" }),
+      engine.listSessions(),
       paw.storage.get<string>("active-chat-session", ""),
     ])
       .then(async ([available, storedSessionId]) => {
         if (cancelled) return;
-        let next = available;
+        let next = available.map(engineSessionToChatSession);
         if (next.length === 0) {
           next = [
-            await paw.chatSessions.create({
-              agentId: "qwenpaw-data",
-              name: t("history.newAnalysis"),
-            }),
+            engineSessionToChatSession(
+              await engine.createSession({
+                title: t("history.newAnalysis"),
+              }),
+            ),
           ];
         }
         if (cancelled) return;
@@ -819,21 +1056,16 @@ export function ChatWorkspace({
           : next[0].sessionId;
         setActiveSessionId(selected);
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
-        const fallback: PawChatSession = {
-          id: "legacy",
-          sessionId: FALLBACK_CHAT_SESSION_ID,
-          name: t("history.previousAnalysis"),
-          createdAt: "",
-          updatedAt: "",
-          archived: false,
-          pinned: false,
-        };
-        setSessions([fallback]);
-        setActiveSessionId(fallback.sessionId);
+        setRestoring(false);
         void paw
-          .toast(t("session.legacyFallback"), "warning")
+          .toast(
+            t("session.engineUnavailable", {
+              detail: error instanceof Error ? error.message : String(error),
+            }),
+            "warning",
+          )
           .catch(() => undefined);
       });
     return () => {
@@ -846,28 +1078,61 @@ export function ChatWorkspace({
     let cancelled = false;
     setRestoring(true);
     setMessages([]);
+    setFollowups([]);
     void paw.storage
       .set("active-chat-session", activeSessionId)
       .catch(() => undefined);
-    void paw
-      .getChatHistory({
-        agentId: "qwenpaw-data",
-        sessionId: activeSessionId,
-      })
-      .then((history) => {
+    void (async () => {
+      const chats = await engine.listChats(activeSessionId);
+      const recent = chats.slice(-20);
+      const restored: ChatMessage[] = [];
+      let runningChat: EngineChat | undefined;
+      for (const chat of recent) {
         if (cancelled) return;
-        setMessages(historyToChatMessages(history.messages, language));
-      })
-      .catch(() => {
-        if (!cancelled) {
-          void paw
-            .toast(t("session.restoreFailed"), "warning")
-            .catch(() => undefined);
+        if (chat.status === "created" || chat.status === "running") {
+          runningChat = chat;
+          restored.push(
+            { id: `user-${chat.id}`, role: "user", text: chat.user_input },
+            {
+              id: `assistant-${chat.id}`,
+              role: "assistant",
+              text: "",
+              trace: [],
+              streaming: true,
+            },
+          );
+          break;
         }
-      })
-      .finally(() => {
-        if (!cancelled) setRestoring(false);
-      });
+        restored.push(
+          ...(await replayChatTranscript(
+            engine,
+            chat,
+            language,
+            t("chat.noTextResponse"),
+          )),
+        );
+      }
+      if (cancelled) return;
+      setMessages(restored);
+      setRestoring(false);
+      if (runningChat) {
+        setSending(true);
+        void consumeChatStream(
+          activeSessionId,
+          runningChat.id,
+          `assistant-${runningChat.id}`,
+        ).finally(() => {
+          if (!cancelled) setSending(false);
+        });
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setRestoring(false);
+        void paw
+          .toast(t("session.restoreFailed"), "warning")
+          .catch(() => undefined);
+      }
+    });
     return () => {
       cancelled = true;
     };
@@ -887,10 +1152,9 @@ export function ChatWorkspace({
     if (sending || creatingSession) return;
     setCreatingSession(true);
     try {
-      const created = await paw.chatSessions.create({
-        agentId: "qwenpaw-data",
-        name: t("history.newAnalysis"),
-      });
+      const created = engineSessionToChatSession(
+        await engine.createSession({ title: t("history.newAnalysis") }),
+      );
       setSessions((current) => [created, ...current]);
       setActiveSessionId(created.sessionId);
     } catch (error) {
@@ -933,17 +1197,10 @@ export function ChatWorkspace({
     );
   }
 
-  function togglePin(session: PawChatSession) {
-    void paw.chatSessions
-      .pin(session.id, !session.pinned, { agentId: "qwenpaw-data" })
-      .then(updateSession)
-      .catch((error) => void sessionActionFailed("session.action.pin", error));
-  }
-
   function renameDialogue(session: PawChatSession, name: string) {
-    void paw.chatSessions
-      .rename(session.id, name, { agentId: "qwenpaw-data" })
-      .then(updateSession)
+    void engine
+      .renameSession(session.id, name)
+      .then((updated) => updateSession(engineSessionToChatSession(updated)))
       .catch(
         (error) => void sessionActionFailed("session.action.rename", error),
       );
@@ -965,10 +1222,9 @@ export function ChatWorkspace({
     }
     // The last dialogue is gone; keep the workspace usable with a fresh one.
     try {
-      const created = await paw.chatSessions.create({
-        agentId: "qwenpaw-data",
-        name: t("history.newAnalysis"),
-      });
+      const created = engineSessionToChatSession(
+        await engine.createSession({ title: t("history.newAnalysis") }),
+      );
       setSessions([created]);
       setActiveSessionId(created.sessionId);
     } catch (error) {
@@ -976,105 +1232,209 @@ export function ChatWorkspace({
     }
   }
 
-  function archiveDialogue(session: PawChatSession) {
-    void paw.chatSessions
-      .archive(session.id, { agentId: "qwenpaw-data" })
-      .then(() => dropDialogue(session))
-      .catch(
-        (error) => void sessionActionFailed("session.action.archive", error),
-      );
-  }
-
   function deleteDialogue(session: PawChatSession) {
-    void paw.chatSessions
-      .delete(session.id, { agentId: "qwenpaw-data" })
+    void engine
+      .deleteSession(session.id)
       .then(() => dropDialogue(session))
       .catch(
         (error) => void sessionActionFailed("session.action.delete", error),
       );
   }
 
+  async function consumeChatStream(
+    sessionId: string,
+    chatId: string,
+    assistantId: string,
+  ): Promise<void> {
+    let streamState = createChatStreamState();
+    activeTurnRef.current = { sessionId, chatId };
+
+    function applyPatch() {
+      const patch = streamMessagePatch(streamState);
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId ? { ...message, ...patch } : message,
+        ),
+      );
+    }
+
+    try {
+      for await (const event of engine.streamChatEvents(sessionId, chatId)) {
+        if (event.object === "followup.generated") {
+          const questions = event.followup?.questions ?? [];
+          if (questions.length) setFollowups(questions.slice(0, 4));
+          continue;
+        }
+        const clarificationRequest = parseClarificationRequest(event);
+        if (clarificationRequest) {
+          setClarification(clarificationRequest);
+        }
+        streamState = reduceChatStreamEvent(streamState, event, language);
+        if (event.object === "response" && event.status === "failed") {
+          const failure = recordValue(event.error);
+          streamState = finalizeChatStreamState(
+            streamState,
+            analysisErrorMessage(
+              Object.assign(
+                new Error(String(failure?.message || "analysis failed")),
+                { code: String(failure?.code || "") },
+              ),
+              language,
+            ),
+          );
+        }
+        if (event.object === "response" && event.status === "cancelled") {
+          streamState = finalizeChatStreamState(
+            streamState,
+            t("chat.stopped"),
+          );
+        }
+        if (
+          event.object === "response" &&
+          ["completed", "failed", "cancelled"].includes(event.status ?? "")
+        ) {
+          setClarification(null);
+        }
+        applyPatch();
+      }
+      if (!streamState.completed) {
+        streamState = finalizeChatStreamState(
+          streamState,
+          t("chat.noTextResponse"),
+        );
+        applyPatch();
+      }
+    } finally {
+      activeTurnRef.current = null;
+      setClarification(null);
+    }
+  }
+
+  async function stopAnalysis() {
+    const target = activeTurnRef.current;
+    if (!target) return;
+    try {
+      await engine.stopChat(target.sessionId, target.chatId);
+    } catch {
+      // The turn may already be terminal; the stream settles either way.
+    }
+  }
+
+  async function submitClarification(
+    request: ClarificationRequest,
+    selections: string[][],
+  ) {
+    const target = activeTurnRef.current;
+    if (!target) return;
+    setClarification(null);
+    try {
+      await engine.answerClarification(
+        target.sessionId,
+        target.chatId,
+        request.id,
+        request.questions.map((question, index) => ({
+          question: question.question,
+          selected_options: selections[index] ?? [],
+          custom_text: null,
+        })),
+      );
+    } catch (error) {
+      void paw
+        .toast(
+          t("clarification.answerFailed", {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+          "error",
+        )
+        .catch(() => undefined);
+    }
+  }
+
+  async function steer(text: string) {
+    const target = activeTurnRef.current;
+    if (!target) return;
+    setDraft("");
+    setMessages((current) => [
+      ...current,
+      {
+        id: `steer-${Date.now()}`,
+        role: "user",
+        text,
+      },
+    ]);
+    try {
+      await engine.steerChat(target.sessionId, target.chatId, text);
+    } catch (error) {
+      void paw
+        .toast(
+          t("chat.steerFailed", {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+          "warning",
+        )
+        .catch(() => undefined);
+    }
+  }
+
   async function submit(question: string) {
     const clean = question.trim();
-    if (!clean || sending || restoring || !activeSessionId) return;
+    if (!clean || restoring || !activeSessionId) return;
+    if (sending) {
+      // A turn is running: route the message as steering guidance.
+      if (activeTurnRef.current) await steer(clean);
+      return;
+    }
     const sessionForTurn = activeSessionId;
     const shouldNameSession =
       messages.length === 0 &&
       activeSession &&
-      DEFAULT_SESSION_NAMES.includes(activeSession.name) &&
-      activeSession.id !== "legacy";
+      DEFAULT_SESSION_NAMES.includes(activeSession.name);
     const now = Date.now();
-    const assistantId = `assistant-${now}`;
     const userMessage: ChatMessage = {
       id: `user-${now}`,
       role: "user",
       text: clean,
     };
-    const assistantMessage: ChatMessage = {
-      id: assistantId,
-      role: "assistant",
-      text: "",
-      trace: [],
-      streaming: true,
-    };
-    setMessages((current) => [...current, userMessage, assistantMessage]);
     setDraft("");
+    setFollowups([]);
     setSending(true);
     if (shouldNameSession && activeSession) {
-      void paw.chatSessions
-        .rename(activeSession.id, clean.slice(0, 64), {
-          agentId: "qwenpaw-data",
-        })
-        .then(updateSession)
+      void engine
+        .renameSession(activeSession.id, clean.slice(0, 64))
+        .then((updated) => updateSession(engineSessionToChatSession(updated)))
         .catch(() => undefined);
     }
-    let streamState = createChatStreamState();
     try {
-      const sourceContext = selectedSource
-        ? `${SOURCE_CONTEXT_OPEN}Use QwenPaw-Data source ${selectedSource.datasource_id} (${sourceLabel}) for this request unless the user explicitly asks for another source.${SOURCE_CONTEXT_CLOSE}\n\n`
-        : "";
-      for await (const event of paw.chatStream(`${sourceContext}${clean}`, {
-        agentId: "qwenpaw-data",
-        sessionId: sessionForTurn,
-      })) {
-        streamState = reduceChatStreamEvent(streamState, event, language);
-        const patch = streamMessagePatch(streamState);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId ? { ...message, ...patch } : message,
-          ),
-        );
-      }
-
-      if (!streamState.completed) {
-        const fallbackId = streamState.messageOrder.at(-1);
-        streamState = {
-          ...streamState,
-          completed: true,
-          finalMessageId: fallbackId,
-          finalText:
-            (fallbackId && streamState.textByMessage[fallbackId]) ||
-            t("chat.noTextResponse"),
-        };
-        const patch = streamMessagePatch(streamState);
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantId ? { ...message, ...patch } : message,
-          ),
-        );
-      }
-    } catch (error) {
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                text: analysisErrorMessage(error, language),
-                streaming: false,
-              }
-            : message,
-        ),
+      const chat = await engine.createChat(
+        sessionForTurn,
+        clean,
+        selectedSource?.datasource_id,
       );
+      const assistantId = `assistant-${chat.id}`;
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: assistantId,
+          role: "assistant",
+          text: "",
+          trace: [],
+          streaming: true,
+        },
+      ]);
+      await consumeChatStream(sessionForTurn, chat.id, assistantId);
+    } catch (error) {
+      const assistantId = `assistant-${now}`;
+      setMessages((current) => [
+        ...current,
+        userMessage,
+        {
+          id: assistantId,
+          role: "assistant",
+          text: analysisErrorMessage(error, language),
+          streaming: false,
+        },
+      ]);
       await paw.toast(t("chat.analysisFailed"), "error");
     } finally {
       setSending(false);
@@ -1186,12 +1546,41 @@ export function ChatWorkspace({
         </div>
 
         <form className="qwenpaw-data-composer" onSubmit={handleSubmit}>
+          {clarification ? (
+            <ClarificationCard
+              request={clarification}
+              onSubmit={(selections) =>
+                void submitClarification(clarification, selections)
+              }
+            />
+          ) : null}
+          {followups.length && !sending && !restoring ? (
+            <div
+              className="qwenpaw-data-followups"
+              aria-label={t("chat.followupsAria")}
+            >
+              {followups.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  onClick={() => void submit(question)}
+                >
+                  <span>{question}</span>
+                  <b aria-hidden="true">
+                    <ArrowUpRightIcon size={12} />
+                  </b>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             value={draft}
             rows={2}
             disabled={restoring || !activeSessionId}
-            placeholder={t("chat.placeholder")}
+            placeholder={
+              sending ? t("chat.steerPlaceholder") : t("chat.placeholder")
+            }
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
@@ -1200,13 +1589,24 @@ export function ChatWorkspace({
               }
             }}
           />
-          <button
-            type="submit"
-            disabled={!draft.trim() || sending || restoring}
-            aria-label={t("chat.send")}
-          >
-            <ArrowUpIcon size={16} />
-          </button>
+          {sending ? (
+            <button
+              type="button"
+              className="qwenpaw-data-composer__stop"
+              onClick={() => void stopAnalysis()}
+              aria-label={t("chat.stop")}
+            >
+              <span aria-hidden="true">■</span>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!draft.trim() || sending || restoring}
+              aria-label={t("chat.send")}
+            >
+              <ArrowUpIcon size={16} />
+            </button>
+          )}
           <div className="qwenpaw-data-composer__hint">{t("chat.hint")}</div>
         </form>
       </div>
@@ -1227,11 +1627,12 @@ export function ChatWorkspace({
             activeSessionId={activeSessionId}
             busy={sending || restoring}
             creating={creatingSession}
+            showPinArchive={false}
             onCreate={() => void createDialogue()}
             onSelect={switchDialogue}
-            onTogglePin={togglePin}
+            onTogglePin={() => undefined}
             onRename={renameDialogue}
-            onArchive={archiveDialogue}
+            onArchive={() => undefined}
             onDelete={deleteDialogue}
           />
         ) : null}

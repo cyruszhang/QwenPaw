@@ -113,6 +113,16 @@ const en = {
     "QwenPaw-Data may execute read-only queries. Verify important decisions.",
   "chat.noTextResponse": "The analysis completed without a text response.",
   "chat.analysisFailed": "QwenPaw-Data analysis failed",
+  "chat.stop": "Stop analysis",
+  "chat.stopped": "Analysis stopped.",
+  "chat.followupsAria": "Suggested follow-up questions",
+  "chat.steerPlaceholder":
+    "Analysis is running — send guidance to steer it",
+  "chat.steerFailed": "Could not steer the running analysis. {detail}",
+  "clarification.aria": "The analysis needs your input",
+  "clarification.title": "The analysis needs your input",
+  "clarification.submit": "Answer",
+  "clarification.answerFailed": "Could not submit the answer. {detail}",
 
   // Analysis trace
   "trace.live": "Live analysis",
@@ -152,6 +162,8 @@ const en = {
   // Session errors and toasts
   "session.legacyFallback":
     "Dialogue management is unavailable; using legacy history",
+  "session.engineUnavailable":
+    "The analysis engine is not available. {detail}",
   "session.restoreFailed": "Could not restore the analysis history",
   "session.createFailed": "Could not create a new dialogue. {detail}",
   "session.actionFailed": "Could not {action} the dialogue. {detail}",
@@ -263,6 +275,15 @@ const zh: Record<StringKey, string> = {
   "chat.hint": "QwenPaw-Data 可能执行只读查询。重要决策请自行核实。",
   "chat.noTextResponse": "分析已完成，但没有文本回复。",
   "chat.analysisFailed": "QwenPaw-Data 分析失败",
+  "chat.stop": "停止分析",
+  "chat.stopped": "分析已停止。",
+  "chat.followupsAria": "推荐追问",
+  "chat.steerPlaceholder": "分析进行中——发送提示可实时引导分析方向",
+  "chat.steerFailed": "无法引导当前分析。{detail}",
+  "clarification.aria": "分析需要你的确认",
+  "clarification.title": "分析需要你的确认",
+  "clarification.submit": "回答",
+  "clarification.answerFailed": "无法提交回答。{detail}",
 
   "trace.live": "实时分析",
   "trace.steps": "分析轨迹 · {count} {stepWord}",
@@ -297,6 +318,7 @@ const zh: Record<StringKey, string> = {
   "history.previousAnalysis": "历史分析",
 
   "session.legacyFallback": "会话管理不可用，已使用旧版历史",
+  "session.engineUnavailable": "分析引擎不可用。{detail}",
   "session.restoreFailed": "无法恢复分析历史",
   "session.createFailed": "无法创建新会话。{detail}",
   "session.actionFailed": "无法{action}会话。{detail}",

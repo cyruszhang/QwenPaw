@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 if __package__ and __package__.startswith("plugin_"):
     from .backend.config import (
+        APP_DATA_DIR,
         CONFIG_JSON_PATH,
         DataAppConfig,
         load_config,
@@ -35,6 +36,7 @@ if __package__ and __package__.startswith("plugin_"):
         set_context_env_vars,
     )
     from .backend.context_gateway import ContextGateway
+    from .backend.engine_gateway import EngineGateway
     from .backend.runtime import (
         context_python,
         context_working_dir,
@@ -46,6 +48,7 @@ else:
     if str(PLUGIN_DIR) not in sys.path:
         sys.path.insert(0, str(PLUGIN_DIR))
     from backend.config import (  # noqa: E402
+        APP_DATA_DIR,
         CONFIG_JSON_PATH,
         DataAppConfig,
         load_config,
@@ -56,6 +59,7 @@ else:
         set_context_env_vars,
     )
     from backend.context_gateway import ContextGateway  # noqa: E402
+    from backend.engine_gateway import EngineGateway  # noqa: E402
     from backend.runtime import (  # noqa: E402
         context_python,
         context_working_dir,
@@ -140,6 +144,77 @@ _context_service = app.managed_service(
     ),
 )
 _gateway = ContextGateway(_context_service, _context_token)
+
+_engine_token = secrets.token_urlsafe(32)
+ENGINE_HOME = APP_DATA_DIR / "engine"
+
+
+async def _engine_before_start() -> None:
+    """Inject CM connectivity and model defaults into the engine env.
+
+    The engine sidecar starts after the context service (registration
+    order), so the context endpoint is known here. ManagedService snapshots
+    ``os.environ`` at start time, which makes this the one place dynamic
+    values can be provided.
+    """
+    ENGINE_HOME.mkdir(parents=True, exist_ok=True)
+    if _context_service.is_external:
+        cm_url = os.getenv("QWENPAW_DATA_CONTEXT_URL", "").strip()
+        cm_token = os.getenv("QWENPAW_DATA_CONTEXT_TOKEN", "").strip()
+    else:
+        try:
+            cm_url = _context_service.base_url
+        except RuntimeError:
+            cm_url = ""
+        cm_token = _context_token
+    if cm_url:
+        os.environ["QWENPAW_DATA_CM_BASE_URL"] = cm_url
+        os.environ["QWENPAW_DATA_CLIENT_API_TOKEN"] = cm_token
+    config = load_config()
+    if config.llm.model and config.llm.api_key:
+        os.environ["QWENPAW_DATA_MODEL_PROVIDER"] = (
+            config.llm.provider or "openai"
+        )
+        os.environ["QWENPAW_DATA_MODEL_NAME"] = config.llm.model
+        os.environ["QWENPAW_DATA_MODEL_API_KEY"] = config.llm.api_key
+        if config.llm.base_url:
+            os.environ["QWENPAW_DATA_MODEL_BASE_URL"] = config.llm.base_url
+
+
+_engine_service = app.managed_service(
+    "engine",
+    command=(
+        str(context_python()),
+        "-m",
+        "uvicorn",
+        "--factory",
+        "qwenpaw_data.host.core.api.app:create_app",
+        "--host",
+        "{host}",
+        "--port",
+        "{port}",
+    ),
+    health_path="/health",
+    cwd=context_working_dir(),
+    env={
+        "QWENPAW_DATA_API_TOKEN": _engine_token,
+        "QWENPAW_DATA_HOME": str(ENGINE_HOME),
+    },
+    external_url_env="QWENPAW_DATA_ENGINE_URL",
+    mode_env="QWENPAW_DATA_ENGINE_MODE",
+    on_before_start=_engine_before_start,
+    startup_timeout=45,
+    display_name="Analysis Engine",
+    required=False,
+    capabilities=("agent-chat", "analysis-orchestration"),
+    runtime_remediation=(
+        "Install the runtime from PyPI (scripts/setup-pypi.sh) or from the "
+        "QwenPaw-Data workspace (scripts/setup-dev.sh); alternatively set "
+        "QWENPAW_DATA_ENGINE_MODE=external with QWENPAW_DATA_ENGINE_URL and "
+        "QWENPAW_DATA_ENGINE_TOKEN"
+    ),
+)
+_engine_gateway = EngineGateway(_engine_service, _engine_token)
 
 
 def _context_runtime_issue() -> dict[str, str] | None:
@@ -322,11 +397,13 @@ async def _initialize_config() -> None:
 @app.hook("startup", priority=90)
 async def _start_gateway() -> None:
     await _gateway.start()
+    await _engine_gateway.start()
 
 
 @app.hook("shutdown", priority=120)
 async def _stop_gateway() -> None:
     await _gateway.stop()
+    await _engine_gateway.stop()
 
 
 _known_source_dependencies: dict[str, str] = {}
@@ -516,6 +593,7 @@ async def status() -> dict[str, Any]:
     return {
         "app": "qwenpaw-data",
         "service": _context_service.status(),
+        "engine": _engine_service.status(),
         "runtime": {
             "ok": _runtime_issue is None,
             "issue": _runtime_issue,
@@ -615,6 +693,15 @@ async def context_proxy(path: str, request: Request) -> Any:
     if request.method == "DELETE" and _DATASOURCE_ITEM_RE.search(path):
         return await _proxy_delete_datasource(path, request)
     return await _gateway.proxy(path, request)
+
+
+@router.api_route(
+    "/engine/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+)
+async def engine_proxy(path: str, request: Request) -> Any:
+    """Forward session/chat traffic to the analysis engine sidecar."""
+    return await _engine_gateway.proxy(path, request)
 
 
 @router.get("/config")
