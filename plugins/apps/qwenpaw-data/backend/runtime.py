@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import sys
 from importlib.metadata import PackageNotFoundError, distribution
@@ -115,3 +116,63 @@ def skill_layers(root: Path) -> list[Path]:
         ):
             layers.append(candidate)
     return layers
+
+
+DATABRIDGE_MCP_NAME = "databridge"
+
+
+def provision_engine_mcp(
+    engine_home: Path,
+    cm_url: str,
+    cm_token: str,
+) -> Path | None:
+    """Upsert the DataBridge MCP entry in the engine workspace ``.mcp``.
+
+    The engine only exposes CM tools to the sandboxed agent through the
+    AgentScope ``.mcp`` file; the CLI provisions it via ``qwenpaw-data mcp
+    import`` but a managed engine has no such step, leaving agents without
+    any datasource. The entry is rewritten on every start because a managed
+    context sidecar may come up on a different port, while entries under
+    other names are preserved as user configuration.
+    """
+    if not cm_url:
+        return None
+    workspace = engine_home / "host" / "workspace"
+    workspace.mkdir(parents=True, exist_ok=True)
+    mcp_path = workspace / ".mcp"
+
+    entries: list[dict] = []
+    if mcp_path.is_file():
+        try:
+            existing = json.loads(mcp_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            existing = []
+        if isinstance(existing, list):
+            entries = [
+                item
+                for item in existing
+                if isinstance(item, dict)
+                and item.get("name") != DATABRIDGE_MCP_NAME
+            ]
+
+    headers: dict[str, str] = {}
+    if cm_token:
+        headers["Authorization"] = f"Bearer {cm_token}"
+    entries.insert(
+        0,
+        {
+            "name": DATABRIDGE_MCP_NAME,
+            "is_stateful": False,
+            "mcp_config": {
+                "type": "http_mcp",
+                "url": f"{cm_url.rstrip('/')}/mcp/v1/cm",
+                "headers": headers,
+                "timeout": 2400.0,
+            },
+            "enable_tools": None,
+            "disable_tools": None,
+            "execution_timeout": 2400.0,
+        },
+    )
+    mcp_path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    return mcp_path

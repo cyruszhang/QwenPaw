@@ -40,6 +40,7 @@ if __package__ and __package__.startswith("plugin_"):
     from .backend.runtime import (
         context_python,
         context_working_dir,
+        provision_engine_mcp,
         runtime_packages_available,
         skill_layers,
         skills_root,
@@ -63,6 +64,7 @@ else:
     from backend.runtime import (  # noqa: E402
         context_python,
         context_working_dir,
+        provision_engine_mcp,
         runtime_packages_available,
         skill_layers,
         skills_root,
@@ -170,6 +172,7 @@ async def _engine_before_start() -> None:
     if cm_url:
         os.environ["QWENPAW_DATA_CM_BASE_URL"] = cm_url
         os.environ["QWENPAW_DATA_CLIENT_API_TOKEN"] = cm_token
+        provision_engine_mcp(ENGINE_HOME, cm_url, cm_token)
     config = load_config()
     if config.llm.model and config.llm.api_key:
         os.environ["QWENPAW_DATA_MODEL_PROVIDER"] = (

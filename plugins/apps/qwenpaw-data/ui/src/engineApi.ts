@@ -171,6 +171,7 @@ export function createEngineApi(paw: PawAppSdk) {
           ? { after_sequence_number: options.afterSequenceNumber }
           : undefined;
       for await (const frame of paw.api.events(path, {
+        method: "GET",
         query,
         signal: options?.signal,
       })) {
