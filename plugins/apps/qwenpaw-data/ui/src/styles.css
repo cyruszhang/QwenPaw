@@ -2994,3 +2994,187 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* Rich segment cards (console-parity 输入/执行/结论) */
+.qwenpaw-data-segment-card {
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px 18px;
+  margin: 10px 0;
+}
+.qwenpaw-data-segment-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.qwenpaw-data-segment-card header h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.qwenpaw-data-segment-card header em {
+  font-style: normal;
+  color: var(--qwenpaw-data-muted);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.qwenpaw-data-segment-card__block {
+  margin: 10px 0;
+  border-radius: 10px;
+  background: var(--qwenpaw-data-soft);
+  padding: 10px 14px;
+}
+.qwenpaw-data-segment-card__block > b {
+  display: block;
+  font-size: 12px;
+  color: var(--qwenpaw-data-purple);
+  margin-bottom: 4px;
+}
+.qwenpaw-data-segment-card__block.is-conclusion {
+  background: #eef5ff;
+  border: 1px solid #d5e6ff;
+}
+.qwenpaw-data-segment-card__rich {
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+.qwenpaw-data-segment-card__rich p {
+  margin: 4px 0;
+}
+.qwenpaw-data-segment-card__rich ol,
+.qwenpaw-data-segment-card__rich ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+
+/* Artifact card rows (message strip + segment 关键产物) */
+.qwenpaw-data-artifact-cards {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.qwenpaw-data-artifact-cards li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 12px;
+}
+.qwenpaw-data-artifact-cards li > i {
+  color: var(--qwenpaw-data-purple);
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.qwenpaw-data-artifact-cards li > span:first-of-type {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.qwenpaw-data-artifact-cards code {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qwenpaw-data-artifact-cards small {
+  color: var(--qwenpaw-data-muted);
+  font-size: 11px;
+}
+.qwenpaw-data-artifact-cards__actions {
+  display: inline-flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.qwenpaw-data-artifact-cards__actions button {
+  border: 1px solid var(--qwenpaw-data-line);
+  background: #fff;
+  border-radius: 7px;
+  padding: 4px 7px;
+  cursor: pointer;
+  display: inline-flex;
+  color: var(--qwenpaw-data-muted);
+}
+.qwenpaw-data-artifact-cards__actions button:hover {
+  border-color: var(--qwenpaw-data-purple);
+  color: var(--qwenpaw-data-purple);
+}
+
+/* Artifact preview modal */
+.qwenpaw-data-preview-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 32, 51, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.qwenpaw-data-preview {
+  width: min(1100px, 92vw);
+  height: min(760px, 88vh);
+  background: #fff;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(24, 32, 51, 0.28);
+}
+.qwenpaw-data-preview header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--qwenpaw-data-line);
+}
+.qwenpaw-data-preview header b {
+  font-size: 13px;
+}
+.qwenpaw-data-preview header button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--qwenpaw-data-muted);
+  display: inline-flex;
+}
+.qwenpaw-data-preview iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+}
+.qwenpaw-data-preview img {
+  flex: 1;
+  object-fit: contain;
+  min-height: 0;
+  background: var(--qwenpaw-data-soft);
+}
+.qwenpaw-data-preview pre {
+  flex: 1;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-size: 12px;
+  background: var(--qwenpaw-data-soft);
+}
+
+/* Analysis-trace ticker (collapsed thinking card) */
+.qwenpaw-data-analysis-trace__ticker {
+  font-style: normal;
+  color: var(--qwenpaw-data-muted);
+  font-size: 12px;
+  margin-left: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+  display: inline-block;
+  vertical-align: bottom;
+}

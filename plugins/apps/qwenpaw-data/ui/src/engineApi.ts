@@ -184,7 +184,8 @@ export function createEngineApi(paw: PawAppSdk) {
     downloadArtifact: (sessionId: string, path: string): Promise<Blob> =>
       paw.api.download(
         `${ENGINE_BASE}/sessions/${encodeURIComponent(sessionId)}` +
-          `/artifacts/file?path=${encodeURIComponent(path)}`,
+          `/artifacts/file`,
+        { query: { path } },
       ),
     answerClarification: (
       sessionId: string,

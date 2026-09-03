@@ -7,7 +7,16 @@ import {
   type EngineApi,
   type EngineChat,
 } from "./engineApi";
-import { ArrowUpIcon, ArrowUpRightIcon, EllipsisIcon, PinIcon } from "./icons";
+import {
+  ArrowUpIcon,
+  ArrowUpRightIcon,
+  CloseIcon,
+  DownloadIcon,
+  EllipsisIcon,
+  EyeIcon,
+  FileIcon,
+  PinIcon,
+} from "./icons";
 import { useLanguage, useT } from "./language";
 import { LogoMark } from "./LogoMark";
 import { renderMarkdown, splitCompletionMarker } from "./markdown";
@@ -37,13 +46,19 @@ interface ChatTraceItem {
   result?: QueryResult;
 }
 
+export interface SegmentArtifactView {
+  name: string;
+  description?: string;
+  path?: string;
+}
+
 export interface SegmentView {
   id: string;
   title: string;
   input?: string;
   behavior?: string;
   conclusion?: string;
-  artifacts: string[];
+  artifacts: SegmentArtifactView[];
   durationSeconds?: number;
 }
 
@@ -144,12 +159,23 @@ function toSegmentView(raw: unknown): SegmentView | null {
     typeof segment.started_at === "number" ? segment.started_at : undefined;
   const ended =
     typeof segment.ended_at === "number" ? segment.ended_at : undefined;
-  const artifacts: string[] = [];
+  const artifacts: SegmentArtifactView[] = [];
   if (Array.isArray(segment.artifact)) {
     for (const item of segment.artifact) {
       const artifact = recordValue(item);
       if (artifact && typeof artifact.name === "string" && artifact.name) {
-        artifacts.push(artifact.name);
+        artifacts.push({
+          name: artifact.name,
+          description:
+            typeof artifact.description === "string" && artifact.description
+              ? artifact.description
+              : undefined,
+          path:
+            typeof artifact.relative_path === "string" &&
+            artifact.relative_path
+              ? artifact.relative_path
+              : undefined,
+        });
       }
     }
   }
@@ -777,8 +803,15 @@ function AnalysisTrace({ message }: { message: ChatMessage }) {
   const t = useT();
   const trace = message.trace || [];
   if (!message.activity && trace.length === 0) return null;
+  const tickerLine = message.streaming
+    ? (message.activity ?? "")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .pop()
+    : undefined;
   return (
-    <details className="qwenpaw-data-analysis-trace" open={message.streaming}>
+    <details className="qwenpaw-data-analysis-trace">
       <summary>
         <span className={message.streaming ? "is-running" : ""} />
         {message.streaming
@@ -789,11 +822,14 @@ function AnalysisTrace({ message }: { message: ChatMessage }) {
                 trace.length === 1 ? "trace.step" : "trace.stepPlural",
               ),
             })}
+        {tickerLine ? (
+          <em className="qwenpaw-data-analysis-trace__ticker">{tickerLine}</em>
+        ) : null}
       </summary>
       <div className="qwenpaw-data-analysis-trace__body">
         {message.activity ? (
-          <div className="qwenpaw-data-analysis-trace__narrative">
-            {message.activity}
+          <div className="qwenpaw-data-analysis-trace__narrative qwenpaw-data-message__body--rich">
+            {renderMarkdown(message.activity)}
           </div>
         ) : null}
         {trace.length ? (
@@ -1094,15 +1130,23 @@ function PlanPanel({ plan }: { plan?: PlanView | null }) {
   );
 }
 
-function SegmentTimeline({ segments }: { segments?: SegmentView[] }) {
+function SegmentCards({
+  segments,
+  onPreview,
+  onDownload,
+}: {
+  segments?: SegmentView[];
+  onPreview(artifact: SegmentArtifactView): void;
+  onDownload(artifact: SegmentArtifactView): void;
+}) {
   const t = useT();
   if (!segments || !segments.length) return null;
   return (
     <div className="qwenpaw-data-segments" aria-label={t("segments.aria")}>
       {segments.map((segment) => (
-        <details key={segment.id} className="qwenpaw-data-segment">
-          <summary>
-            <span>{segment.title}</span>
+        <section key={segment.id} className="qwenpaw-data-segment-card">
+          <header>
+            <h3>{segment.title}</h3>
             {segment.durationSeconds !== undefined ? (
               <em>
                 {t("segments.duration", {
@@ -1110,31 +1154,108 @@ function SegmentTimeline({ segments }: { segments?: SegmentView[] }) {
                 })}
               </em>
             ) : null}
-          </summary>
-          {segment.conclusion ? (
-            <p className="qwenpaw-data-segment__conclusion">
-              {segment.conclusion}
-            </p>
-          ) : null}
-          {segment.behavior ? <small>{segment.behavior}</small> : null}
-          {segment.artifacts.length ? (
-            <div className="qwenpaw-data-segment__artifacts">
-              {segment.artifacts.map((name) => (
-                <code key={name}>{name}</code>
-              ))}
+          </header>
+          {segment.input ? (
+            <div className="qwenpaw-data-segment-card__block">
+              <b>{t("segments.input")}</b>
+              <div className="qwenpaw-data-segment-card__rich">
+                {renderMarkdown(segment.input)}
+              </div>
             </div>
           ) : null}
-        </details>
+          {segment.behavior ? (
+            <div className="qwenpaw-data-segment-card__block">
+              <b>{t("segments.execution")}</b>
+              <div className="qwenpaw-data-segment-card__rich">
+                {renderMarkdown(segment.behavior)}
+              </div>
+            </div>
+          ) : null}
+          {segment.conclusion ? (
+            <div className="qwenpaw-data-segment-card__block is-conclusion">
+              <b>{t("segments.conclusion")}</b>
+              <div className="qwenpaw-data-segment-card__rich">
+                {renderMarkdown(segment.conclusion)}
+              </div>
+            </div>
+          ) : null}
+          {segment.artifacts.length ? (
+            <div className="qwenpaw-data-segment-card__block">
+              <b>{t("segments.artifacts")}</b>
+              <ul className="qwenpaw-data-artifact-cards">
+                {segment.artifacts.map((artifact) => (
+                  <li key={artifact.path ?? artifact.name}>
+                    <i aria-hidden="true">
+                      <FileIcon size={16} />
+                    </i>
+                    <span>
+                      <code>{artifact.name}</code>
+                      {artifact.description ? (
+                        <small>{artifact.description}</small>
+                      ) : null}
+                    </span>
+                    {artifact.path ? (
+                      <span className="qwenpaw-data-artifact-cards__actions">
+                        {isPreviewableArtifact(artifact.name) ? (
+                          <button
+                            type="button"
+                            title={t("artifacts.preview")}
+                            onClick={() => onPreview(artifact)}
+                          >
+                            <EyeIcon size={14} />
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          title={t("artifacts.download")}
+                          onClick={() => onDownload(artifact)}
+                        >
+                          <DownloadIcon size={14} />
+                        </button>
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
       ))}
     </div>
   );
 }
 
+const PREVIEW_IFRAME_EXTENSIONS = [".html", ".htm", ".svg"];
+const PREVIEW_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+const PREVIEW_TEXT_EXTENSIONS = [".csv", ".md", ".json", ".txt", ".log"];
+
+export function previewKindForArtifact(
+  name: string,
+): "iframe" | "image" | "text" | null {
+  const lower = name.toLowerCase();
+  if (PREVIEW_IFRAME_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return "iframe";
+  }
+  if (PREVIEW_IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return "image";
+  }
+  if (PREVIEW_TEXT_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+    return "text";
+  }
+  return null;
+}
+
+function isPreviewableArtifact(name: string): boolean {
+  return previewKindForArtifact(name) !== null;
+}
+
 function ArtifactStrip({
   artifacts,
+  onPreview,
   onDownload,
 }: {
   artifacts?: ArtifactView[];
+  onPreview(artifact: ArtifactView): void;
   onDownload(artifact: ArtifactView): void;
 }) {
   const t = useT();
@@ -1142,16 +1263,36 @@ function ArtifactStrip({
   return (
     <div className="qwenpaw-data-artifacts" aria-label={t("artifacts.aria")}>
       <span>{t("artifacts.title")}</span>
-      {artifacts.map((artifact) => (
-        <button
-          key={artifact.path}
-          type="button"
-          title={artifact.path}
-          onClick={() => onDownload(artifact)}
-        >
-          {artifact.name}
-        </button>
-      ))}
+      <ul className="qwenpaw-data-artifact-cards">
+        {artifacts.map((artifact) => (
+          <li key={artifact.path} title={artifact.path}>
+            <i aria-hidden="true">
+              <FileIcon size={16} />
+            </i>
+            <span>
+              <code>{artifact.name}</code>
+            </span>
+            <span className="qwenpaw-data-artifact-cards__actions">
+              {isPreviewableArtifact(artifact.name) ? (
+                <button
+                  type="button"
+                  title={t("artifacts.preview")}
+                  onClick={() => onPreview(artifact)}
+                >
+                  <EyeIcon size={14} />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                title={t("artifacts.download")}
+                onClick={() => onDownload(artifact)}
+              >
+                <DownloadIcon size={14} />
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -1257,6 +1398,12 @@ export function ChatWorkspace({
   const [clarification, setClarification] =
     useState<ClarificationRequest | null>(null);
   const [settlementEpoch, setSettlementEpoch] = useState(0);
+  const [preview, setPreview] = useState<{
+    name: string;
+    kind: "iframe" | "image" | "text";
+    url?: string;
+    text?: string;
+  } | null>(null);
   const engine = useMemo(() => createEngineApi(paw), [paw]);
   const activeTurnRef = useRef<{ sessionId: string; chatId: string } | null>(
     null,
@@ -1569,7 +1716,7 @@ export function ChatWorkspace({
     }
   }
 
-  async function downloadArtifact(artifact: ArtifactView) {
+  async function downloadArtifact(artifact: { name: string; path: string }) {
     if (!activeSessionId) return;
     try {
       const blob = await engine.downloadArtifact(activeSessionId, artifact.path);
@@ -1591,6 +1738,37 @@ export function ChatWorkspace({
         )
         .catch(() => undefined);
     }
+  }
+
+  async function previewArtifact(artifact: { name: string; path: string }) {
+    if (!activeSessionId) return;
+    const kind = previewKindForArtifact(artifact.name);
+    if (!kind) return;
+    try {
+      const blob = await engine.downloadArtifact(activeSessionId, artifact.path);
+      if (kind === "text") {
+        const body = await blob.text();
+        setPreview({ name: artifact.name, kind, text: body.slice(0, 200_000) });
+        return;
+      }
+      setPreview({ name: artifact.name, kind, url: URL.createObjectURL(blob) });
+    } catch (error) {
+      void paw
+        .toast(
+          t("artifacts.downloadFailed", {
+            detail: error instanceof Error ? error.message : String(error),
+          }),
+          "error",
+        )
+        .catch(() => undefined);
+    }
+  }
+
+  function closePreview() {
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
   }
 
   async function submitClarification(
@@ -1798,7 +1976,25 @@ export function ChatWorkspace({
                     <>
                       <PlanPanel plan={message.plan} />
                       <AnalysisTrace message={message} />
-                      <SegmentTimeline segments={message.segments} />
+                      <SegmentCards
+                        segments={message.segments}
+                        onPreview={(artifact) => {
+                          if (artifact.path) {
+                            void previewArtifact({
+                              name: artifact.name,
+                              path: artifact.path,
+                            });
+                          }
+                        }}
+                        onDownload={(artifact) => {
+                          if (artifact.path) {
+                            void downloadArtifact({
+                              name: artifact.name,
+                              path: artifact.path,
+                            });
+                          }
+                        }}
+                      />
                       {message.text ? (
                         <AssistantBody text={message.text} />
                       ) : message.streaming && !message.activity ? (
@@ -1811,6 +2007,9 @@ export function ChatWorkspace({
                       ) : null}
                       <ArtifactStrip
                         artifacts={message.artifacts}
+                        onPreview={(artifact) =>
+                          void previewArtifact(artifact)
+                        }
                         onDownload={(artifact) =>
                           void downloadArtifact(artifact)
                         }
@@ -1898,6 +2097,41 @@ export function ChatWorkspace({
           <div className="qwenpaw-data-composer__hint">{t("chat.hint")}</div>
         </form>
       </div>
+      {preview ? (
+        <div
+          className="qwenpaw-data-preview-overlay"
+          role="dialog"
+          aria-label={preview.name}
+          onClick={closePreview}
+        >
+          <div
+            className="qwenpaw-data-preview"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header>
+              <b>{preview.name}</b>
+              <button
+                type="button"
+                aria-label={t("preview.close")}
+                onClick={closePreview}
+              >
+                <CloseIcon size={16} />
+              </button>
+            </header>
+            {preview.kind === "iframe" && preview.url ? (
+              <iframe
+                title={preview.name}
+                src={preview.url}
+                sandbox="allow-scripts"
+              />
+            ) : preview.kind === "image" && preview.url ? (
+              <img src={preview.url} alt={preview.name} />
+            ) : (
+              <pre>{preview.text}</pre>
+            )}
+          </div>
+        </div>
+      ) : null}
       <div className="qwenpaw-data-history-rail">
         <button
           type="button"

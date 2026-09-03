@@ -4,6 +4,7 @@ import {
   createChatStreamState,
   finalizeChatStreamState,
   parseClarificationRequest,
+  previewKindForArtifact,
   reduceChatStreamEvent,
   replayChatTranscript,
 } from "./ChatWorkspace";
@@ -212,7 +213,13 @@ describe("console-grade turn rendering", () => {
         title: "取数",
         behavior: "运行 SQL",
         conclusion: '增长 <span class="text-green-600 font-bold">12%</span>',
-        artifact: [{ name: "chart.png" }],
+        artifact: [
+          {
+            name: "chart.png",
+            description: "趋势图",
+            relative_path: "graph_1/chart.png",
+          },
+        ],
         started_at: 10,
         ended_at: 25,
         coverage: { start_seq: 0, end_seq: 3 },
@@ -244,7 +251,9 @@ describe("console-grade turn rendering", () => {
     expect(state.segments).toHaveLength(1);
     expect(state.segments[0].conclusion).toBe("增长 12%");
     expect(state.segments[0].durationSeconds).toBe(15);
-    expect(state.segments[0].artifacts).toEqual(["chart.png"]);
+    expect(state.segments[0].artifacts).toEqual([
+      { name: "chart.png", description: "趋势图", path: "graph_1/chart.png" },
+    ]);
     expect(state.artifacts).toEqual([{ name: "chart.png", path: "chart.png" }]);
   });
 
@@ -266,5 +275,15 @@ describe("console-grade turn rendering", () => {
     expect(state.segments).toEqual([]);
     expect(state.plan).toBeNull();
     expect(state.artifacts).toEqual([]);
+  });
+});
+
+describe("artifact preview kinds", () => {
+  it("maps extensions to preview strategies", () => {
+    expect(previewKindForArtifact("report.html")).toBe("iframe");
+    expect(previewKindForArtifact("map.SVG")).toBe("iframe");
+    expect(previewKindForArtifact("trend.png")).toBe("image");
+    expect(previewKindForArtifact("daily.csv")).toBe("text");
+    expect(previewKindForArtifact("build_sections.py")).toBeNull();
   });
 });
