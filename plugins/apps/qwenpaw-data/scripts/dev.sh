@@ -53,6 +53,14 @@ else
     "scripts/sync-context-ui.sh to vendor it." >&2
 fi
 
+DATA_CONSOLE_DIR="$APP_DIR/ui/dist/data-console"
+if [[ -d "$DATA_CONSOLE_DIR" ]]; then
+  cp -R "$DATA_CONSOLE_DIR" "$STAGE_DIR/ui/dist/data-console"
+else
+  echo "NOTE: embedded engine console not found; run" \
+    "scripts/sync-console-ui.sh to vendor it." >&2
+fi
+
 # Hot-install against the configured instance. The CLI's hot-install path
 # routes via config.json's last_api (ignoring --host/--port), which can point
 # at a different running QwenPaw instance; talk to the API directly instead.
