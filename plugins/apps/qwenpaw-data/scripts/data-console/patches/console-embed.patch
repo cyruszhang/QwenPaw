@@ -1,0 +1,191 @@
+diff --git a/packages/datapaw-host-core/frontend/src/App.tsx b/packages/datapaw-host-core/frontend/src/App.tsx
+index 7a150a49..7477f0c4 100644
+--- a/packages/datapaw-host-core/frontend/src/App.tsx
++++ b/packages/datapaw-host-core/frontend/src/App.tsx
+@@ -3,7 +3,7 @@ import { useDataPawColorMode } from '@datapaw/ui-tokens';
+ import enUS from 'antd/locale/en_US';
+ import zhCN from 'antd/locale/zh_CN';
+ import { lazy, Suspense, useLayoutEffect, useMemo, type ReactNode } from 'react';
+-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
++import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+ import { AppI18nProvider, useAppI18n } from './i18n';
+ import ConsoleLayout from './layouts/ConsoleLayout';
+ import { createHostThemeProviderProps } from './theme';
+@@ -11,11 +11,10 @@ import styles from './App.module.less';
+ 
+ const AgentSettingsPage = lazy(() => import('./pages/AgentSettings'));
+ const ChannelSettingsPage = lazy(() => import('./pages/ChannelSettings'));
+-const McpSettingsPage = lazy(() => import('./pages/McpSettings'));
+ const ConsolePage = lazy(() => import('./pages/Console'));
+ const CronJobsPage = lazy(() => import('./pages/CronJobs'));
+ const SessionsPage = lazy(() => import('./pages/Sessions'));
+-const SkillsHubPage = lazy(() => import('./pages/SkillsHub'));
++const SkillsHubPage = lazy(() => import('./pages/SkillsContribution'));
+ 
+ function RedirectToConsole() {
+   const location = useLocation();
+@@ -81,7 +80,7 @@ function LocalizedApp() {
+       {...themeProviderProps}
+       locale={language === 'zh' ? zhCN : enUS}
+     >
+-      <BrowserRouter>
++      <HashRouter>
+         <Suspense fallback={<AppLoadingFallback label={t('common.loading')} />}>
+           <Routes>
+             <Route path="/console" element={<ConsoleLayout />}>
+@@ -109,15 +108,11 @@ function LocalizedApp() {
+                 path="settings/channels"
+                 element={<InitialLoadingCleanup><ChannelSettingsPage /></InitialLoadingCleanup>}
+               />
+-              <Route
+-                path="settings/mcp"
+-                element={<InitialLoadingCleanup><McpSettingsPage /></InitialLoadingCleanup>}
+-              />
+             </Route>
+             <Route path="*" element={<RedirectToConsole />} />
+           </Routes>
+         </Suspense>
+-      </BrowserRouter>
++      </HashRouter>
+     </ConfigProvider>
+   );
+ }
+diff --git a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
+index ea5b698f..cf5304aa 100644
+--- a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
++++ b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
+@@ -1,6 +1,5 @@
+ import {
+   ApiOutlined,
+-  CloudServerOutlined,
+   SettingOutlined,
+ } from '@ant-design/icons';
+ import { Button, Dropdown } from '@agentscope-ai/design';
+@@ -8,7 +7,6 @@ import { useNavigate } from 'react-router-dom';
+ import {
+   buildAgentConfigurationPath,
+   buildChannelConfigurationPath,
+-  buildMcpConfigurationPath,
+ } from '@/shared/navigation/sessionNavigation';
+ import { useAppI18n } from '@/i18n';
+ import sharedStyles from '../../index.module.less';
+@@ -49,7 +47,6 @@ export default function ConsoleSettingsMenu({
+           items: [
+             { key: 'agent-configuration', icon: <SettingOutlined />, label: t('settings.agentConfiguration') },
+             { key: 'channel-configuration', icon: <ApiOutlined />, label: t('settings.channelConfiguration') },
+-            { key: 'mcp-configuration', icon: <CloudServerOutlined />, label: t('settings.mcpConfiguration') },
+           ],
+           onClick: ({ key }: { key: string }) => {
+             if (key === 'agent-configuration') {
+@@ -60,10 +57,6 @@ export default function ConsoleSettingsMenu({
+               navigate(buildChannelConfigurationPath());
+               onAction?.();
+             }
+-            if (key === 'mcp-configuration') {
+-              navigate(buildMcpConfigurationPath());
+-              onAction?.();
+-            }
+           },
+         }}
+       >
+diff --git a/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx b/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx
+new file mode 100644
+index 00000000..a655dba6
+--- /dev/null
++++ b/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx
+@@ -0,0 +1,40 @@
++import { GithubOutlined } from '@ant-design/icons';
++import { Button, Result, Typography } from 'antd';
++import { useAppI18n } from '@/i18n';
++
++const SKILLS_REPO_URL =
++  'https://github.com/agentscope-ai/QwenPaw-Data/tree/main/skills';
++const SKILLS_PACKAGE_URL =
++  'https://github.com/agentscope-ai/QwenPaw-Data/tree/main/packages/qwenpaw-data-skills';
++
++export default function SkillsContribution() {
++  const { language } = useAppI18n();
++  const zh = language === 'zh';
++
++  return (
++    <Result
++      icon={<GithubOutlined />}
++      title={zh ? '技能中心' : 'Skills Hub'}
++      subTitle={
++        zh
++          ? '技能通过开源仓库共建：提交 PR 即可新增或改进分析方法论，安装后即刻生效。'
++          : 'Skills are built in the open-source repository: open a PR to add or improve an analysis methodology, and it ships with the next install.'
++      }
++      extra={
++        <>
++          <Button type="primary" href={SKILLS_REPO_URL} target="_blank" rel="noopener noreferrer">
++            {zh ? '浏览技能目录' : 'Browse the skills catalog'}
++          </Button>
++          <Button href={SKILLS_PACKAGE_URL} target="_blank" rel="noopener noreferrer">
++            {zh ? '贡献指南' : 'Contribution guide'}
++          </Button>
++          <Typography.Paragraph type="secondary" style={{ marginTop: 16 }}>
++            {zh
++              ? '本地技能位于 workspace/skills 目录，可直接编辑调试。'
++              : 'Local skills live under workspace/skills and can be edited in place for debugging.'}
++          </Typography.Paragraph>
++        </>
++      }
++    />
++  );
++}
+diff --git a/packages/datapaw-host-core/frontend/src/services/auth.ts b/packages/datapaw-host-core/frontend/src/services/auth.ts
+index 1e81bc4d..6f0e81c7 100644
+--- a/packages/datapaw-host-core/frontend/src/services/auth.ts
++++ b/packages/datapaw-host-core/frontend/src/services/auth.ts
+@@ -1,4 +1,4 @@
+-import { getApiUrl, getAuthApiUrl, getAuthLoginUrl } from "./config.js";
++import { getApiUrl, getAuthApiUrl } from "./config.js";
+ 
+ interface AuthStatusResponse {
+   enabled: boolean;
+@@ -24,7 +24,6 @@ export interface HostCurrentUser {
+ }
+ 
+ let refreshInFlight: Promise<boolean> | null = null;
+-let ssoLoginPath: string | null = null;
+ let currentUser: HostCurrentUser | null = null;
+ 
+ export function getHostCurrentUser(): HostCurrentUser | null {
+@@ -54,12 +53,9 @@ export function refreshAuthSession(): Promise<boolean> {
+ 
+ export function redirectToLogin(): void {
+   if (typeof window === "undefined") return;
+-  if (ssoLoginPath) {
+-    const redirect = encodeURIComponent(window.location.href);
+-    window.location.assign(`${ssoLoginPath}?back_url=${redirect}`);
+-    return;
+-  }
+-  window.location.assign(getAuthLoginUrl(window.location.href));
++  // Embedded build: the host shell owns authentication; there is no login
++  // page to bounce to. Surface the failure instead of navigating away.
++  console.warn("Authentication is unavailable; staying on the current page.");
+ }
+ 
+ export async function fetchWithAuthRetry(
+@@ -96,7 +92,6 @@ export async function bootstrapHostAuth(): Promise<boolean> {
+   }
+ 
+   const status = await statusResponse.json() as AuthStatusResponse;
+-  ssoLoginPath = status.sso_enabled ? status.sso_login_path : null;
+   if (!status.enabled) return true;
+ 
+   const meResponse = await fetchWithAuthRetry(getAuthApiUrl("/me"));
+diff --git a/packages/datapaw-host-core/frontend/src/services/config.ts b/packages/datapaw-host-core/frontend/src/services/config.ts
+index d3ce27e7..6a1bd30b 100644
+--- a/packages/datapaw-host-core/frontend/src/services/config.ts
++++ b/packages/datapaw-host-core/frontend/src/services/config.ts
+@@ -28,7 +28,7 @@ export function getApiUrl(path: string): string {
+   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+   const prefixedPath = normalizedPath.startsWith("/api/")
+     ? normalizedPath
+-    : `/api${normalizedPath}`;
++    : `/api/v1${normalizedPath}`;
+   return `${base}${prefixedPath}`;
+ }
+ 

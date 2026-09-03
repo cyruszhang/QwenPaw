@@ -6,11 +6,10 @@ import {
   type AppStatus,
   type DataSourceMetadata,
 } from "./api";
-import { ChatWorkspace } from "./ChatWorkspace";
 import { Configure } from "./Configure";
-import { CronJobs } from "./CronJobs";
 import { DataSources } from "./DataSources";
 import { EmbeddedConsole } from "./EmbeddedConsole";
+import { EmbeddedDataConsole } from "./EmbeddedDataConsole";
 import {
   ClockIcon,
   LayoutGridIcon,
@@ -55,6 +54,10 @@ const NAVIGATION: Array<{
  * dimensions, metrics, semantic weaving, and the CM graph.
  */
 const CONSOLE_HOME = "/data-source";
+
+/** Hash routes inside the embedded engine console. */
+const DATA_CONSOLE_HOME = "/console";
+const DATA_CONSOLE_CRON = "/console/cron-jobs";
 
 /** localStorage key the embedded console's i18next reads at boot. */
 const CONSOLE_LANGUAGE_KEY = "language";
@@ -186,19 +189,6 @@ export function App({ paw }: { paw: PawAppSdk }) {
     return () => subscription.dispose();
   }, [paw.dependencies]);
 
-  const selectedSource = sources.find(
-    (source) => source.datasource_id === selectedId,
-  );
-
-  async function selectSource(id: string) {
-    setSelectedId(id);
-    await paw.storage.set("selected-source", id);
-    await paw.toast(
-      translate(language, id ? "toast.sourceUpdated" : "toast.sourceAll"),
-      "success",
-    );
-  }
-
   async function runDependencyAction(
     dependencyId: string,
     action: PawDependencyAction,
@@ -285,13 +275,13 @@ export function App({ paw }: { paw: PawAppSdk }) {
             </div>
           </aside>
           <main className="qwenpaw-data-main">
-            <div hidden={page !== "analysis"}>
-              <ChatWorkspace
-                paw={paw}
-                selectedSource={selectedSource}
-                sources={sources}
-                selectedSourceId={selectedId}
-                onSelectSource={(id) => void selectSource(id)}
+            <div hidden={page !== "analysis" && page !== "automations"}>
+              <EmbeddedDataConsole
+                key={`data-${consoleEpoch}`}
+                route={
+                  page === "automations" ? DATA_CONSOLE_CRON : DATA_CONSOLE_HOME
+                }
+                active={page === "analysis" || page === "automations"}
               />
             </div>
             <div hidden={page !== "manage"}>
@@ -301,9 +291,6 @@ export function App({ paw }: { paw: PawAppSdk }) {
                 active={page === "manage"}
               />
             </div>
-            {page === "automations" ? (
-              <CronJobs paw={paw} sources={sources} />
-            ) : null}
             {page === "configure" ? (
               <Configure paw={paw} onRestart={() => void loadSources()} />
             ) : null}
