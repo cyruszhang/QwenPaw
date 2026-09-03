@@ -8,9 +8,11 @@ import {
 } from "./api";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { Configure } from "./Configure";
+import { CronJobs } from "./CronJobs";
 import { DataSources } from "./DataSources";
 import { EmbeddedConsole } from "./EmbeddedConsole";
 import {
+  ClockIcon,
   LayoutGridIcon,
   SettingsIcon,
   SparklesIcon,
@@ -34,7 +36,7 @@ import {
   type StringParams,
 } from "./strings";
 
-type Page = "analysis" | "manage" | "configure" | "health";
+type Page = "analysis" | "manage" | "automations" | "configure" | "health";
 
 const NAVIGATION: Array<{
   id: Page;
@@ -43,6 +45,7 @@ const NAVIGATION: Array<{
 }> = [
   { id: "analysis", icon: <SparklesIcon />, labelKey: "nav.analyze" },
   { id: "manage", icon: <LayoutGridIcon />, labelKey: "nav.manage" },
+  { id: "automations", icon: <ClockIcon />, labelKey: "nav.automations" },
   { id: "configure", icon: <WrenchIcon />, labelKey: "nav.configure" },
 ];
 
@@ -298,6 +301,9 @@ export function App({ paw }: { paw: PawAppSdk }) {
                 active={page === "manage"}
               />
             </div>
+            {page === "automations" ? (
+              <CronJobs paw={paw} sources={sources} />
+            ) : null}
             {page === "configure" ? (
               <Configure paw={paw} onRestart={() => void loadSources()} />
             ) : null}

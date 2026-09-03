@@ -11,6 +11,7 @@ import { ArrowUpIcon, ArrowUpRightIcon, EllipsisIcon, PinIcon } from "./icons";
 import { useLanguage, useT } from "./language";
 import { LogoMark } from "./LogoMark";
 import { renderMarkdown, splitCompletionMarker } from "./markdown";
+import { SettlementPanel } from "./SettlementPanel";
 import type {
   PawAppSdk,
   PawChatHistoryMessage,
@@ -1255,6 +1256,7 @@ export function ChatWorkspace({
   const [followups, setFollowups] = useState<string[]>([]);
   const [clarification, setClarification] =
     useState<ClarificationRequest | null>(null);
+  const [settlementEpoch, setSettlementEpoch] = useState(0);
   const engine = useMemo(() => createEngineApi(paw), [paw]);
   const activeTurnRef = useRef<{ sessionId: string; chatId: string } | null>(
     null,
@@ -1366,7 +1368,10 @@ export function ChatWorkspace({
           runningChat.id,
           `assistant-${runningChat.id}`,
         ).finally(() => {
-          if (!cancelled) setSending(false);
+          if (!cancelled) {
+            setSending(false);
+            setSettlementEpoch((epoch) => epoch + 1);
+          }
         });
       }
     })().catch(() => {
@@ -1706,6 +1711,7 @@ export function ChatWorkspace({
       await paw.toast(t("chat.analysisFailed"), "error");
     } finally {
       setSending(false);
+      setSettlementEpoch((epoch) => epoch + 1);
       window.setTimeout(() => inputRef.current?.focus(), 0);
     }
   }
@@ -1820,6 +1826,12 @@ export function ChatWorkspace({
             </div>
           )}
         </div>
+
+        <SettlementPanel
+          api={engine}
+          sessionId={activeSessionId}
+          refreshToken={settlementEpoch}
+        />
 
         <form className="qwenpaw-data-composer" onSubmit={handleSubmit}>
           {clarification ? (

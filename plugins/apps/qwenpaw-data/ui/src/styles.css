@@ -2796,3 +2796,201 @@
   border-color: var(--qwenpaw-data-purple);
   color: var(--qwenpaw-data-purple);
 }
+
+/* Knowledge settlement cards (under the transcript, above the composer) */
+.qwenpaw-data-settlement {
+  margin: 0 var(--qwenpaw-data-page-gutter) 12px;
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 12px;
+  background: var(--qwenpaw-data-soft);
+  padding: 12px 16px;
+}
+.qwenpaw-data-settlement header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.qwenpaw-data-settlement header b {
+  font-size: 13px;
+}
+.qwenpaw-data-settlement header small {
+  color: var(--qwenpaw-data-muted);
+  font-size: 12px;
+}
+.qwenpaw-data-settlement ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.qwenpaw-data-settlement li {
+  background: #fff;
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.qwenpaw-data-settlement__type {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.qwenpaw-data-settlement__type em {
+  font-style: normal;
+  font-size: 11px;
+  color: var(--qwenpaw-data-purple);
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.qwenpaw-data-settlement__type b {
+  font-size: 13px;
+}
+.qwenpaw-data-settlement dl {
+  margin: 0 0 8px;
+  display: grid;
+  grid-template-columns: minmax(110px, max-content) 1fr;
+  gap: 2px 12px;
+}
+.qwenpaw-data-settlement dl > div {
+  display: contents;
+}
+.qwenpaw-data-settlement dt {
+  color: var(--qwenpaw-data-muted);
+  font-size: 12px;
+}
+.qwenpaw-data-settlement dd {
+  margin: 0;
+  font-size: 12px;
+  word-break: break-word;
+}
+.qwenpaw-data-settlement__actions {
+  display: flex;
+  gap: 8px;
+}
+.qwenpaw-data-settlement__actions button {
+  border: 1px solid var(--qwenpaw-data-purple);
+  background: var(--qwenpaw-data-purple);
+  color: #fff;
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 4px 14px;
+  cursor: pointer;
+}
+.qwenpaw-data-settlement__actions button.is-secondary {
+  background: #fff;
+  color: var(--qwenpaw-data-muted);
+  border-color: var(--qwenpaw-data-line);
+}
+.qwenpaw-data-settlement__actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Scheduled analyses (Automations page) */
+.qwenpaw-data-cron {
+  padding: var(--qwenpaw-data-page-top) var(--qwenpaw-data-page-gutter);
+  max-width: 860px;
+}
+.qwenpaw-data-cron__error {
+  color: #c0392b;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.qwenpaw-data-cron__empty {
+  color: var(--qwenpaw-data-muted);
+  font-size: 13px;
+}
+.qwenpaw-data-cron__form {
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+  display: grid;
+  gap: 12px;
+  background: var(--qwenpaw-data-soft);
+}
+.qwenpaw-data-cron__form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.qwenpaw-data-cron__form label small {
+  color: var(--qwenpaw-data-muted);
+  font-size: 11px;
+}
+.qwenpaw-data-cron__form input,
+.qwenpaw-data-cron__form textarea,
+.qwenpaw-data-cron__form select {
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+}
+.qwenpaw-data-cron__form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.qwenpaw-data-cron__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.qwenpaw-data-cron__list li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 12px;
+  padding: 14px 18px;
+  background: #fff;
+}
+.qwenpaw-data-cron__list li.is-paused {
+  opacity: 0.65;
+}
+.qwenpaw-data-cron__job b {
+  font-size: 14px;
+  margin-right: 8px;
+}
+.qwenpaw-data-cron__job small {
+  color: var(--qwenpaw-data-muted);
+  font-size: 12px;
+}
+.qwenpaw-data-cron__job p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+.qwenpaw-data-cron__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.qwenpaw-data-cron__actions button {
+  border: 1px solid var(--qwenpaw-data-line);
+  background: #fff;
+  border-radius: 8px;
+  font-size: 12px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+.qwenpaw-data-cron__actions button:hover {
+  border-color: var(--qwenpaw-data-purple);
+  color: var(--qwenpaw-data-purple);
+}
+.qwenpaw-data-cron__actions button.is-danger:hover {
+  border-color: #c0392b;
+  color: #c0392b;
+}
+.qwenpaw-data-cron__actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

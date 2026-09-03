@@ -52,6 +52,16 @@ export function LayoutGridIcon({ size }: { size?: number }) {
   );
 }
 
+/** Lucide "clock" — the Automations navigation entry. */
+export function ClockIcon({ size }: { size?: number }) {
+  return (
+    <Icon size={size}>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </Icon>
+  );
+}
+
 /** Lucide "settings" — the topbar model settings button. */
 export function SettingsIcon({ size }: { size?: number }) {
   return (
