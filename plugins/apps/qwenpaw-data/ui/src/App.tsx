@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 
 import {
   createQwenPawDataApi,
@@ -10,13 +9,7 @@ import { Configure } from "./Configure";
 import { DataSources } from "./DataSources";
 import { EmbeddedConsole } from "./EmbeddedConsole";
 import { EmbeddedDataConsole } from "./EmbeddedDataConsole";
-import {
-  ClockIcon,
-  LayoutGridIcon,
-  SettingsIcon,
-  SparklesIcon,
-  WrenchIcon,
-} from "./icons";
+import { LayoutGridIcon, SettingsIcon } from "./icons";
 import {
   LanguageProvider,
   persistLanguage,
@@ -35,18 +28,14 @@ import {
   type StringParams,
 } from "./strings";
 
-type Page = "analysis" | "manage" | "automations" | "configure" | "health";
-
-const NAVIGATION: Array<{
-  id: Page;
-  icon: ReactNode;
-  labelKey: StringKey;
-}> = [
-  { id: "analysis", icon: <SparklesIcon />, labelKey: "nav.analyze" },
-  { id: "manage", icon: <LayoutGridIcon />, labelKey: "nav.manage" },
-  { id: "automations", icon: <ClockIcon />, labelKey: "nav.automations" },
-  { id: "configure", icon: <WrenchIcon />, labelKey: "nav.configure" },
-];
+/**
+ * The embedded engine console is the app surface; it ships its own
+ * navigation (sessions, Skill Hub, scheduled results, settings). The
+ * plugin shell is reduced to a slim topbar hosting what the console
+ * does not own: runtime health, the DataBridge management console, and
+ * the plugin's own configuration.
+ */
+type Page = "analysis" | "manage" | "configure" | "health";
 
 /**
  * Default deep link into the embedded Context console (hash-routed build).
@@ -54,13 +43,6 @@ const NAVIGATION: Array<{
  * dimensions, metrics, semantic weaving, and the CM graph.
  */
 const CONSOLE_HOME = "/data-source";
-
-/** Hash routes inside the embedded engine console. */
-const DATA_CONSOLE_HOME = "/console";
-const DATA_CONSOLE_CRON = "/console/cron-jobs";
-
-/** localStorage key the embedded console's i18next reads at boot. */
-const CONSOLE_LANGUAGE_KEY = "language";
 
 function StatusPanel({
   status,
@@ -203,15 +185,16 @@ export function App({ paw }: { paw: PawAppSdk }) {
     setDependencies(await paw.dependencies.list(true));
   }
 
-  function openConfiguration() {
-    setPage("configure");
+  /** Topbar buttons toggle: reselecting returns to the analysis console. */
+  function togglePage(target: Page) {
+    setPage((current) => (current === target ? "analysis" : target));
   }
 
   async function toggleLanguage() {
     const next = language === "zh" ? "en" : "zh";
     persistLanguage(next);
     setLanguage(next);
-    // The embedded console reads the language at boot; remount it.
+    // The embedded consoles read the language at boot; remount them.
     setConsoleEpoch((epoch) => epoch + 1);
     await paw.toast(
       next === "zh"
@@ -224,6 +207,13 @@ export function App({ paw }: { paw: PawAppSdk }) {
   const t = (key: StringKey, params?: StringParams) =>
     translate(language, key, params);
 
+  const statusModel = buildAppStatusModel(
+    status,
+    dependencies,
+    selectedId,
+    language,
+  );
+
   return (
     <LanguageProvider value={language}>
       <div className="qwenpaw-data-app">
@@ -232,10 +222,35 @@ export function App({ paw }: { paw: PawAppSdk }) {
           <div className="qwenpaw-data-topbar__actions">
             <button
               type="button"
-              className="qwenpaw-data-topbar__icon"
+              className={`qwenpaw-data-topbar__status is-${statusModel.tone} ${
+                page === "health" ? "is-active" : ""
+              }`}
+              title={t("status.openDetails")}
+              aria-label={t("status.openDetails")}
+              onClick={() => togglePage("health")}
+            >
+              <i aria-hidden="true" />
+              <span>{statusModel.label}</span>
+            </button>
+            <button
+              type="button"
+              className={`qwenpaw-data-topbar__icon ${
+                page === "manage" ? "is-active" : ""
+              }`}
+              title={t("nav.manage")}
+              aria-label={t("nav.manage")}
+              onClick={() => togglePage("manage")}
+            >
+              <LayoutGridIcon size={18} />
+            </button>
+            <button
+              type="button"
+              className={`qwenpaw-data-topbar__icon ${
+                page === "configure" ? "is-active" : ""
+              }`}
               title={t("topbar.configuration")}
               aria-label={t("topbar.configuration")}
-              onClick={openConfiguration}
+              onClick={() => togglePage("configure")}
             >
               <SettingsIcon size={18} />
             </button>
@@ -249,52 +264,33 @@ export function App({ paw }: { paw: PawAppSdk }) {
             </button>
           </div>
         </header>
-        <div className="qwenpaw-data-body">
-          <aside className="qwenpaw-data-nav">
-            <nav aria-label={t("nav.aria")}>
-              {NAVIGATION.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={page === item.id ? "is-active" : ""}
-                  onClick={() => setPage(item.id)}
-                >
-                  <i aria-hidden="true">{item.icon}</i>
-                  <span>{t(item.labelKey)}</span>
-                </button>
-              ))}
-            </nav>
-            <div className="qwenpaw-data-nav__bottom">
+        <main className="qwenpaw-data-main">
+          <div hidden={page !== "analysis"}>
+            <EmbeddedDataConsole
+              key={`data-${consoleEpoch}`}
+              route="/console"
+              active={page === "analysis"}
+            />
+          </div>
+          <div hidden={page !== "manage"}>
+            <EmbeddedConsole
+              key={consoleEpoch}
+              route={consoleRoute}
+              active={page === "manage"}
+            />
+          </div>
+          {page === "configure" ? (
+            <Configure paw={paw} onRestart={() => void loadSources()} />
+          ) : null}
+          {page === "health" ? (
+            <div className="qwenpaw-data-health">
               <StatusPanel
                 status={status}
                 dependencies={dependencies}
                 selectedSourceId={selectedId}
                 language={language}
-                onOpenDetails={() => setPage("health")}
+                onOpenDetails={() => setPage("analysis")}
               />
-            </div>
-          </aside>
-          <main className="qwenpaw-data-main">
-            <div hidden={page !== "analysis" && page !== "automations"}>
-              <EmbeddedDataConsole
-                key={`data-${consoleEpoch}`}
-                route={
-                  page === "automations" ? DATA_CONSOLE_CRON : DATA_CONSOLE_HOME
-                }
-                active={page === "analysis" || page === "automations"}
-              />
-            </div>
-            <div hidden={page !== "manage"}>
-              <EmbeddedConsole
-                key={consoleEpoch}
-                route={consoleRoute}
-                active={page === "manage"}
-              />
-            </div>
-            {page === "configure" ? (
-              <Configure paw={paw} onRestart={() => void loadSources()} />
-            ) : null}
-            {page === "health" ? (
               <DataSources
                 selectedId={selectedId}
                 error={sourceError}
@@ -307,9 +303,9 @@ export function App({ paw }: { paw: PawAppSdk }) {
                 dependencies={dependencies?.dependencies ?? []}
                 onDependencyAction={runDependencyAction}
               />
-            ) : null}
-          </main>
-        </div>
+            </div>
+          ) : null}
+        </main>
       </div>
     </LanguageProvider>
   );

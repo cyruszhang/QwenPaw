@@ -105,23 +105,42 @@
   line-height: 1;
 }
 
-.qwenpaw-data-body {
-  display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
+.qwenpaw-data-topbar__actions button.is-active {
+  border-color: #a8cdfe;
+  color: var(--qwenpaw-data-purple);
+  background: #ecf4ff;
 }
 
-.qwenpaw-data-nav {
+.qwenpaw-data-topbar__actions button.qwenpaw-data-topbar__status {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  /* Top padding lines the first nav row up with the embedded console's
-     first menu item and its page title. */
-  padding: 24px 16px 18px;
-  border-right: 1px solid var(--qwenpaw-data-line);
-  background: linear-gradient(180deg, #f8f8fc 0%, #f4f5f9 100%);
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  font-weight: 600;
+}
+.qwenpaw-data-topbar__status i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #98a0b1;
+}
+.qwenpaw-data-topbar__status.is-ready i {
+  background: #26a888;
+}
+.qwenpaw-data-topbar__status.is-warning i {
+  background: #ed8b2d;
+}
+.qwenpaw-data-topbar__status.is-error i {
+  background: #d55767;
+}
+
+.qwenpaw-data-health {
+  height: 100%;
+  overflow: auto;
+}
+.qwenpaw-data-health > .qwenpaw-data-status-panel {
+  max-width: 560px;
+  margin: 22px 26px 0;
 }
 
 .qwenpaw-data-welcome__mark {
@@ -153,50 +172,6 @@
   background: linear-gradient(145deg, #0d76fd, #12a594);
   font-size: 13px;
   letter-spacing: -0.02em;
-}
-
-.qwenpaw-data-nav nav {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-
-.qwenpaw-data-nav nav button {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 11px;
-  padding: 10px 11px;
-  border: 0;
-  border-radius: 10px;
-  color: #646d80;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  transition: 160ms ease;
-}
-
-.qwenpaw-data-nav nav button:hover {
-  color: var(--qwenpaw-data-ink);
-  background: #ececf4;
-}
-.qwenpaw-data-nav nav button.is-active {
-  color: var(--qwenpaw-data-purple-deep);
-  background: #ecf4ff; /* BRAND_PRIMARY_BG */
-  font-weight: 650;
-}
-
-.qwenpaw-data-nav nav i {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  font-size: 15px;
-  font-style: normal;
-}
-
-.qwenpaw-data-nav__bottom {
-  margin-top: auto;
 }
 
 .qwenpaw-data-status-panel {
@@ -318,8 +293,9 @@
 }
 
 .qwenpaw-data-main {
+  flex: 1 1 auto;
   min-width: 0;
-  height: 100%;
+  min-height: 0;
   overflow: auto;
   background: #fff;
 }
