@@ -3,25 +3,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createQwenPawDataApi,
   type AppStatus,
-  type DataSourceMetadata,
 } from "./api";
 import { Configure } from "./Configure";
 import { DataSources } from "./DataSources";
-import { EmbeddedConsole } from "./EmbeddedConsole";
 import { EmbeddedDataConsole } from "./EmbeddedDataConsole";
-import { LayoutGridIcon, SettingsIcon } from "./icons";
+import { SettingsIcon } from "./icons";
 import {
   LanguageProvider,
   persistLanguage,
   resolveInitialLanguage,
-  useT,
 } from "./language";
-import { WordmarkLogo } from "./LogoMark";
 import type { PawAppSdk } from "./sdk";
 import type { PawDependencyAction, PawDependencySnapshot } from "./sdk";
 import { buildAppStatusModel } from "./status";
 import {
-  localeTag,
   translate,
   type Language,
   type StringKey,
@@ -30,98 +25,28 @@ import {
 
 /**
  * The embedded engine console is the app surface; it ships its own
- * navigation (sessions, Skill Hub, scheduled results, settings). The
- * plugin shell is reduced to a slim topbar hosting what the console
- * does not own: runtime health, the DataBridge management console, and
- * the plugin's own configuration.
+ * navigation, branding, and a DataBridge entry that opens the Context
+ * console in a full tab. The plugin shell is a logo-less action strip
+ * hosting only what the console does not own: runtime health and the
+ * plugin's own configuration.
  */
-type Page = "analysis" | "manage" | "configure" | "health";
+type Page = "analysis" | "configure" | "health";
 
 /**
- * Default deep link into the embedded Context console (hash-routed build).
- * The console ships its own sidebar covering data sources, datasets,
- * dimensions, metrics, semantic weaving, and the CM graph.
+ * Same-origin static build of the Context console (vendored by
+ * scripts/sync-context-ui.sh); opened in a full browser tab rather than
+ * embedded — the console's own DataBridge button uses the same target.
  */
-const CONSOLE_HOME = "/data-source";
-
-function StatusPanel({
-  status,
-  dependencies,
-  selectedSourceId,
-  language,
-  onOpenDetails,
-}: {
-  status?: AppStatus;
-  dependencies?: PawDependencySnapshot;
-  selectedSourceId: string;
-  language: Language;
-  onOpenDetails(): void;
-}) {
-  const t = useT();
-  const model = buildAppStatusModel(
-    status,
-    dependencies,
-    selectedSourceId,
-    language,
-  );
-  return (
-    <div
-      className={`qwenpaw-data-status-panel is-clickable is-${model.tone}`}
-      role="button"
-      tabIndex={0}
-      aria-label={t("status.openDetails")}
-      onClick={onOpenDetails}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onOpenDetails();
-        }
-      }}
-    >
-      <div className="qwenpaw-data-status-panel__summary">
-        <i aria-hidden="true" />
-        <span>
-          <b>{model.label}</b>
-          {model.detail ? <small>{model.detail}</small> : null}
-        </span>
-      </div>
-      <ul>
-        {model.categories.map((category) => (
-          <li className={`is-${category.tone}`} key={category.id}>
-            <i aria-hidden="true" />
-            <span>{category.label}</span>
-            <small>{category.detail}</small>
-          </li>
-        ))}
-      </ul>
-      <div className="qwenpaw-data-status-panel__footer">
-        <span>
-          {model.checkedAt
-            ? t("status.checked", {
-                time: new Date(model.checkedAt).toLocaleTimeString(
-                  localeTag(language),
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  },
-                ),
-              })
-            : t("status.waitingFirstCheck")}
-        </span>
-      </div>
-    </div>
-  );
-}
+const CONTEXT_CONSOLE_URL =
+  "/api/frontend_plugin/qwenpaw-data/files/ui/dist/context-console/index.html#/data-source";
 
 export function App({ paw }: { paw: PawAppSdk }) {
   const api = useMemo(() => createQwenPawDataApi(paw), [paw]);
   const [page, setPage] = useState<Page>("analysis");
-  const [consoleRoute, setConsoleRoute] = useState(CONSOLE_HOME);
   const [consoleEpoch, setConsoleEpoch] = useState(0);
   const [language, setLanguage] = useState<Language>(resolveInitialLanguage);
   const [status, setStatus] = useState<AppStatus>();
   const [dependencies, setDependencies] = useState<PawDependencySnapshot>();
-  const [sources, setSources] = useState<DataSourceMetadata[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [sourceError, setSourceError] = useState("");
   const [sourcesUpdatedAt, setSourcesUpdatedAt] = useState<Date>();
@@ -130,8 +55,7 @@ export function App({ paw }: { paw: PawAppSdk }) {
     async (background = false) => {
       setSourceError("");
       try {
-        const response = await api.listDataSources();
-        setSources(response.records ?? []);
+        await api.listDataSources();
         setSourcesUpdatedAt(new Date());
       } catch (error) {
         setSourceError(error instanceof Error ? error.message : String(error));
@@ -190,11 +114,15 @@ export function App({ paw }: { paw: PawAppSdk }) {
     setPage((current) => (current === target ? "analysis" : target));
   }
 
+  function openContextConsole() {
+    window.open(CONTEXT_CONSOLE_URL, "_blank", "noopener,noreferrer");
+  }
+
   async function toggleLanguage() {
     const next = language === "zh" ? "en" : "zh";
     persistLanguage(next);
     setLanguage(next);
-    // The embedded consoles read the language at boot; remount them.
+    // The embedded console reads the language at boot; remount it.
     setConsoleEpoch((epoch) => epoch + 1);
     await paw.toast(
       next === "zh"
@@ -218,7 +146,6 @@ export function App({ paw }: { paw: PawAppSdk }) {
     <LanguageProvider value={language}>
       <div className="qwenpaw-data-app">
         <header className="qwenpaw-data-topbar">
-          <WordmarkLogo />
           <div className="qwenpaw-data-topbar__actions">
             <button
               type="button"
@@ -231,17 +158,6 @@ export function App({ paw }: { paw: PawAppSdk }) {
             >
               <i aria-hidden="true" />
               <span>{statusModel.label}</span>
-            </button>
-            <button
-              type="button"
-              className={`qwenpaw-data-topbar__icon ${
-                page === "manage" ? "is-active" : ""
-              }`}
-              title={t("nav.manage")}
-              aria-label={t("nav.manage")}
-              onClick={() => togglePage("manage")}
-            >
-              <LayoutGridIcon size={18} />
             </button>
             <button
               type="button"
@@ -272,38 +188,19 @@ export function App({ paw }: { paw: PawAppSdk }) {
               active={page === "analysis"}
             />
           </div>
-          <div hidden={page !== "manage"}>
-            <EmbeddedConsole
-              key={consoleEpoch}
-              route={consoleRoute}
-              active={page === "manage"}
-            />
-          </div>
           {page === "configure" ? (
             <Configure paw={paw} onRestart={() => void loadSources()} />
           ) : null}
           {page === "health" ? (
-            <div className="qwenpaw-data-health">
-              <StatusPanel
-                status={status}
-                dependencies={dependencies}
-                selectedSourceId={selectedId}
-                language={language}
-                onOpenDetails={() => setPage("analysis")}
-              />
-              <DataSources
-                selectedId={selectedId}
-                error={sourceError}
-                onReload={() => void loadSources()}
-                onOpenManage={() => {
-                  setConsoleRoute(CONSOLE_HOME);
-                  setPage("manage");
-                }}
-                lastUpdatedAt={sourcesUpdatedAt}
-                dependencies={dependencies?.dependencies ?? []}
-                onDependencyAction={runDependencyAction}
-              />
-            </div>
+            <DataSources
+              selectedId={selectedId}
+              error={sourceError}
+              onReload={() => void loadSources()}
+              onOpenManage={openContextConsole}
+              lastUpdatedAt={sourcesUpdatedAt}
+              dependencies={dependencies?.dependencies ?? []}
+              onDependencyAction={runDependencyAction}
+            />
           ) : null}
         </main>
       </div>
