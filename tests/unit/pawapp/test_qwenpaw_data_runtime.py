@@ -87,7 +87,9 @@ def test_backend_entry_loads_with_plugin_loader_package_shape() -> None:
 def test_provision_engine_mcp_creates_databridge_entry(tmp_path: Path) -> None:
     runtime = _load_runtime_module()
     path = runtime.provision_engine_mcp(
-        tmp_path, "http://127.0.0.1:8765/", "cm-token"
+        tmp_path,
+        "http://127.0.0.1:8765/",
+        "cm-token",
     )
     assert path == tmp_path / "host" / "workspace" / ".mcp"
     entries = json.loads(path.read_text(encoding="utf-8"))
@@ -96,7 +98,7 @@ def test_provision_engine_mcp_creates_databridge_entry(tmp_path: Path) -> None:
     assert entry["name"] == "databridge"
     assert entry["mcp_config"]["url"] == "http://127.0.0.1:8765/mcp/v1/cm"
     assert entry["mcp_config"]["headers"] == {
-        "Authorization": "Bearer cm-token"
+        "Authorization": "Bearer cm-token",
     }
 
 
@@ -123,7 +125,7 @@ def test_provision_engine_mcp_upserts_and_preserves_user_entries(
                     "name": "databridge",
                     "mcp_config": {"url": "http://stale:1/mcp/v1/cm"},
                 },
-            ]
+            ],
         ),
         encoding="utf-8",
     )
