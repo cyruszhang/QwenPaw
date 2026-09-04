@@ -88,6 +88,28 @@ index ea5b698f..cf5304aa 100644
            },
          }}
        >
+diff --git a/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx b/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx
+index e8689683..8d760a75 100644
+--- a/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx
++++ b/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx
+@@ -314,7 +314,7 @@ export default function GlobalProductNav({
+           workspaceIcon={<HomeOutlined />}
+           usernameAriaLabel={`${t('nav.currentUser')}: ${username}`}
+           workspaceAriaLabel={`${t('nav.currentWorkspace')}: ${activeWorkspaceName}`}
+-          renderUsernameTrigger={(trigger) => (
++          renderUsernameTrigger={currentUser ? (trigger) => (
+             <Dropdown
+               getPopupContainer={getAccountCardPopupContainer}
+               overlayClassName="datapaw-sider-account-dropdown"
+@@ -326,7 +326,7 @@ export default function GlobalProductNav({
+             >
+               {trigger}
+             </Dropdown>
+-          )}
++          ) : undefined}
+           renderWorkspaceTrigger={workspaces.length ? (trigger) => (
+             <Dropdown
+               getPopupContainer={getAccountCardPopupContainer}
 diff --git a/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx b/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx
 new file mode 100644
 index 00000000..a655dba6
