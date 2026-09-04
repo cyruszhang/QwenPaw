@@ -54,86 +54,6 @@
   flex-shrink: 0;
 }
 
-.qwenpaw-data-topbar {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  height: 52px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--qwenpaw-data-line);
-  background: #fff;
-}
-.qwenpaw-data-topbar img {
-  display: block;
-  width: auto;
-  height: 26px;
-}
-.qwenpaw-data-topbar__fallback {
-  font-size: 16px;
-  letter-spacing: -0.02em;
-}
-.qwenpaw-data-topbar__actions {
-  display: flex;
-  gap: 6px;
-  margin-left: auto;
-  /* Clear the host console's floating window controls pinned to the
-     top-right corner. */
-  margin-right: 104px;
-}
-.qwenpaw-data-topbar__actions button {
-  display: grid;
-  place-items: center;
-  min-width: 30px;
-  height: 30px;
-  padding: 0 7px;
-  border: 1px solid var(--qwenpaw-data-line);
-  border-radius: 8px;
-  color: #646d80;
-  background: #fff;
-  font-size: 14px;
-  font-weight: 650;
-  cursor: pointer;
-  transition: 140ms ease;
-}
-.qwenpaw-data-topbar__actions button:hover {
-  border-color: #a8cdfe;
-  color: var(--qwenpaw-data-purple);
-  background: #ecf4ff;
-}
-.qwenpaw-data-topbar__actions button.qwenpaw-data-topbar__icon {
-  font-size: 18px;
-  line-height: 1;
-}
-
-.qwenpaw-data-topbar__actions button.is-active {
-  border-color: #a8cdfe;
-  color: var(--qwenpaw-data-purple);
-  background: #ecf4ff;
-}
-
-.qwenpaw-data-topbar__actions button.qwenpaw-data-topbar__status {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 11px;
-  font-weight: 600;
-}
-.qwenpaw-data-topbar__status i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #98a0b1;
-}
-.qwenpaw-data-topbar__status.is-ready i {
-  background: #26a888;
-}
-.qwenpaw-data-topbar__status.is-warning i {
-  background: #ed8b2d;
-}
-.qwenpaw-data-topbar__status.is-error i {
-  background: #d55767;
-}
-
 .qwenpaw-data-welcome__mark {
   display: grid;
   place-items: center;
@@ -166,11 +86,45 @@
 }
 
 .qwenpaw-data-main {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   background: #fff;
+}
+
+/* App-level configuration, opened from the console's settings menu. */
+.qwenpaw-data-config-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  overflow: auto;
+  background: #fff;
+}
+.qwenpaw-data-config-overlay__close {
+  position: fixed;
+  top: 14px;
+  /* Clear the host console's floating window controls. */
+  right: 118px;
+  z-index: 31;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--qwenpaw-data-line);
+  border-radius: 9px;
+  color: #646d80;
+  background: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: 140ms ease;
+}
+.qwenpaw-data-config-overlay__close:hover {
+  border-color: #a8cdfe;
+  color: var(--qwenpaw-data-purple);
+  background: #ecf4ff;
 }
 .qwenpaw-data-main > div {
   height: 100%;

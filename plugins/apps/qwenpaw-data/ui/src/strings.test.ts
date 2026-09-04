@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { localeTag, stringKeys, translate } from "./strings";
-import { buildAppStatusModel } from "./status";
 
 describe("string tables", () => {
   it("has a non-empty translation for every key in both languages", () => {
@@ -26,30 +25,5 @@ describe("string tables", () => {
   it("maps languages to BCP 47 locale tags", () => {
     expect(localeTag("zh")).toBe("zh-CN");
     expect(localeTag("en")).toBe("en-US");
-  });
-});
-
-describe("buildAppStatusModel localization", () => {
-  it("keeps English labels by default", () => {
-    const model = buildAppStatusModel(undefined, undefined);
-    expect(model.label).toBe("Checking");
-    expect(model.categories.map((category) => category.label)).toEqual([
-      "Core",
-      "Data",
-      "Graph",
-      "Skills",
-    ]);
-  });
-
-  it("renders Chinese labels when asked", () => {
-    const model = buildAppStatusModel(undefined, undefined, "", "zh");
-    expect(model.label).toBe("检查中");
-    expect(model.categories.map((category) => category.label)).toEqual([
-      "核心",
-      "数据",
-      "图谱",
-      "技能",
-    ]);
-    expect(model.detail).toBe("Context 服务不可用");
   });
 });

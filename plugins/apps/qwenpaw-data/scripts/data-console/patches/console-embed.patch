@@ -51,17 +51,18 @@ index 7a150a49..7477f0c4 100644
    );
  }
 diff --git a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
-index ea5b698f..cf5304aa 100644
+index ea5b698f..65f5cf59 100644
 --- a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
 +++ b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
-@@ -1,6 +1,5 @@
+@@ -1,14 +1,13 @@
  import {
    ApiOutlined,
 -  CloudServerOutlined,
    SettingOutlined,
++  ToolOutlined,
  } from '@ant-design/icons';
  import { Button, Dropdown } from '@agentscope-ai/design';
-@@ -8,7 +7,6 @@ import { useNavigate } from 'react-router-dom';
+ import { useNavigate } from 'react-router-dom';
  import {
    buildAgentConfigurationPath,
    buildChannelConfigurationPath,
@@ -69,25 +70,31 @@ index ea5b698f..cf5304aa 100644
  } from '@/shared/navigation/sessionNavigation';
  import { useAppI18n } from '@/i18n';
  import sharedStyles from '../../index.module.less';
-@@ -49,7 +47,6 @@ export default function ConsoleSettingsMenu({
+@@ -49,7 +48,7 @@ export default function ConsoleSettingsMenu({
            items: [
              { key: 'agent-configuration', icon: <SettingOutlined />, label: t('settings.agentConfiguration') },
              { key: 'channel-configuration', icon: <ApiOutlined />, label: t('settings.channelConfiguration') },
 -            { key: 'mcp-configuration', icon: <CloudServerOutlined />, label: t('settings.mcpConfiguration') },
++            { key: 'app-configuration', icon: <ToolOutlined />, label: t('settings.appConfiguration') },
            ],
            onClick: ({ key }: { key: string }) => {
              if (key === 'agent-configuration') {
-@@ -60,10 +57,6 @@ export default function ConsoleSettingsMenu({
+@@ -60,8 +59,13 @@ export default function ConsoleSettingsMenu({
                navigate(buildChannelConfigurationPath());
                onAction?.();
              }
 -            if (key === 'mcp-configuration') {
 -              navigate(buildMcpConfigurationPath());
--              onAction?.();
--            }
++            if (key === 'app-configuration') {
++              // Embedded build: the host shell renders the app-level
++              // configuration; hand the request up to the parent frame.
++              window.parent?.postMessage(
++                { type: 'qwenpaw-data:open-app-config' },
++                window.location.origin,
++              );
+               onAction?.();
+             }
            },
-         }}
-       >
 diff --git a/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx b/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx
 index e8689683..8d760a75 100644
 --- a/packages/datapaw-host-core/frontend/src/features/console/components/GlobalProductNav/index.tsx
@@ -110,6 +117,26 @@ index e8689683..8d760a75 100644
            renderWorkspaceTrigger={workspaces.length ? (trigger) => (
              <Dropdown
                getPopupContainer={getAccountCardPopupContainer}
+diff --git a/packages/datapaw-host-core/frontend/src/i18n/locales.ts b/packages/datapaw-host-core/frontend/src/i18n/locales.ts
+index 21f77a04..05dfe5a7 100644
+--- a/packages/datapaw-host-core/frontend/src/i18n/locales.ts
++++ b/packages/datapaw-host-core/frontend/src/i18n/locales.ts
+@@ -53,6 +53,7 @@ export const zhMessages = {
+   'settings.dataBridge': '数据语义配置中心',
+   'settings.agentConfiguration': '智能体配置',
+   'settings.channelConfiguration': '接入渠道配置',
++  'settings.appConfiguration': '应用配置',
+   'settings.mcpConfiguration': '工具配置',
+ 
+   'workspace.tasks': '任务',
+@@ -781,6 +782,7 @@ export const enMessages: Record<MessageKey, string> = {
+   'settings.dataBridge': 'Data Bridge',
+   'settings.agentConfiguration': 'Agent Configuration',
+   'settings.channelConfiguration': 'Channel Configuration',
++  'settings.appConfiguration': 'App Configuration',
+   'settings.mcpConfiguration': 'Tool Configuration',
+ 
+   'workspace.tasks': 'Tasks',
 diff --git a/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx b/packages/datapaw-host-core/frontend/src/pages/SkillsContribution.tsx
 new file mode 100644
 index 00000000..a655dba6
