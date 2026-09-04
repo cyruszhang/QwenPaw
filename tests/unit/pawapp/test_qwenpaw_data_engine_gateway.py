@@ -85,6 +85,24 @@ def test_engine_gateway_rejects_undeclared_or_escaped_paths(path: str) -> None:
     assert exc.value.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/system/channel-config",
+        "/api/v1/system/channel-config/",
+        "/api/v1/system/channel-config/dingtalk",
+        "/api/v1/system/channel-config/wechat/qrcode",
+        "/api/v1/channels/reload",
+    ],
+)
+def test_engine_gateway_denies_channel_management_routes(path: str) -> None:
+    # The QwenPaw host owns channel delivery; the engine's own channel
+    # management surface must stay unreachable through the plugin.
+    with pytest.raises(HTTPException) as exc:
+        _gateway_class()._validate_path(path)
+    assert exc.value.status_code == 404
+
+
 def test_sse_path_detection() -> None:
     module = _gateway_module()
     assert module._SSE_PATH_RE.search("/api/v1/sessions/s1/chats/c1/events")

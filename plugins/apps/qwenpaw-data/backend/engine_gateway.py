@@ -18,6 +18,12 @@ _ALLOWED_ROUTES = (
     ("/health", False),
     ("/api/v1", True),
 )
+# Engine IM-channel management stays unreachable through the plugin:
+# the QwenPaw host's channel infrastructure is the delivery layer.
+_DENIED_ROUTES = (
+    ("/api/v1/system/channel-config", True),
+    ("/api/v1/channels/reload", False),
+)
 _FORWARDED_REQUEST_HEADERS = {
     "accept",
     "content-type",
@@ -257,6 +263,16 @@ class EngineGateway:
             for route, subtree in _ALLOWED_ROUTES
         )
         if not allowed:
+            raise HTTPException(
+                status_code=404,
+                detail="Engine route is not exposed",
+            )
+        denied = any(
+            decoded.rstrip("/") == route
+            or (subtree and decoded.startswith(f"{route}/"))
+            for route, subtree in _DENIED_ROUTES
+        )
+        if denied:
             raise HTTPException(
                 status_code=404,
                 detail="Engine route is not exposed",

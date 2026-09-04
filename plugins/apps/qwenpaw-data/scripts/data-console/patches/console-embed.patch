@@ -1,8 +1,8 @@
 diff --git a/packages/datapaw-host-core/frontend/src/App.tsx b/packages/datapaw-host-core/frontend/src/App.tsx
-index 7a150a49..e454adb7 100644
+index 7a150a49..aceb2c3f 100644
 --- a/packages/datapaw-host-core/frontend/src/App.tsx
 +++ b/packages/datapaw-host-core/frontend/src/App.tsx
-@@ -3,7 +3,7 @@ import { useDataPawColorMode } from '@datapaw/ui-tokens';
+@@ -3,19 +3,18 @@ import { useDataPawColorMode } from '@datapaw/ui-tokens';
  import enUS from 'antd/locale/en_US';
  import zhCN from 'antd/locale/zh_CN';
  import { lazy, Suspense, useLayoutEffect, useMemo, type ReactNode } from 'react';
@@ -11,10 +11,10 @@ index 7a150a49..e454adb7 100644
  import { AppI18nProvider, useAppI18n } from './i18n';
  import ConsoleLayout from './layouts/ConsoleLayout';
  import { createHostThemeProviderProps } from './theme';
-@@ -11,11 +11,11 @@ import styles from './App.module.less';
+ import styles from './App.module.less';
 
  const AgentSettingsPage = lazy(() => import('./pages/AgentSettings'));
- const ChannelSettingsPage = lazy(() => import('./pages/ChannelSettings'));
+-const ChannelSettingsPage = lazy(() => import('./pages/ChannelSettings'));
 -const McpSettingsPage = lazy(() => import('./pages/McpSettings'));
  const ConsolePage = lazy(() => import('./pages/Console'));
  const CronJobsPage = lazy(() => import('./pages/CronJobs'));
@@ -25,7 +25,7 @@ index 7a150a49..e454adb7 100644
 
  function RedirectToConsole() {
    const location = useLocation();
-@@ -81,7 +81,7 @@ function LocalizedApp() {
+@@ -81,7 +80,7 @@ function LocalizedApp() {
        {...themeProviderProps}
        locale={language === 'zh' ? zhCN : enUS}
      >
@@ -34,10 +34,14 @@ index 7a150a49..e454adb7 100644
          <Suspense fallback={<AppLoadingFallback label={t('common.loading')} />}>
            <Routes>
              <Route path="/console" element={<ConsoleLayout />}>
-@@ -110,14 +110,14 @@ function LocalizedApp() {
-                 element={<InitialLoadingCleanup><ChannelSettingsPage /></InitialLoadingCleanup>}
+@@ -106,18 +105,14 @@ function LocalizedApp() {
+                 element={<InitialLoadingCleanup><AgentSettingsPage /></InitialLoadingCleanup>}
                />
                <Route
+-                path="settings/channels"
+-                element={<InitialLoadingCleanup><ChannelSettingsPage /></InitialLoadingCleanup>}
+-              />
+-              <Route
 -                path="settings/mcp"
 -                element={<InitialLoadingCleanup><McpSettingsPage /></InitialLoadingCleanup>}
 +                path="settings/databridge"
@@ -53,12 +57,12 @@ index 7a150a49..e454adb7 100644
    );
  }
 diff --git a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
-index ea5b698f..a4292d1a 100644
+index ea5b698f..d2d8d691 100644
 --- a/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
 +++ b/packages/datapaw-host-core/frontend/src/features/console/components/ConsoleSettingsMenu/index.tsx
-@@ -1,14 +1,13 @@
+@@ -1,14 +1,11 @@
  import {
-   ApiOutlined,
+-  ApiOutlined,
 -  CloudServerOutlined,
    SettingOutlined,
 +  DatabaseOutlined,
@@ -67,24 +71,28 @@ index ea5b698f..a4292d1a 100644
  import { useNavigate } from 'react-router-dom';
  import {
    buildAgentConfigurationPath,
-   buildChannelConfigurationPath,
+-  buildChannelConfigurationPath,
 -  buildMcpConfigurationPath,
  } from '@/shared/navigation/sessionNavigation';
  import { useAppI18n } from '@/i18n';
  import sharedStyles from '../../index.module.less';
-@@ -49,7 +48,7 @@ export default function ConsoleSettingsMenu({
+@@ -48,20 +45,15 @@ export default function ConsoleSettingsMenu({
+         menu={{
            items: [
              { key: 'agent-configuration', icon: <SettingOutlined />, label: t('settings.agentConfiguration') },
-             { key: 'channel-configuration', icon: <ApiOutlined />, label: t('settings.channelConfiguration') },
+-            { key: 'channel-configuration', icon: <ApiOutlined />, label: t('settings.channelConfiguration') },
 -            { key: 'mcp-configuration', icon: <CloudServerOutlined />, label: t('settings.mcpConfiguration') },
 +            { key: 'app-configuration', icon: <DatabaseOutlined />, label: t('settings.appConfiguration') },
            ],
            onClick: ({ key }: { key: string }) => {
              if (key === 'agent-configuration') {
-@@ -60,8 +59,8 @@ export default function ConsoleSettingsMenu({
-               navigate(buildChannelConfigurationPath());
+               navigate(buildAgentConfigurationPath());
                onAction?.();
              }
+-            if (key === 'channel-configuration') {
+-              navigate(buildChannelConfigurationPath());
+-              onAction?.();
+-            }
 -            if (key === 'mcp-configuration') {
 -              navigate(buildMcpConfigurationPath());
 +            if (key === 'app-configuration') {

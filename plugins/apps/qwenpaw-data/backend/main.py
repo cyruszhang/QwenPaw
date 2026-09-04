@@ -35,6 +35,15 @@ if __package__ and __package__.startswith("plugin_"):
         seed_from_env,
         set_context_env_vars,
     )
+    from .backend.bridge import (
+        BridgeSessionStore,
+        EngineClient,
+        make_bridge_middleware_factory,
+    )
+    from .backend.bridge.commands import (
+        make_data_command,
+        make_datasource_command,
+    )
     from .backend.context_gateway import ContextGateway
     from .backend.engine_gateway import EngineGateway
     from .backend.runtime import (
@@ -58,6 +67,15 @@ else:
         save_config,
         seed_from_env,
         set_context_env_vars,
+    )
+    from backend.bridge import (  # noqa: E402
+        BridgeSessionStore,
+        EngineClient,
+        make_bridge_middleware_factory,
+    )
+    from backend.bridge.commands import (  # noqa: E402
+        make_data_command,
+        make_datasource_command,
     )
     from backend.context_gateway import ContextGateway  # noqa: E402
     from backend.engine_gateway import EngineGateway  # noqa: E402
@@ -218,6 +236,40 @@ _engine_service = app.managed_service(
     ),
 )
 _engine_gateway = EngineGateway(_engine_service, _engine_token)
+
+
+def _engine_endpoint() -> tuple[str, str]:
+    """Resolve the engine base URL + bearer token for server-side calls.
+
+    Mirrors the gateway's managed/external token selection; ``base_url``
+    raises RuntimeError while the sidecar is not ready, which the bridge
+    client surfaces as an engine-unavailable turn.
+    """
+    token = (
+        os.getenv("QWENPAW_DATA_ENGINE_TOKEN", "").strip()
+        if _engine_service.is_external
+        else _engine_token
+    )
+    return _engine_service.base_url, token
+
+
+_bridge_store = BridgeSessionStore(path=APP_DATA_DIR / "bridge_sessions.json")
+_bridge_client = EngineClient(_engine_endpoint)
+app.middleware(
+    make_bridge_middleware_factory(
+        client=_bridge_client,
+        store=_bridge_store,
+    ),
+    priority=50,
+)
+app.command(
+    "data",
+    description="Toggle data-analysis mode (on/off/status)",
+)(make_data_command(_bridge_store))
+app.command(
+    "datasource",
+    description="List engine datasources and select one for analysis",
+)(make_datasource_command(_bridge_store, _bridge_client))
 
 
 def _context_runtime_issue() -> dict[str, str] | None:
