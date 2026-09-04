@@ -119,9 +119,12 @@ class EngineClient:
         return payload.get("chat") or payload
 
     async def stop(self, session_id: str, chat_id: str) -> None:
+        # The engine awaits the full runtime unwind before responding,
+        # which can take minutes mid-sandbox-step.
         await self._request(
             "POST",
             f"/api/v1/sessions/{session_id}/chats/{chat_id}/stop",
+            timeout=httpx.Timeout(180.0, connect=5.0),
         )
 
     async def answer_clarification(
