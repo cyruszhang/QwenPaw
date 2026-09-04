@@ -138,7 +138,10 @@ class EngineGateway:
         )
 
     async def _request(
-        self, method: str, path: str, **kwargs
+        self,
+        method: str,
+        path: str,
+        **kwargs,
     ) -> httpx.Response:
         upstream_request = self._build_request(method, path, **kwargs)
         client = self._require_client()
@@ -151,7 +154,10 @@ class EngineGateway:
             ) from exc
 
     def _build_request(
-        self, method: str, path: str, **kwargs
+        self,
+        method: str,
+        path: str,
+        **kwargs,
     ) -> httpx.Request:
         self._validate_path(path)
         if not _ENGINE_PATH_RE.fullmatch(path):
