@@ -897,6 +897,18 @@ async def reuse_host_model(payload: dict[str, Any]) -> dict[str, Any]:
     return config.to_dict()
 
 
+@router.post("/config/restart-context")
+async def restart_context_service() -> dict[str, Any]:
+    """Restart the managed Context service so saved settings take effect.
+
+    External-mode deployments own the service lifecycle; restarting is a
+    no-op that still reports success so the console flow stays uniform.
+    """
+    if not _context_service.is_external:
+        await _context_service.restart()
+    return {"ok": True, "external": _context_service.is_external}
+
+
 @router.post("/config/test/{target}")
 async def test_config_target(
     target: str,
