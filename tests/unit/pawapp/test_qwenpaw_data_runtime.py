@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -81,3 +82,73 @@ def test_backend_entry_loads_with_plugin_loader_package_shape() -> None:
                 f"{module_name}.",
             ):
                 sys.modules.pop(loaded_name, None)
+
+
+def test_provision_engine_mcp_creates_databridge_entry(tmp_path: Path) -> None:
+    runtime = _load_runtime_module()
+    path = runtime.provision_engine_mcp(
+        tmp_path,
+        "http://127.0.0.1:8765/",
+        "cm-token",
+    )
+    assert path == tmp_path / "host" / "workspace" / ".mcp"
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert len(entries) == 1
+    entry = entries[0]
+    assert entry["name"] == "databridge"
+    assert entry["mcp_config"]["url"] == "http://127.0.0.1:8765/mcp/v1/cm"
+    assert entry["mcp_config"]["headers"] == {
+        "Authorization": "Bearer cm-token",
+    }
+
+
+def test_provision_engine_mcp_without_token_sends_no_auth_header(
+    tmp_path: Path,
+) -> None:
+    runtime = _load_runtime_module()
+    path = runtime.provision_engine_mcp(tmp_path, "http://cm.local", "")
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert entries[0]["mcp_config"]["headers"] == {}
+
+
+def test_provision_engine_mcp_upserts_and_preserves_user_entries(
+    tmp_path: Path,
+) -> None:
+    runtime = _load_runtime_module()
+    workspace = tmp_path / "host" / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".mcp").write_text(
+        json.dumps(
+            [
+                {"name": "custom-tool", "mcp_config": {"url": "http://x"}},
+                {
+                    "name": "databridge",
+                    "mcp_config": {"url": "http://stale:1/mcp/v1/cm"},
+                },
+            ],
+        ),
+        encoding="utf-8",
+    )
+    path = runtime.provision_engine_mcp(tmp_path, "http://cm:9", "t")
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    names = [e["name"] for e in entries]
+    assert names == ["databridge", "custom-tool"]
+    assert entries[0]["mcp_config"]["url"] == "http://cm:9/mcp/v1/cm"
+
+
+def test_provision_engine_mcp_recovers_from_corrupt_file(
+    tmp_path: Path,
+) -> None:
+    runtime = _load_runtime_module()
+    workspace = tmp_path / "host" / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / ".mcp").write_text("not-json{", encoding="utf-8")
+    path = runtime.provision_engine_mcp(tmp_path, "http://cm:9", "")
+    entries = json.loads(path.read_text(encoding="utf-8"))
+    assert [e["name"] for e in entries] == ["databridge"]
+
+
+def test_provision_engine_mcp_skips_without_cm_url(tmp_path: Path) -> None:
+    runtime = _load_runtime_module()
+    assert runtime.provision_engine_mcp(tmp_path, "", "t") is None
+    assert not (tmp_path / "host").exists()

@@ -22,7 +22,7 @@ try {
     mount(container) {
       const removeStyles = installStyles();
       const root = createRoot(container);
-      root.render(<App paw={paw} />);
+      root.render(<App />);
       return () => {
         root.unmount();
         removeStyles();

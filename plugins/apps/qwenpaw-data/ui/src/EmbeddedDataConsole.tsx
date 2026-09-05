@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Same-origin static build of the QwenPaw-Data-Cloud Context console,
- * vendored by scripts/sync-context-ui.sh. The build uses hash routing, so
- * tab switches navigate the live iframe without reloading it.
+ * Same-origin static build of the engine console (the Data-Cloud host-core
+ * console frontend), vendored by scripts/sync-console-ui.sh. The build uses
+ * hash routing, so tab switches navigate the live iframe without reloading
+ * it — chat runs keep streaming while other pages are visible.
  */
 const CONSOLE_INDEX =
-  "/api/frontend_plugin/qwenpaw-data/files/ui/dist/context-console/index.html";
+  "/api/frontend_plugin/qwenpaw-data/files/ui/dist/data-console/index.html";
 
 type Availability = "checking" | "ready" | "missing";
 
-export function EmbeddedConsole({
+export function EmbeddedDataConsole({
   route,
   active,
 }: {
@@ -53,11 +54,10 @@ export function EmbeddedConsole({
   if (availability === "missing") {
     return (
       <div className="qwenpaw-data-embedded-console__empty">
-        <b>Context console is not bundled</b>
+        <b>Analysis console is not bundled</b>
         <p>
-          The embedded QwenPaw-Data-Cloud console was not found in this build.
-          Vendor it with <code>scripts/sync-context-ui.sh</code> and reinstall
-          the app.
+          The embedded engine console was not found in this build. Vendor it
+          with <code>scripts/sync-console-ui.sh</code> and reinstall the app.
         </p>
       </div>
     );
@@ -77,7 +77,7 @@ export function EmbeddedConsole({
         <iframe
           ref={iframeRef}
           src={`${CONSOLE_INDEX}#${initialRouteRef.current}`}
-          title="QwenPaw-Data context console"
+          title="QwenPaw-Data analysis console"
           onLoad={() => setLoaded(true)}
         />
       ) : null}

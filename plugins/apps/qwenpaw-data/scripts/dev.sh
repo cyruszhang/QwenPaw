@@ -34,6 +34,8 @@ mkdir -p "$STAGE_DIR/backend" "$STAGE_DIR/ui/dist" \
   "$STAGE_DIR/agents/qwenpaw-data/en"
 cp "$APP_DIR/plugin.json" "$APP_DIR/requirements.txt" "$APP_DIR/__init__.py" "$STAGE_DIR/"
 cp "$APP_DIR"/backend/*.py "$STAGE_DIR/backend/"
+mkdir -p "$STAGE_DIR/backend/bridge"
+cp "$APP_DIR"/backend/bridge/*.py "$STAGE_DIR/backend/bridge/"
 cp "$APP_DIR/agents/qwenpaw-data/en/PROFILE.md" \
   "$APP_DIR/agents/qwenpaw-data/en/SOUL.md" "$STAGE_DIR/agents/qwenpaw-data/en/"
 cp "$APP_DIR/ui/dist/index.js" "$APP_DIR/ui/dist/index.js.map" "$STAGE_DIR/ui/dist/"
@@ -51,6 +53,14 @@ if [[ -d "$CONTEXT_CONSOLE_DIR" ]]; then
 else
   echo "NOTE: embedded Context console not found; run" \
     "scripts/sync-context-ui.sh to vendor it." >&2
+fi
+
+DATA_CONSOLE_DIR="$APP_DIR/ui/dist/data-console"
+if [[ -d "$DATA_CONSOLE_DIR" ]]; then
+  cp -R "$DATA_CONSOLE_DIR" "$STAGE_DIR/ui/dist/data-console"
+else
+  echo "NOTE: embedded engine console not found; run" \
+    "scripts/sync-console-ui.sh to vendor it." >&2
 fi
 
 # Hot-install against the configured instance. The CLI's hot-install path
